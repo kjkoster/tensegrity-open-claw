@@ -7,6 +7,8 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+mod http_server;
+
 use embassy_executor::Spawner;
 use embassy_net::StackResources;
 use embassy_time::{Duration, Timer};
@@ -17,13 +19,13 @@ use esp_radio::wifi::{Interface, sta::StationConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
+extern crate alloc;
+
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
     rprintln!("{}", panic_info);
     loop {}
 }
-
-extern crate alloc;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -34,20 +36,6 @@ static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) -> ! {
     runner.run().await
-}
-
-/// Blinks the onboard user LED (GPIO21, active low) at 1 Hz.
-#[embassy_executor::task]
-async fn blinky(mut led: Output<'static>) {
-    loop {
-        led.set_low(); // LED on
-        rprintln!("LED on");
-        Timer::after(Duration::from_millis(500)).await;
-
-        led.set_high(); // LED off
-        rprintln!("LED off");
-        Timer::after(Duration::from_millis(500)).await;
-    }
 }
 
 #[allow(
@@ -114,21 +102,23 @@ async fn main(spawner: Spawner) -> ! {
     stack.wait_config_up().await;
 
     if let Some(cfg) = stack.config_v4() {
-        rprintln!("ip address:  {}", cfg.address.address());
-        rprintln!("netmask:     {}", cfg.address.netmask());
+        rprintln!("ip address: {}", cfg.address.address());
+        rprintln!("netmask:    {}", cfg.address.netmask());
+        rprintln!("dmx config: http://{}/", cfg.address.address());
         for dns in cfg.dns_servers.iter() {
-            rprintln!("nameserver:  {}", dns);
+            rprintln!("nameserver: {}", dns);
         }
     }
 
-    // GPIO21 is the single user-controllable LED on the XIAO ESP32-S3 (active low).
-    let led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
-    spawner.spawn(blinky(led).unwrap());
+    http_server::spawn(spawner, stack);
+
+    // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
+    let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
 
     loop {
-        rprintln!("Hello world!");
-        Timer::after(Duration::from_secs(1)).await;
+        led.set_low();
+        Timer::after(Duration::from_millis(15)).await;
+        led.set_high();
+        Timer::after(Duration::from_millis(985)).await;
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }
