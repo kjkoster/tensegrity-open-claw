@@ -46,21 +46,14 @@ async fn blinky(mut led: Output<'static>) {
 )]
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    // generator version: 1.3.0
-    // generator parameters: --chip esp32s3 -o esp32s3-wroom-1-octal-psram -o alloc -o unstable-hal -o embassy -o wifi -o probe-rs -o zed -o esp
-
+    // RTT must be initialized first so panics during startup produce visible output.
     rtt_target::rtt_init_print!();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // The following pins are used to bootstrap the chip. They are available
-    // for use, but check the datasheet of the module for more information on them.
-    // - GPIO0
-    // - GPIO3
-    // - GPIO45
-    // - GPIO46
-    // These GPIO pins are in use by some feature of the module and should not be used.
+    // GPIO27-37 are used internally by the XIAO ESP32-S3's octal PSRAM. Consuming
+    // them here prevents accidental reuse; do not reassign these pins.
     let _ = peripherals.GPIO27;
     let _ = peripherals.GPIO28;
     let _ = peripherals.GPIO29;
@@ -84,7 +77,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let (mut _wifi_controller, _interfaces) =
         esp_radio::wifi::new(peripherals.WIFI, Default::default())
-            .expect("Failed to initialize Wi-Fi controller");
+            .unwrap_or_else(|e| panic!("Failed to initialize Wi-Fi controller: {:?}", e));
 
     // GPIO21 is the single user-controllable LED on the XIAO ESP32-S3 (active low).
     let led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
