@@ -8,11 +8,14 @@
 #![deny(clippy::large_stack_frames)]
 
 use embassy_executor::Spawner;
+use embassy_net::StackResources;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::timer::timg::TimerGroup;
+use esp_radio::wifi::{Interface, sta::StationConfig};
 use rtt_target::rprintln;
+use static_cell::StaticCell;
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -25,6 +28,13 @@ extern crate alloc;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+
+#[embassy_executor::task]
+async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) -> ! {
+    runner.run().await
+}
 
 /// Blinks the onboard user LED (GPIO21, active low) at 1 Hz.
 #[embassy_executor::task]
@@ -75,9 +85,41 @@ async fn main(spawner: Spawner) -> ! {
 
     rprintln!("Embassy initialized!");
 
-    let (mut _wifi_controller, _interfaces) =
+    let rng = esp_hal::rng::Rng::new();
+    let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
+
+    let (mut wifi_controller, interfaces) =
         esp_radio::wifi::new(peripherals.WIFI, Default::default())
             .unwrap_or_else(|e| panic!("Failed to initialize Wi-Fi controller: {:?}", e));
+
+    let (stack, runner) = embassy_net::new(
+        interfaces.station,
+        embassy_net::Config::dhcpv4(Default::default()),
+        STACK_RESOURCES.init(StackResources::new()),
+        seed,
+    );
+    spawner.spawn(net_task(runner).unwrap());
+
+    wifi_controller
+        .set_config(&esp_radio::wifi::Config::Station(
+            StationConfig::default()
+                .with_ssid("radiowaves")
+                .with_password("IkWilInternetten!!".into()),
+        ))
+        .unwrap();
+
+    rprintln!("connecting to radiowaves...");
+    wifi_controller.connect_async().await.unwrap();
+    rprintln!("wifi connected, waiting for dhcp...");
+    stack.wait_config_up().await;
+
+    if let Some(cfg) = stack.config_v4() {
+        rprintln!("ip address:  {}", cfg.address.address());
+        rprintln!("netmask:     {}", cfg.address.netmask());
+        for dns in cfg.dns_servers.iter() {
+            rprintln!("nameserver:  {}", dns);
+        }
+    }
 
     // GPIO21 is the single user-controllable LED on the XIAO ESP32-S3 (active low).
     let led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
