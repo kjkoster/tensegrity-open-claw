@@ -3,6 +3,7 @@ use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
     Ipv4Address, Stack,
 };
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
@@ -20,15 +21,24 @@ static RX_DATA: StaticCell<[u8; 638]> = StaticCell::new();
 static TX_META: StaticCell<[PacketMetadata; 1]> = StaticCell::new();
 static TX_DATA: StaticCell<[u8; 64]> = StaticCell::new();
 
-pub fn spawn(spawner: Spawner, stack: Stack<'static>, storage: &'static Storage) {
-    spawner.spawn(task(stack, storage).unwrap());
+pub fn spawn(
+    spawner: Spawner,
+    stack: Stack<'static>,
+    storage: &'static Storage,
+    value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
+) {
+    spawner.spawn(task(stack, storage, value_signal).unwrap());
 }
 
 /// Listens for sACN (E1.31) packets on UDP 5568, reads the DMX slot at
 /// `storage.read_dmx_base_address()` from each packet for the configured universe,
-/// and prints the value via RTT whenever it changes.
+/// signals and prints the value via RTT whenever it changes.
 #[embassy_executor::task]
-async fn task(stack: Stack<'static>, storage: &'static Storage) -> ! {
+async fn task(
+    stack: Stack<'static>,
+    storage: &'static Storage,
+    value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
+) -> ! {
     let universe = storage.read_universe();
 
     // sACN multicast address: 239.255.(universe_hi).(universe_lo)
@@ -57,6 +67,7 @@ async fn task(stack: Stack<'static>, storage: &'static Storage) -> ! {
         };
         if Some(val) != last_value {
             last_value = Some(val);
+            value_signal.signal(val);
             rprintln!("DMX ch {} = {}", slot, val);
         }
     }

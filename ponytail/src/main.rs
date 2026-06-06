@@ -15,10 +15,15 @@ use embassy_executor::Spawner;
 use embassy_net::StackResources;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::gpio::DriveMode;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::ledc::{
+    channel::{self, ChannelIFace},
+    timer::{self, TimerIFace},
+    LSGlobalClkSource, Ledc, LowSpeed,
+};
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::wifi::{Interface, sta::StationConfig};
 use rtt_target::rprintln;
@@ -39,6 +44,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, u16> = Signal::new();
+static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
 
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) -> ! {
@@ -137,15 +143,35 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     http_server::spawn(spawner, stack, storage.read_dmx_base_address(), &DMX_SAVE);
-    sacn::spawn(spawner, stack, storage);
+    sacn::spawn(spawner, stack, storage, &DMX_VALUE);
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
-    let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
+    // LEDC duty 0% = GPIO low = LED on; duty 100% = GPIO high = LED off.
+    // Invert DMX value: 0 → 100% duty (off), 255 → 0% duty (full brightness).
+    let mut ledc = Ledc::new(peripherals.LEDC);
+    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
+
+    let mut lstimer = ledc.timer::<LowSpeed>(timer::Number::Timer0);
+    lstimer
+        .configure(timer::config::Config {
+            duty: timer::config::Duty::Duty8Bit,
+            clock_source: timer::LSClockSource::APBClk,
+            frequency: Rate::from_khz(20),
+        })
+        .unwrap();
+
+    let mut led_channel = ledc.channel::<LowSpeed>(channel::Number::Channel0, peripherals.GPIO21);
+    led_channel
+        .configure(channel::config::Config {
+            timer: &lstimer,
+            duty_pct: 0,
+            drive_mode: DriveMode::PushPull,
+        })
+        .unwrap();
 
     loop {
-        led.set_low();
-        Timer::after(Duration::from_millis(15)).await;
-        led.set_high();
-        Timer::after(Duration::from_millis(985)).await;
+        let val = DMX_VALUE.wait().await;
+        let duty_pct = 100 - (val as u32 * 100 / 255) as u8;
+        led_channel.set_duty(duty_pct).ok();
     }
 }
