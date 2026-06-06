@@ -129,16 +129,16 @@ async fn handle_request(
     };
 
     // req_buf is no longer needed for the request; reuse it for the response.
-    send_response(socket, req_buf, dmx_address, updated).await;
+    send_response(socket, req_buf, *dmx_address, updated).await;
 }
 
 async fn send_response(
     socket: &mut TcpSocket<'_>,
     buf: &mut [u8; 1024],
-    dmx_address: &mut u16,
+    dmx_address: u16,
     saved: bool,
 ) {
-    let len = build_response(buf, *dmx_address, saved);
+    let len = build_response(buf, dmx_address, saved);
     tcp_write(socket, &buf[..len]).await;
 }
 

@@ -36,6 +36,7 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, u16> = Signal::new();
 
 #[embassy_executor::task]
@@ -44,10 +45,17 @@ async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) 
 }
 
 #[embassy_executor::task]
-async fn persist_task(save_signal: &'static Signal<CriticalSectionRawMutex, u16>) -> ! {
+async fn persist_task(
+    storage: &'static storage::Storage,
+    save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+) -> ! {
     loop {
         let addr = save_signal.wait().await;
-        if let Err(e) = storage::write_dmx_base_address(addr) {
+        if let Err(e) = storage.write_dmx_base_address(addr) {
+            // OtherCoreRunning is seen under `cargo run` (probe-rs): the debugger
+            // leaves Core 1 active at start-up and the ESP32-S3 flash driver refuses
+            // writes while either core fetches from flash. The condition is transient;
+            // retrying would fix it. When attaching after boot the write succeeds.
             rprintln!("storage write failed: {:?}", e);
         }
     }
@@ -81,9 +89,7 @@ async fn main(spawner: Spawner) -> ! {
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
-    if let Err(e) = storage::init(peripherals.FLASH) {
-        rprintln!("storage init failed: {:?}", e);
-    }
+    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -105,17 +111,17 @@ async fn main(spawner: Spawner) -> ! {
         seed,
     );
     spawner.spawn(net_task(runner).unwrap());
-    spawner.spawn(persist_task(&DMX_SAVE).unwrap());
+    spawner.spawn(persist_task(storage, &DMX_SAVE).unwrap());
 
     wifi_controller
         .set_config(&esp_radio::wifi::Config::Station(
             StationConfig::default()
-                .with_ssid(storage::read_ssid())
-                .with_password(storage::read_password()),
+                .with_ssid(storage.read_ssid())
+                .with_password(storage.read_password()),
         ))
         .unwrap();
 
-    rprintln!("connecting to {}...", storage::read_ssid());
+    rprintln!("connecting to {}...", storage.read_ssid());
     wifi_controller.connect_async().await.unwrap();
     rprintln!("wifi connected, waiting for dhcp...");
     stack.wait_config_up().await;
@@ -129,7 +135,7 @@ async fn main(spawner: Spawner) -> ! {
         }
     }
 
-    http_server::spawn(spawner, stack, storage::read_dmx_base_address(), &DMX_SAVE);
+    http_server::spawn(spawner, stack, storage.read_dmx_base_address(), &DMX_SAVE);
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());

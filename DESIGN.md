@@ -246,8 +246,19 @@ Legend: ✅ usable as-is · ⚠️ exists, insufficient → extend upstream · �
 
 Firmware
 - [ ] **Action Point:** review forum thread for ESP32/WiFi context: https://esp32.com/viewtopic.php?t=47612
+- [ ] **Bug:** `storage.write_dmx_base_address()` returns `FlashStorageError::OtherCoreRunning` when
+      the write is attempted while running under `cargo run` (probe-rs debugger), but succeeds when
+      attaching after boot. The ESP32-S3 flash driver refuses writes if Core 1 is active (instruction
+      fetches from flash on either core during an erase/write corrupt the fetch). Under the debugger,
+      Core 1 is left in an active state at start-up. Fix: retry on `OtherCoreRunning` in `flush()`
+      since the condition is transient, or halt/resume Core 1 around the erase/write.
 - [ ] sACN/E1.31 receive over WiFi (UDP) — implement codec or adapt `sacn`
-- [ ] WiFi configuration page for DMX start address (`config-portal`)
+- [ ] Replace hand-rolled HTTP server with `picoserve` — a no_std async HTTP server built for
+      Embassy; would eliminate the manual header/body parsing, byte-by-byte read loop, and response
+      builder in `http_server.rs`
+- [ ] Audit smoltcp features in Cargo.toml — `socket-icmp`, `socket-raw`, `socket-dns`, and
+      `proto-dns` are not used by the current TCP-only HTTP server + DHCP stack; removing them
+      shrinks the binary
 - [ ] Control onboard LED via DMX channels as test output (LEDC/GPIO)
 - [ ] Stub channel handlers for later builds
 

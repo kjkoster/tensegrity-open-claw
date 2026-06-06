@@ -53,143 +53,144 @@ struct Settings {
     password_len: u8,
 }
 
-static SETTINGS: Mutex<RefCell<Settings>> = Mutex::new(RefCell::new(Settings {
-    dmx_base_address: DEFAULT_DMX_BASE_ADDRESS,
-    ssid: SSID_INIT.0,
-    ssid_len: SSID_INIT.1,
-    password: PWD_INIT.0,
-    password_len: PWD_INIT.1,
-}));
-
-static FLASH_STORAGE: Mutex<RefCell<Option<FlashStorage<'static>>>> =
-    Mutex::new(RefCell::new(None));
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            dmx_base_address: DEFAULT_DMX_BASE_ADDRESS,
+            ssid: SSID_INIT.0,
+            ssid_len: SSID_INIT.1,
+            password: PWD_INIT.0,
+            password_len: PWD_INIT.1,
+        }
+    }
+}
 
 // 4-byte aligned buffer for flash reads and writes (WORD_SIZE = 4).
 #[repr(C, align(4))]
 struct AlignedRecord([u8; RECORD_SIZE]);
 
-/// Initialise flash storage and load persisted settings.
-///
-/// Falls back to compiled-in defaults when no valid record is found (first
-/// boot or erased flash). Returns `Err` only on a hardware-level flash
-/// failure.
-pub fn init(flash: FLASH<'static>) -> Result<(), FlashStorageError> {
-    let mut fs = FlashStorage::new(flash);
-    let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
+pub struct Storage {
+    settings: Mutex<RefCell<Settings>>,
+    flash: Mutex<RefCell<Option<FlashStorage<'static>>>>,
+}
 
-    let result = fs.read(BASE, &mut rec.0);
+impl Storage {
+    /// Load persisted settings from flash, falling back to compiled-in
+    /// defaults when no valid record is found (first boot or erased flash).
+    #[allow(clippy::large_stack_frames)] // called once at boot; Clippy over-counts inlined Mutex/RefCell temporaries
+    pub fn new(flash: FLASH<'static>) -> Self {
+        let mut fs = FlashStorage::new(flash);
+        let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
+        let mut settings = Settings::default();
 
-    if result.is_ok() && rec.0[..4] == MAGIC {
-        let dmx = u16::from_le_bytes([rec.0[4], rec.0[5]]);
-        let ssid_len = rec.0[6] as usize;
-        let pwd_len = rec.0[39] as usize;
+        if fs.read(BASE, &mut rec.0).is_ok() && rec.0[..4] == MAGIC {
+            let dmx = u16::from_le_bytes([rec.0[4], rec.0[5]]);
+            let ssid_len = rec.0[6] as usize;
+            let pwd_len = rec.0[39] as usize;
 
-        if (1..=512).contains(&dmx) && ssid_len <= SSID_MAX && pwd_len <= PASSWORD_MAX {
-            critical_section::with(|cs| {
-                let mut s = SETTINGS.borrow(cs).borrow_mut();
-                s.dmx_base_address = dmx;
-                s.ssid_len = ssid_len as u8;
-                s.ssid[..ssid_len].copy_from_slice(&rec.0[7..7 + ssid_len]);
-                s.password_len = pwd_len as u8;
-                s.password[..pwd_len].copy_from_slice(&rec.0[40..40 + pwd_len]);
-            });
+            if (1..=512).contains(&dmx) && ssid_len <= SSID_MAX && pwd_len <= PASSWORD_MAX {
+                settings.dmx_base_address = dmx;
+                settings.ssid_len = ssid_len as u8;
+                settings.ssid[..ssid_len].copy_from_slice(&rec.0[7..7 + ssid_len]);
+                settings.password_len = pwd_len as u8;
+                settings.password[..pwd_len].copy_from_slice(&rec.0[40..40 + pwd_len]);
+            }
+        }
+
+        Self {
+            settings: Mutex::new(RefCell::new(settings)),
+            flash: Mutex::new(RefCell::new(Some(fs))),
         }
     }
 
-    critical_section::with(|cs| {
-        *FLASH_STORAGE.borrow(cs).borrow_mut() = Some(fs);
-    });
-
-    result
-}
-
-pub fn read_dmx_base_address() -> u16 {
-    critical_section::with(|cs| SETTINGS.borrow(cs).borrow().dmx_base_address)
-}
-
-pub fn read_ssid() -> String {
-    critical_section::with(|cs| {
-        let s = SETTINGS.borrow(cs).borrow();
-        let len = s.ssid_len as usize;
-        core::str::from_utf8(&s.ssid[..len])
-            .unwrap_or(DEFAULT_SSID)
-            .into()
-    })
-}
-
-pub fn read_password() -> String {
-    critical_section::with(|cs| {
-        let s = SETTINGS.borrow(cs).borrow();
-        let len = s.password_len as usize;
-        core::str::from_utf8(&s.password[..len])
-            .unwrap_or(DEFAULT_PASSWORD)
-            .into()
-    })
-}
-
-pub fn write_dmx_base_address(addr: u16) -> Result<(), FlashStorageError> {
-    if !(1..=512).contains(&addr) {
-        return Err(FlashStorageError::OutOfBounds);
+    pub fn read_dmx_base_address(&self) -> u16 {
+        critical_section::with(|cs| self.settings.borrow(cs).borrow().dmx_base_address)
     }
-    critical_section::with(|cs| {
-        SETTINGS.borrow(cs).borrow_mut().dmx_base_address = addr;
-    });
-    flush()
-}
 
-pub fn write_ssid(ssid: &str) -> Result<(), FlashStorageError> {
-    if ssid.len() > SSID_MAX {
-        return Err(FlashStorageError::OutOfBounds);
+    pub fn read_ssid(&self) -> String {
+        critical_section::with(|cs| {
+            let s = self.settings.borrow(cs).borrow();
+            let len = s.ssid_len as usize;
+            core::str::from_utf8(&s.ssid[..len])
+                .unwrap_or(DEFAULT_SSID)
+                .into()
+        })
     }
-    critical_section::with(|cs| {
-        let mut s = SETTINGS.borrow(cs).borrow_mut();
-        s.ssid_len = ssid.len() as u8;
-        s.ssid[..ssid.len()].copy_from_slice(ssid.as_bytes());
-    });
-    flush()
-}
 
-pub fn write_password(password: &str) -> Result<(), FlashStorageError> {
-    if password.len() > PASSWORD_MAX {
-        return Err(FlashStorageError::OutOfBounds);
+    pub fn read_password(&self) -> String {
+        critical_section::with(|cs| {
+            let s = self.settings.borrow(cs).borrow();
+            let len = s.password_len as usize;
+            core::str::from_utf8(&s.password[..len])
+                .unwrap_or(DEFAULT_PASSWORD)
+                .into()
+        })
     }
-    critical_section::with(|cs| {
-        let mut s = SETTINGS.borrow(cs).borrow_mut();
-        s.password_len = password.len() as u8;
-        s.password[..password.len()].copy_from_slice(password.as_bytes());
-    });
-    flush()
-}
 
-fn flush() -> Result<(), FlashStorageError> {
-    let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
+    pub fn write_dmx_base_address(&self, addr: u16) -> Result<(), FlashStorageError> {
+        if !(1..=512).contains(&addr) {
+            return Err(FlashStorageError::OutOfBounds);
+        }
+        critical_section::with(|cs| {
+            self.settings.borrow(cs).borrow_mut().dmx_base_address = addr;
+        });
+        self.flush()
+    }
 
-    critical_section::with(|cs| {
-        let s = SETTINGS.borrow(cs).borrow();
-        let ssid_len = s.ssid_len as usize;
-        let pwd_len = s.password_len as usize;
-        rec.0[..4].copy_from_slice(&MAGIC);
-        rec.0[4..6].copy_from_slice(&s.dmx_base_address.to_le_bytes());
-        rec.0[6] = s.ssid_len;
-        rec.0[7..7 + ssid_len].copy_from_slice(&s.ssid[..ssid_len]);
-        rec.0[39] = s.password_len;
-        rec.0[40..40 + pwd_len].copy_from_slice(&s.password[..pwd_len]);
-    });
+    pub fn write_ssid(&self, ssid: &str) -> Result<(), FlashStorageError> {
+        if ssid.len() > SSID_MAX {
+            return Err(FlashStorageError::OutOfBounds);
+        }
+        critical_section::with(|cs| {
+            let mut s = self.settings.borrow(cs).borrow_mut();
+            s.ssid_len = ssid.len() as u8;
+            s.ssid[..ssid.len()].copy_from_slice(ssid.as_bytes());
+        });
+        self.flush()
+    }
 
-    // Take storage out so the erase/write (~40 ms) runs outside any critical
-    // section, keeping the embassy executor responsive.
-    let mut opt = critical_section::with(|cs| FLASH_STORAGE.borrow(cs).borrow_mut().take());
+    pub fn write_password(&self, password: &str) -> Result<(), FlashStorageError> {
+        if password.len() > PASSWORD_MAX {
+            return Err(FlashStorageError::OutOfBounds);
+        }
+        critical_section::with(|cs| {
+            let mut s = self.settings.borrow(cs).borrow_mut();
+            s.password_len = password.len() as u8;
+            s.password[..password.len()].copy_from_slice(password.as_bytes());
+        });
+        self.flush()
+    }
 
-    let result = if let Some(fs) = opt.as_mut() {
-        fs.erase(BASE, BASE + FlashStorage::SECTOR_SIZE)
-            .and_then(|_| fs.write(BASE, &rec.0))
-    } else {
-        Ok(())
-    };
+    fn flush(&self) -> Result<(), FlashStorageError> {
+        let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
 
-    critical_section::with(|cs| {
-        *FLASH_STORAGE.borrow(cs).borrow_mut() = opt;
-    });
+        critical_section::with(|cs| {
+            let s = self.settings.borrow(cs).borrow();
+            let ssid_len = s.ssid_len as usize;
+            let pwd_len = s.password_len as usize;
+            rec.0[..4].copy_from_slice(&MAGIC);
+            rec.0[4..6].copy_from_slice(&s.dmx_base_address.to_le_bytes());
+            rec.0[6] = s.ssid_len;
+            rec.0[7..7 + ssid_len].copy_from_slice(&s.ssid[..ssid_len]);
+            rec.0[39] = s.password_len;
+            rec.0[40..40 + pwd_len].copy_from_slice(&s.password[..pwd_len]);
+        });
 
-    result
+        // Take storage out so the erase/write (~40 ms) runs outside any critical
+        // section, keeping the embassy executor responsive.
+        let mut opt = critical_section::with(|cs| self.flash.borrow(cs).borrow_mut().take());
+
+        let result = if let Some(fs) = opt.as_mut() {
+            fs.erase(BASE, BASE + FlashStorage::SECTOR_SIZE)
+                .and_then(|_| fs.write(BASE, &rec.0))
+        } else {
+            Ok(())
+        };
+
+        critical_section::with(|cs| {
+            *self.flash.borrow(cs).borrow_mut() = opt;
+        });
+
+        result
+    }
 }
