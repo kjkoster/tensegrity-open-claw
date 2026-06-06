@@ -1,5 +1,3 @@
-use core::sync::atomic::{AtomicU16, Ordering};
-
 use embassy_executor::Spawner;
 use embassy_net::tcp::TcpSocket;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
@@ -16,7 +14,7 @@ static HTTP_REQ: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 pub fn spawn(
     spawner: Spawner,
     stack: embassy_net::Stack<'static>,
-    addr: &'static AtomicU16,
+    addr: u16,
     save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
 ) {
     spawner.spawn(
@@ -40,9 +38,13 @@ async fn task(
     rx_buf: &'static mut [u8; 1024],
     tx_buf: &'static mut [u8; 1024],
     req_buf: &'static mut [u8; 1024],
-    addr: &'static AtomicU16,
+    addr: u16,
     save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
 ) -> ! {
+    // The DMX base address may be changed by the user, so we keep a mutable
+    // copy of it here.
+    let mut dmx_address = addr;
+
     loop {
         let mut socket = TcpSocket::new(stack, rx_buf, tx_buf);
         socket.set_timeout(Some(Duration::from_secs(10)));
@@ -52,9 +54,10 @@ async fn task(
             continue;
         }
 
-        handle_request(&mut socket, req_buf, addr, save_signal).await;
+        handle_request(&mut socket, req_buf, &mut dmx_address, save_signal).await;
         socket.flush().await.ok();
         socket.close();
+
         // Allow the stack to transmit the FIN before the socket is dropped.
         Timer::after(Duration::from_millis(100)).await;
     }
@@ -63,7 +66,7 @@ async fn task(
 async fn handle_request(
     socket: &mut TcpSocket<'_>,
     req_buf: &mut [u8; 1024],
-    addr: &AtomicU16,
+    dmx_address: &mut u16,
     save_signal: &Signal<CriticalSectionRawMutex, u16>,
 ) {
     // Read headers byte by byte, storing up to req_buf.len() bytes but always
@@ -114,9 +117,9 @@ async fn handle_request(
             }
         }
         if let Some(new_addr) = parse_dmx_address(&body[..bpos]) {
-            addr.store(new_addr, Ordering::Relaxed);
-            save_signal.signal(new_addr);
-            rprintln!("DMX base address set to {}", new_addr);
+            *dmx_address = new_addr;
+            save_signal.signal(*dmx_address);
+            rprintln!("DMX base address set to {}", dmx_address);
             true
         } else {
             false
@@ -125,17 +128,21 @@ async fn handle_request(
         false
     };
 
-    let current = addr.load(Ordering::Relaxed);
     // req_buf is no longer needed for the request; reuse it for the response.
-    send_response(socket, req_buf, current, updated).await;
+    send_response(socket, req_buf, dmx_address, updated).await;
 }
 
-async fn send_response(socket: &mut TcpSocket<'_>, buf: &mut [u8; 1024], addr: u16, saved: bool) {
-    let len = build_response(buf, addr, saved);
+async fn send_response(
+    socket: &mut TcpSocket<'_>,
+    buf: &mut [u8; 1024],
+    dmx_address: &mut u16,
+    saved: bool,
+) {
+    let len = build_response(buf, *dmx_address, saved);
     tcp_write(socket, &buf[..len]).await;
 }
 
-fn build_response(buf: &mut [u8; 1024], addr: u16, saved: bool) -> usize {
+fn build_response(buf: &mut [u8; 1024], dmx_address: u16, saved: bool) -> usize {
     fn put(buf: &mut [u8], pos: &mut usize, data: &[u8]) {
         let n = data.len().min(buf.len() - *pos);
         buf[*pos..*pos + n].copy_from_slice(&data[..n]);
@@ -184,7 +191,7 @@ fn build_response(buf: &mut [u8; 1024], addr: u16, saved: bool) -> usize {
         b"<input type=\"number\" name=\"dmx_address\" min=\"1\" max=\"512\" value=\"",
     );
     let mut num_buf = [0u8; 5];
-    let s = fmt_u16(addr, &mut num_buf);
+    let s = fmt_u16(dmx_address, &mut num_buf);
     put(buf, &mut pos, &num_buf[s..]);
     put(
         buf,

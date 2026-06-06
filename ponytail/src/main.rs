@@ -10,10 +10,10 @@
 mod http_server;
 mod storage;
 
-use core::sync::atomic::{AtomicU16, Ordering};
-
 use embassy_executor::Spawner;
 use embassy_net::StackResources;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
@@ -24,8 +24,6 @@ use rtt_target::rprintln;
 use static_cell::StaticCell;
 
 extern crate alloc;
-
-pub(crate) static DMX_BASE_ADDRESS: AtomicU16 = AtomicU16::new(333);
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -38,10 +36,21 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+static DMX_SAVE: Signal<CriticalSectionRawMutex, u16> = Signal::new();
 
 #[embassy_executor::task]
 async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) -> ! {
     runner.run().await
+}
+
+#[embassy_executor::task]
+async fn persist_task(save_signal: &'static Signal<CriticalSectionRawMutex, u16>) -> ! {
+    loop {
+        let addr = save_signal.wait().await;
+        if let Err(e) = storage::write_dmx_base_address(addr) {
+            rprintln!("storage write failed: {:?}", e);
+        }
+    }
 }
 
 #[allow(
@@ -52,17 +61,6 @@ async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) 
 async fn main(spawner: Spawner) -> ! {
     // RTT must be initialized first so panics during startup produce visible output.
     rtt_target::rtt_init_print!();
-
-    storage::init();
-    if let Some(addr) = storage::load() {
-        DMX_BASE_ADDRESS.store(addr, Ordering::Relaxed);
-        rprintln!("dmx base address from nvs: {}", addr);
-    } else {
-        rprintln!(
-            "default dmx base address: {}",
-            DMX_BASE_ADDRESS.load(Ordering::Relaxed)
-        );
-    }
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
@@ -82,6 +80,10 @@ async fn main(spawner: Spawner) -> ! {
     let _ = peripherals.GPIO37;
 
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
+
+    if let Err(e) = storage::init(peripherals.FLASH) {
+        rprintln!("storage init failed: {:?}", e);
+    }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -103,17 +105,17 @@ async fn main(spawner: Spawner) -> ! {
         seed,
     );
     spawner.spawn(net_task(runner).unwrap());
-    storage::spawn(spawner);
+    spawner.spawn(persist_task(&DMX_SAVE).unwrap());
 
     wifi_controller
         .set_config(&esp_radio::wifi::Config::Station(
             StationConfig::default()
-                .with_ssid("radiowaves")
-                .with_password("IkWilInternetten!!".into()),
+                .with_ssid(storage::read_ssid())
+                .with_password(storage::read_password()),
         ))
         .unwrap();
 
-    rprintln!("connecting to radiowaves...");
+    rprintln!("connecting to {}...", storage::read_ssid());
     wifi_controller.connect_async().await.unwrap();
     rprintln!("wifi connected, waiting for dhcp...");
     stack.wait_config_up().await;
@@ -127,7 +129,7 @@ async fn main(spawner: Spawner) -> ! {
         }
     }
 
-    http_server::spawn(spawner, stack, &DMX_BASE_ADDRESS, storage::signal());
+    http_server::spawn(spawner, stack, storage::read_dmx_base_address(), &DMX_SAVE);
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
