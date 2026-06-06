@@ -1,4 +1,5 @@
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
 use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
     Ipv4Address, Stack,
@@ -7,7 +8,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
-use crate::storage::Storage;
+use crate::DmxConfig;
 
 const SACN_PORT: u16 = 5568;
 
@@ -24,26 +25,40 @@ static TX_DATA: StaticCell<[u8; 64]> = StaticCell::new();
 pub fn spawn(
     spawner: Spawner,
     stack: Stack<'static>,
-    storage: &'static Storage,
+    address: u16,
+    universe: u16,
+    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
 ) {
-    spawner.spawn(task(stack, storage, value_signal).unwrap());
+    spawner.spawn(task(stack, address, universe, config_signal, value_signal).unwrap());
 }
 
 /// Listens for sACN (E1.31) packets on UDP 5568, reads the DMX slot at
-/// `storage.read_dmx_base_address()` from each packet for the configured universe,
-/// signals and prints the value via RTT whenever it changes.
+/// `address` from each packet for the configured `universe`, signals and
+/// prints the value via RTT whenever it changes. Rejoins the correct
+/// multicast group whenever a new `DmxConfig` arrives on `config_signal`.
 #[embassy_executor::task]
 async fn task(
     stack: Stack<'static>,
-    storage: &'static Storage,
+    address: u16,
+    universe: u16,
+    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
 ) -> ! {
-    let universe = storage.read_universe();
+    let mut address = address;
+    let mut universe = universe;
 
     // sACN multicast address: 239.255.(universe_hi).(universe_lo)
-    let multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
+    let mut multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
     stack.join_multicast_group(multicast).ok();
+    rprintln!(
+        "sACN listening: address={} universe={} multicast=239.255.{}.{}:{}",
+        address,
+        universe,
+        (universe >> 8) as u8,
+        universe as u8,
+        SACN_PORT
+    );
 
     let mut socket = UdpSocket::new(
         stack,
@@ -58,17 +73,33 @@ async fn task(
     let mut pkt_buf = [0u8; 638];
 
     loop {
-        let Ok((n, _)) = socket.recv_from(&mut pkt_buf).await else {
-            continue;
+        let n = match select(socket.recv_from(&mut pkt_buf), config_signal.wait()).await {
+            Either::First(Ok((n, _))) => n,
+            Either::First(Err(_)) => continue,
+            Either::Second(new_config) => {
+                stack.leave_multicast_group(multicast).ok();
+                address = new_config.address;
+                universe = new_config.universe;
+                multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
+                stack.join_multicast_group(multicast).ok();
+                rprintln!(
+                    "sACN reconfigured: address={} universe={} multicast=239.255.{}.{}:{}",
+                    address,
+                    universe,
+                    (universe >> 8) as u8,
+                    universe as u8,
+                    SACN_PORT
+                );
+                continue;
+            }
         };
-        let slot = storage.read_dmx_base_address();
-        let Some(val) = parse_e131_slot(&pkt_buf[..n], universe, slot) else {
+        let Some(val) = parse_e131_slot(&pkt_buf[..n], universe, address) else {
             continue;
         };
         if Some(val) != last_value {
             last_value = Some(val);
             value_signal.signal(val);
-            rprintln!("DMX ch {} = {}", slot, val);
+            rprintln!("DMX ch {} = {}", address, val);
         }
     }
 }

@@ -14,6 +14,8 @@ use picoserve::{
 use rtt_target::rprintln;
 use static_cell::{ConstStaticCell, StaticCell};
 
+use crate::DmxConfig;
+
 pub struct WifiConfig {
     pub ssid: String,
     pub password: String,
@@ -22,14 +24,16 @@ pub struct WifiConfig {
 #[derive(Clone)]
 struct AppState {
     dmx_address: &'static Mutex<CriticalSectionRawMutex, u16>,
+    universe: &'static Mutex<CriticalSectionRawMutex, u16>,
     ssid: String,
-    dmx_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+    dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 }
 
 #[derive(serde::Deserialize)]
 struct ConfigForm {
     dmx_address: Option<u16>,
+    universe: Option<u16>,
     ssid: Option<String>,
     password: Option<String>,
 }
@@ -53,27 +57,41 @@ impl Content for Html {
 enum FormResult {
     None,
     DmxSaved,
+    DmxError,
     WifiSaved,
     WifiError,
 }
 
 async fn handle_get(State(state): State<AppState>) -> Html {
     let addr = *state.dmx_address.lock().await;
-    Html(build_html(addr, &state.ssid, FormResult::None))
+    let uni = *state.universe.lock().await;
+    Html(build_html(addr, uni, &state.ssid, FormResult::None))
 }
 
 async fn handle_post(State(state): State<AppState>, Form(form): Form<ConfigForm>) -> Html {
     let result = process_form(&state, form).await;
     let addr = *state.dmx_address.lock().await;
-    Html(build_html(addr, &state.ssid, result))
+    let uni = *state.universe.lock().await;
+    Html(build_html(addr, uni, &state.ssid, result))
 }
 
 async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
-    if let Some(addr) = form.dmx_address.filter(|&a| (1..=512).contains(&a)) {
-        *state.dmx_address.lock().await = addr;
-        state.dmx_signal.signal(addr);
-        rprintln!("DMX base address set to {}", addr);
-        FormResult::DmxSaved
+    if form.dmx_address.is_some() || form.universe.is_some() {
+        let valid_addr = form.dmx_address.filter(|&a| (1..=512).contains(&a));
+        let valid_uni = form.universe.filter(|&u| (1..=63999).contains(&u));
+        match (valid_addr, valid_uni) {
+            (Some(addr), Some(uni)) => {
+                *state.dmx_address.lock().await = addr;
+                *state.universe.lock().await = uni;
+                state.dmx_signal.signal(DmxConfig {
+                    address: addr,
+                    universe: uni,
+                });
+                rprintln!("DMX address={} universe={}", addr, uni);
+                FormResult::DmxSaved
+            }
+            _ => FormResult::DmxError,
+        }
     } else {
         match (form.ssid, form.password) {
             (Some(s), Some(p)) if valid_ssid(&s) && valid_password(&p) => {
@@ -90,12 +108,14 @@ async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
     }
 }
 
-fn build_html(dmx_address: u16, ssid: &str, result: FormResult) -> String {
+fn build_html(dmx_address: u16, universe: u16, ssid: &str, result: FormResult) -> String {
     let redirect = matches!(result, FormResult::DmxSaved | FormResult::WifiSaved);
-    let dmx_ok = if matches!(result, FormResult::DmxSaved) {
-        r#"<p class="ok">DMX base address saved.</p>"#
-    } else {
-        ""
+    let dmx_msg = match result {
+        FormResult::DmxSaved => r#"<p class="ok">DMX address and sACN universe saved.</p>"#,
+        FormResult::DmxError => {
+            r#"<p class="err">Channel must be 1-512; sACN universe must be 1-63999.</p>"#
+        }
+        _ => "",
     };
     let wifi_msg = match result {
         FormResult::WifiSaved => r#"<p class="ok">network config saved, rebooting...</p>"#,
@@ -124,11 +144,17 @@ fn build_html(dmx_address: u16, ssid: &str, result: FormResult) -> String {
     ));
     html.push_str("<body>");
     html.push_str("<h1>DMX Base Address</h1>");
-    html.push_str(dmx_ok);
-    html.push_str(r#"<form method="POST" action="/"><label>Channel (1-512)"#);
+    html.push_str(dmx_msg);
+    html.push_str(r#"<form method="POST" action="/">"#);
+    html.push_str(r#"<label>Channel (1-512)"#);
     html.push_str(r#"<input type="number" name="dmx_address" min="1" max="512" value=""#);
     push_u16(&mut html, dmx_address);
-    html.push_str(r#""></label><input type="submit" value="save"></form>"#);
+    html.push_str(r#""></label>"#);
+    html.push_str(r#"<label>sACN Universe (1-63999)"#);
+    html.push_str(r#"<input type="number" name="universe" min="1" max="63999" value=""#);
+    push_u16(&mut html, universe);
+    html.push_str(r#""></label>"#);
+    html.push_str(r#"<input type="submit" value="save"></form>"#);
     html.push_str("<h2>Wireless Network</h2>");
     html.push_str(wifi_msg);
     html.push_str(r#"<form method="POST" action="/"><label>Network"#);
@@ -180,16 +206,19 @@ static HTTP_RX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_TX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_BUF: ConstStaticCell<[u8; 2048]> = ConstStaticCell::new([0; 2048]);
 static DMX_ADDR: StaticCell<Mutex<CriticalSectionRawMutex, u16>> = StaticCell::new();
+static UNIVERSE: StaticCell<Mutex<CriticalSectionRawMutex, u16>> = StaticCell::new();
 
 pub fn spawn(
     spawner: Spawner,
     stack: Stack<'static>,
     dmx_address: u16,
+    universe: u16,
     ssid: String,
-    dmx_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+    dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) {
     let dmx_mutex = DMX_ADDR.init(Mutex::new(dmx_address));
+    let uni_mutex = UNIVERSE.init(Mutex::new(universe));
     spawner.spawn(
         task(
             stack,
@@ -197,6 +226,7 @@ pub fn spawn(
             HTTP_TX.take(),
             HTTP_BUF.take(),
             dmx_mutex,
+            uni_mutex,
             ssid,
             dmx_signal,
             wifi_signal,
@@ -212,12 +242,14 @@ async fn task(
     tx_buf: &'static mut [u8; 1024],
     http_buf: &'static mut [u8; 2048],
     dmx_address: &'static Mutex<CriticalSectionRawMutex, u16>,
+    universe: &'static Mutex<CriticalSectionRawMutex, u16>,
     ssid: String,
-    dmx_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+    dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let state = AppState {
         dmx_address,
+        universe,
         ssid,
         dmx_signal,
         wifi_signal,

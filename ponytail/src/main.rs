@@ -41,25 +41,35 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
+pub struct DmxConfig {
+    pub address: u16,
+    pub universe: u16,
+}
+
 static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
-static DMX_SAVE: Signal<CriticalSectionRawMutex, u16> = Signal::new();
+static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
+static DMX_CONFIG: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
 static WIFI_SAVE: Signal<CriticalSectionRawMutex, http_server::WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
-async fn persist_dmx_task(
+async fn dmx_change_task(
     storage: &'static storage::Storage,
-    save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+    save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
+    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
 ) -> ! {
     loop {
-        let addr = save_signal.wait().await;
-        if let Err(e) = storage.write_dmx_base_address(addr) {
-            // OtherCoreRunning is seen under `cargo run` (probe-rs): the debugger
-            // leaves Core 1 active at start-up and the ESP32-S3 flash driver refuses
-            // writes while either core fetches from flash. The condition is transient;
-            // retrying would fix it. When attaching after boot the write succeeds.
+        let config = save_signal.wait().await;
+        if let Err(e) = storage.write_dmx_base_address(config.address) {
             rprintln!("storage write failed: {:?}", e);
         }
+        if let Err(e) = storage.write_universe(config.universe) {
+            rprintln!("storage write failed: {:?}", e);
+        }
+        config_signal.signal(DmxConfig {
+            address: config.address,
+            universe: config.universe,
+        });
     }
 }
 
@@ -113,7 +123,7 @@ async fn main(spawner: Spawner) -> ! {
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
 
     let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
-    spawner.spawn(persist_dmx_task(storage, &DMX_SAVE).unwrap());
+    spawner.spawn(dmx_change_task(storage, &DMX_SAVE, &DMX_CONFIG).unwrap());
     spawner.spawn(persist_wifi_task(storage, &WIFI_SAVE).unwrap());
 
     let stack = wifi::connect(
@@ -129,11 +139,19 @@ async fn main(spawner: Spawner) -> ! {
         spawner,
         stack,
         storage.read_dmx_base_address(),
+        storage.read_universe(),
         storage.read_ssid(),
         &DMX_SAVE,
         &WIFI_SAVE,
     );
-    sacn::spawn(spawner, stack, storage, &DMX_VALUE);
+    sacn::spawn(
+        spawner,
+        stack,
+        storage.read_dmx_base_address(),
+        storage.read_universe(),
+        &DMX_CONFIG,
+        &DMX_VALUE,
+    );
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     // LEDC duty 0% = GPIO low = LED on; duty 100% = GPIO high = LED off.
