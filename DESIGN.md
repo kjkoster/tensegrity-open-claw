@@ -261,7 +261,6 @@ Firmware
 - [ ] break dependency of sacn on storage
 - [ ] Redo the start-up logging data.
 - [ ] Make the DMX base address and universe editable and dynamic, so that when they change the relevant subsystem is reconfigured.
-- [ ] Push the wifi into its own module.
 
 Validation
 - [ ] Control onboard LED brightness via QLC+ over local WiFi

@@ -10,22 +10,22 @@
 mod http_server;
 mod sacn;
 mod storage;
+mod wifi;
 
 use embassy_executor::Spawner;
-use embassy_net::StackResources;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::DriveMode;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::ledc::{
+    LSGlobalClkSource, Ledc, LowSpeed,
     channel::{self, ChannelIFace},
     timer::{self, TimerIFace},
-    LSGlobalClkSource, Ledc, LowSpeed,
 };
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_radio::wifi::{Interface, sta::StationConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
@@ -41,18 +41,13 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, u16> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
+static WIFI_SAVE: Signal<CriticalSectionRawMutex, http_server::WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
-async fn net_task(mut runner: embassy_net::Runner<'static, Interface<'static>>) -> ! {
-    runner.run().await
-}
-
-#[embassy_executor::task]
-async fn persist_task(
+async fn persist_dmx_task(
     storage: &'static storage::Storage,
     save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
 ) -> ! {
@@ -68,6 +63,19 @@ async fn persist_task(
     }
 }
 
+#[embassy_executor::task]
+async fn persist_wifi_task(
+    storage: &'static storage::Storage,
+    wifi_signal: &'static Signal<CriticalSectionRawMutex, http_server::WifiConfig>,
+) -> ! {
+    let config = wifi_signal.wait().await;
+    storage.write_ssid(&config.ssid).ok();
+    storage.write_password(&config.password).ok();
+    // Brief pause so the HTTP response finishes sending before we reset.
+    Timer::after(Duration::from_millis(500)).await;
+    esp_hal::system::software_reset()
+}
+
 #[allow(
     clippy::large_stack_frames,
     reason = "it's not unusual to allocate larger buffers etc. in main"
@@ -78,8 +86,9 @@ async fn main(spawner: Spawner) -> ! {
     rtt_target::rtt_init_print!();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
+    let peripherals = esp_hal::init(config);
     // GPIO27-37 are used internally by the XIAO ESP32-S3's octal PSRAM. Consuming
     // them here prevents accidental reuse; do not reassign these pins.
     let _ = peripherals.GPIO27;
@@ -94,10 +103,6 @@ async fn main(spawner: Spawner) -> ! {
     let _ = peripherals.GPIO36;
     let _ = peripherals.GPIO37;
 
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
-
-    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
-
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
@@ -107,42 +112,27 @@ async fn main(spawner: Spawner) -> ! {
     let rng = esp_hal::rng::Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
 
-    let (mut wifi_controller, interfaces) =
-        esp_radio::wifi::new(peripherals.WIFI, Default::default())
-            .unwrap_or_else(|e| panic!("Failed to initialize Wi-Fi controller: {:?}", e));
+    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
+    spawner.spawn(persist_dmx_task(storage, &DMX_SAVE).unwrap());
+    spawner.spawn(persist_wifi_task(storage, &WIFI_SAVE).unwrap());
 
-    let (stack, runner) = embassy_net::new(
-        interfaces.station,
-        embassy_net::Config::dhcpv4(Default::default()),
-        STACK_RESOURCES.init(StackResources::new()),
+    let stack = wifi::connect(
+        spawner,
+        peripherals.WIFI,
         seed,
+        storage.read_ssid(),
+        storage.read_password(),
+    )
+    .await;
+
+    http_server::spawn(
+        spawner,
+        stack,
+        storage.read_dmx_base_address(),
+        storage.read_ssid(),
+        &DMX_SAVE,
+        &WIFI_SAVE,
     );
-    spawner.spawn(net_task(runner).unwrap());
-    spawner.spawn(persist_task(storage, &DMX_SAVE).unwrap());
-
-    wifi_controller
-        .set_config(&esp_radio::wifi::Config::Station(
-            StationConfig::default()
-                .with_ssid(storage.read_ssid())
-                .with_password(storage.read_password()),
-        ))
-        .unwrap();
-
-    rprintln!("connecting to {}...", storage.read_ssid());
-    wifi_controller.connect_async().await.unwrap();
-    rprintln!("wifi connected, waiting for dhcp...");
-    stack.wait_config_up().await;
-
-    if let Some(cfg) = stack.config_v4() {
-        rprintln!("ip address: {}", cfg.address.address());
-        rprintln!("netmask:    {}", cfg.address.netmask());
-        rprintln!("dmx config: http://{}/", cfg.address.address());
-        for dns in cfg.dns_servers.iter() {
-            rprintln!("nameserver: {}", dns);
-        }
-    }
-
-    http_server::spawn(spawner, stack, storage.read_dmx_base_address(), &DMX_SAVE);
     sacn::spawn(spawner, stack, storage, &DMX_VALUE);
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
