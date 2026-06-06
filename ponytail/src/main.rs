@@ -8,18 +8,24 @@
 #![deny(clippy::large_stack_frames)]
 
 mod http_server;
+mod storage;
+
+use core::sync::atomic::{AtomicU16, Ordering};
 
 use embassy_executor::Spawner;
 use embassy_net::StackResources;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Level, Output, OutputConfig};
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::wifi::{Interface, sta::StationConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
 extern crate alloc;
+
+pub(crate) static DMX_BASE_ADDRESS: AtomicU16 = AtomicU16::new(333);
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -47,6 +53,17 @@ async fn main(spawner: Spawner) -> ! {
     // RTT must be initialized first so panics during startup produce visible output.
     rtt_target::rtt_init_print!();
 
+    storage::init();
+    if let Some(addr) = storage::load() {
+        DMX_BASE_ADDRESS.store(addr, Ordering::Relaxed);
+        rprintln!("dmx base address from nvs: {}", addr);
+    } else {
+        rprintln!(
+            "default dmx base address: {}",
+            DMX_BASE_ADDRESS.load(Ordering::Relaxed)
+        );
+    }
+
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
@@ -67,8 +84,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let sw_interrupt =
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     rprintln!("Embassy initialized!");
@@ -87,6 +103,7 @@ async fn main(spawner: Spawner) -> ! {
         seed,
     );
     spawner.spawn(net_task(runner).unwrap());
+    storage::spawn(spawner);
 
     wifi_controller
         .set_config(&esp_radio::wifi::Config::Station(
@@ -110,7 +127,7 @@ async fn main(spawner: Spawner) -> ! {
         }
     }
 
-    http_server::spawn(spawner, stack);
+    http_server::spawn(spawner, stack, &DMX_BASE_ADDRESS, storage::signal());
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());

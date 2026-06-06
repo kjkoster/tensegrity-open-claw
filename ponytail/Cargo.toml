@@ -16,6 +16,7 @@ esp-rtos = { version = "0.3.0", features = [
 
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3"] }
 
+embassy-sync = "0.8.0"
 embassy-net = { version = "0.9.1", features = [
   "dhcpv4",
   "medium-ethernet",
@@ -48,8 +49,10 @@ smoltcp = { version = "0.13.0", default-features = false, features = [
   "socket-udp",
 ] }
 
-critical-section = "1.2.0"
-static_cell      = "2.1.1"
+critical-section    = "1.2.0"
+embedded-storage    = "0.3"
+esp-storage         = { version = "0.9.0", features = ["esp32s3"] }
+static_cell         = "2.1.1"
 
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html

@@ -2,11 +2,10 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use embassy_executor::Spawner;
 use embassy_net::tcp::TcpSocket;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
 use rtt_target::rprintln;
 use static_cell::ConstStaticCell;
-
-pub(crate) static DMX_BASE_ADDRESS: AtomicU16 = AtomicU16::new(333);
 
 // ConstStaticCell holds the value in BSS/data at link time; take() is a pointer
 // op with no stack copy, keeping spawn()'s frame under the 1024-byte limit.
@@ -14,8 +13,23 @@ static HTTP_RX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_TX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_REQ: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 
-pub fn spawn(spawner: Spawner, stack: embassy_net::Stack<'static>) {
-    spawner.spawn(task(stack, HTTP_RX.take(), HTTP_TX.take(), HTTP_REQ.take()).unwrap());
+pub fn spawn(
+    spawner: Spawner,
+    stack: embassy_net::Stack<'static>,
+    addr: &'static AtomicU16,
+    save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
+) {
+    spawner.spawn(
+        task(
+            stack,
+            HTTP_RX.take(),
+            HTTP_TX.take(),
+            HTTP_REQ.take(),
+            addr,
+            save_signal,
+        )
+        .unwrap(),
+    );
 }
 
 /// Serves a minimal HTTP config page for the DMX base address on port 80.
@@ -26,6 +40,8 @@ async fn task(
     rx_buf: &'static mut [u8; 1024],
     tx_buf: &'static mut [u8; 1024],
     req_buf: &'static mut [u8; 1024],
+    addr: &'static AtomicU16,
+    save_signal: &'static Signal<CriticalSectionRawMutex, u16>,
 ) -> ! {
     loop {
         let mut socket = TcpSocket::new(stack, rx_buf, tx_buf);
@@ -36,7 +52,7 @@ async fn task(
             continue;
         }
 
-        handle_request(&mut socket, req_buf).await;
+        handle_request(&mut socket, req_buf, addr, save_signal).await;
         socket.flush().await.ok();
         socket.close();
         // Allow the stack to transmit the FIN before the socket is dropped.
@@ -44,7 +60,12 @@ async fn task(
     }
 }
 
-async fn handle_request(socket: &mut TcpSocket<'_>, req_buf: &mut [u8; 1024]) {
+async fn handle_request(
+    socket: &mut TcpSocket<'_>,
+    req_buf: &mut [u8; 1024],
+    addr: &AtomicU16,
+    save_signal: &Signal<CriticalSectionRawMutex, u16>,
+) {
     // Read headers byte by byte, storing up to req_buf.len() bytes but always
     // draining to \r\n\r\n so the socket is positioned at the start of the body.
     // Browser POST headers routinely exceed 512 bytes; stopping early at the
@@ -92,9 +113,10 @@ async fn handle_request(socket: &mut TcpSocket<'_>, req_buf: &mut [u8; 1024]) {
                 Ok(n) => bpos += n,
             }
         }
-        if let Some(addr) = parse_dmx_address(&body[..bpos]) {
-            DMX_BASE_ADDRESS.store(addr, Ordering::Relaxed);
-            rprintln!("DMX base address set to {}", addr);
+        if let Some(new_addr) = parse_dmx_address(&body[..bpos]) {
+            addr.store(new_addr, Ordering::Relaxed);
+            save_signal.signal(new_addr);
+            rprintln!("DMX base address set to {}", new_addr);
             true
         } else {
             false
@@ -103,9 +125,9 @@ async fn handle_request(socket: &mut TcpSocket<'_>, req_buf: &mut [u8; 1024]) {
         false
     };
 
-    let addr = DMX_BASE_ADDRESS.load(Ordering::Relaxed);
+    let current = addr.load(Ordering::Relaxed);
     // req_buf is no longer needed for the request; reuse it for the response.
-    send_response(socket, req_buf, addr, updated).await;
+    send_response(socket, req_buf, current, updated).await;
 }
 
 async fn send_response(socket: &mut TcpSocket<'_>, buf: &mut [u8; 1024], addr: u16, saved: bool) {
@@ -121,22 +143,54 @@ fn build_response(buf: &mut [u8; 1024], addr: u16, saved: bool) -> usize {
     }
 
     let mut pos = 0usize;
-    put(buf, &mut pos, b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n");
-    put(buf, &mut pos, b"<!DOCTYPE html><html><head><title>DMX Config</title><style>");
-    put(buf, &mut pos, b"body{font-family:system-ui,sans-serif;max-width:22em;margin:2em auto;padding:0 1em}");
-    put(buf, &mut pos, b".saved{background:#d4edda;color:#155724;padding:.6em;border-radius:4px;margin:0 0 .5em}");
+    put(
+        buf,
+        &mut pos,
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n",
+    );
+    put(
+        buf,
+        &mut pos,
+        b"<!DOCTYPE html><html><head><title>DMX Config</title><style>",
+    );
+    put(
+        buf,
+        &mut pos,
+        b"body{font-family:system-ui,sans-serif;max-width:22em;margin:2em auto;padding:0 1em}",
+    );
+    put(
+        buf,
+        &mut pos,
+        b".saved{background:#d4edda;color:#155724;padding:.6em;border-radius:4px;margin:0 0 .5em}",
+    );
     put(buf, &mut pos, b"input{display:block;width:100%;box-sizing:border-box;padding:.4em;font-size:1em;margin-top:.4em}");
     put(buf, &mut pos, b"input[type=submit]{background:#0066cc;color:#fff;border:none;border-radius:3px;cursor:pointer}");
-    put(buf, &mut pos, b"</style></head><body><h1>DMX Base Address</h1>");
+    put(
+        buf,
+        &mut pos,
+        b"</style></head><body><h1>DMX Base Address</h1>",
+    );
     if saved {
         put(buf, &mut pos, b"<p class=\"saved\">Saved.</p>");
     }
-    put(buf, &mut pos, b"<form method=\"POST\" action=\"/\"><label>Channel (1-512)");
-    put(buf, &mut pos, b"<input type=\"number\" name=\"dmx_address\" min=\"1\" max=\"512\" value=\"");
+    put(
+        buf,
+        &mut pos,
+        b"<form method=\"POST\" action=\"/\"><label>Channel (1-512)",
+    );
+    put(
+        buf,
+        &mut pos,
+        b"<input type=\"number\" name=\"dmx_address\" min=\"1\" max=\"512\" value=\"",
+    );
     let mut num_buf = [0u8; 5];
     let s = fmt_u16(addr, &mut num_buf);
     put(buf, &mut pos, &num_buf[s..]);
-    put(buf, &mut pos, b"\"></label><input type=\"submit\" value=\"Save\"></form></body></html>");
+    put(
+        buf,
+        &mut pos,
+        b"\"></label><input type=\"submit\" value=\"Save\"></form></body></html>",
+    );
     pos
 }
 
