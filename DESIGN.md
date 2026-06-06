@@ -40,11 +40,16 @@ EP2T10's baseband line to its RF section) reveals what signals control what,
 regardless of chip identity. Identification was abandoned as low-value once the
 three documented parts (ULN2803A, 7805, 28BYJ-48) gave a complete-enough picture.
 
-> **Note on RF Sniffing:** Over-the-air sniffing of the 2.4GHz protocol using an
-> nRF24L01 is highly unreliable because hardware packet handlers (like ShockBurst)
-> will drop packets that do not exactly match their expected MAC format. Tracing
-> must be done via a logic analyzer tapped directly into the SPI bus of the original
-> remote.
+> **Note on RF Sniffing — Closed:** OTA capture was attempted using an nRF24L01+
+> in pseudo-promiscuous mode (CRC off, auto-ack off, illegal 2-byte address width)
+> sweeping all 126 channels at 250 kbps, 1 Mbps, and 2 Mbps. No decodable packets
+> were observed at any channel or rate. The most probable cause is that the remote's
+> RF chip (PL1167-family) operates at 500 kbps, which the nRF24L01+ cannot demodulate
+> — its silicon only supports 250 k / 1 M / 2 M. **Testing shows it is not possible
+> to emulate the remote via OTA capture with available 2.4GHz hardware. Build 4 is
+> closed.** A wired logic-analyser tap on the SPI bus between the remote's MCU and RF
+> chip would bypass the rate limitation, but the effort is not warranted given that
+> direct control (Build 5) is already the preferred path.
 
 ### 2.3 Open hardware questions (block Build 5)
 
@@ -294,29 +299,6 @@ Design
 Validation
 - [ ] Engineer can patch a standard 5-pin XLR, sees no power on the signal cable
 - [ ] Full chain: desk → ground station → installation cable → fixture
-
-### Build 4 — RF Remote Emulator
-
-Hardware BOM
-- [ ] nRF24L01 module (for transmission / emulation)
-- [ ] Wire nRF24L01 to ESP32-S3 via SPI
-- [ ] Logic Analyzer (e.g. Saleae clone) for sniffing
-
-Sniffing (Wired — see §2.2)
-- [ ] **Experiment:** Open remote, identify RF chip marking (confirm PL1167 or equivalent)
-- [ ] Solder logic-analyzer wires directly to the SPI bus between the remote's MCU and RF chip
-- [ ] Capture packets per button (all 28). Do not attempt over-the-air sniffing — hardware filters drop mismatched frames
-- [ ] Document packet structure: length, address, command bytes, timing
-
-Firmware
-- [ ] `nrf24` driver (`embedded-nrf24l01`) integration
-- [ ] `led-lamp-rf` codec — bespoke, encodes captured protocol
-- [ ] RF transmit to emulate remote
-- [ ] Map DMX channels → captured RF commands
-
-Validation
-- [ ] Fixture responds to emulated commands
-- [ ] Full channel range via QLC+
 
 ### Build 5 — Direct Control (replace board)
 
