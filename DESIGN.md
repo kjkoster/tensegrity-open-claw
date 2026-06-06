@@ -251,19 +251,11 @@ Firmware
       fetches from flash on either core during an erase/write corrupt the fetch). Under the debugger,
       Core 1 is left in an active state at start-up. Fix: retry on `OtherCoreRunning` in `flush()`
       since the condition is transient, or halt/resume Core 1 around the erase/write.
-- [ ] Replace hand-rolled HTTP server with `picoserve` — a no_std async HTTP server built for
-      Embassy; would eliminate the manual header/body parsing, byte-by-byte read loop, and response
-      builder in `http_server.rs`
-- [ ] Audit smoltcp features in Cargo.toml — `socket-icmp`, `socket-raw`, `socket-dns`, and
-      `proto-dns` are not used by the current TCP-only HTTP server + DHCP stack; removing them
-      shrinks the binary
 - [ ] Stub channel handlers for later builds
 - [ ] break dependency of sacn on storage
 - [ ] Redo the start-up logging data.
 - [ ] Make the DMX base address and universe editable and dynamic, so that when they change the relevant subsystem is reconfigured.
 
-Validation
-- [ ] Control onboard LED brightness via QLC+ over local WiFi
 
 ### Build 2 — Wired DMX
 
@@ -501,3 +493,26 @@ independent of signal logic.
 - [ ] Confirm DMX integrity with all motors + LEDs switching (worst-case EMI)
 - [ ] Confirm power-on inrush does not trip the PSU
 - [ ] Confirm data integrity is independent of structure earth (test structure bonded vs floating, if safe to do)
+
+## Build 9 — Phantom Power over DMX Cable
+
+Deliver 48V power to fixtures over the same 3-core cable as DMX data, eliminating a separate power run.
+
+### Cable assignment
+
+- Core 1 — ground / power return
+- Core 2 — DMX data −
+- Core 3 — DMX data + / 48V phantom
+
+### Implementation
+
+- 48V phantom rides on the data cores
+- Blocking capacitors at each receiver decouple the DC from the RS-485 transceivers
+- Ground is shared between data return and power return
+- All devices on the rig are custom — no standard DMX equipment will be connected
+
+### Constraints
+
+- Non-standard, proprietary to this rig — must be documented at every junction
+- RS-485 transceivers must tolerate the common-mode voltage with caps in place
+- Voltage drop over long runs must be budgeted at design time

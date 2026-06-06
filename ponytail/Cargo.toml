@@ -24,8 +24,6 @@ embassy-net = { version = "0.9.1", features = [
   "tcp",
   "udp",
 ] }
-embedded-io = "0.7.1"
-embedded-io-async = "0.7.0"
 esp-alloc = "0.10.0"
 rtt-target = "0.6.2"
 # for more networking protocol support see https://crates.io/crates/edge-net
@@ -41,11 +39,7 @@ smoltcp = { version = "0.13.0", default-features = false, features = [
   "medium-ethernet",
   "multicast",
   "proto-dhcpv4",
-  "proto-dns",
   "proto-ipv4",
-  "socket-dns",
-  "socket-icmp",
-  "socket-raw",
   "socket-tcp",
   "socket-udp",
 ] }
@@ -54,6 +48,8 @@ critical-section    = "1.2.0"
 embedded-storage    = "0.3"
 esp-storage         = { version = "0.9.0", features = ["esp32s3"] }
 static_cell         = "2.1.1"
+picoserve           = { version = "0.18.0", features = ["embassy", "alloc"] }
+serde               = { version = "1", default-features = false, features = ["derive", "alloc"] }
 
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
