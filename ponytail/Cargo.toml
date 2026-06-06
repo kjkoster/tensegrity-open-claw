@@ -20,6 +20,7 @@ embassy-sync = "0.8.0"
 embassy-net = { version = "0.9.1", features = [
   "dhcpv4",
   "medium-ethernet",
+  "multicast",
   "tcp",
   "udp",
 ] }

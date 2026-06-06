@@ -252,7 +252,6 @@ Firmware
       fetches from flash on either core during an erase/write corrupt the fetch). Under the debugger,
       Core 1 is left in an active state at start-up. Fix: retry on `OtherCoreRunning` in `flush()`
       since the condition is transient, or halt/resume Core 1 around the erase/write.
-- [ ] sACN/E1.31 receive over WiFi (UDP) — implement codec or adapt `sacn`
 - [ ] Replace hand-rolled HTTP server with `picoserve` — a no_std async HTTP server built for
       Embassy; would eliminate the manual header/body parsing, byte-by-byte read loop, and response
       builder in `http_server.rs`

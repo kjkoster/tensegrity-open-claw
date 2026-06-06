@@ -8,6 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 mod http_server;
+mod sacn;
 mod storage;
 
 use embassy_executor::Spawner;
@@ -136,6 +137,7 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     http_server::spawn(spawner, stack, storage.read_dmx_base_address(), &DMX_SAVE);
+    sacn::spawn(spawner, stack, storage);
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut led = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
