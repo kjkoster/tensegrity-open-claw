@@ -24,6 +24,7 @@ embassy-net = { version = "0.9.1", features = [
   "multicast",
   "tcp",
   "udp",
+  "auto-icmp-echo-reply",
 ] }
 esp-alloc = "0.10.0"
 rtt-target = "0.6.2"
