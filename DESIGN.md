@@ -71,8 +71,10 @@ three documented parts (ULN2803A, 7805, 28BYJ-48) gave a complete-enough picture
 
 There are two ways into the fixture, plus a DMX layer that sits above both:
 
-- **Non-invasive (RF):** emulate the remote over 2.4GHz, leaving the board intact
-  (Build 4). Lowest risk; constrained to whatever the remote can express.
+- **Non-invasive (RF):** emulate the remote over 2.4GHz (Build 4). **Closed:** testing
+  shows it is not possible to emulate the remote — the remote's RF chip (PL1167-family)
+  operates at 500 kbps, which available 2.4GHz hardware (nRF24L01+) cannot demodulate.
+  See §2.2.
 - **Invasive (replace):** rip out the board and drive the LEDs and stepper directly
   (Build 5). Maximum control; requires the hardware investigation above.
 - **DMX transport layer:** how control data reaches the fixture — wireless sACN
@@ -86,8 +88,8 @@ Builds are ordered so each yields a working artefact and de-risks the next:
 1. Wireless DMX proves the protocol + config stack on the bench with zero extra hardware.
 2. Wired DMX adds the RS-485 front end — the path that actually matters for venues.
 3. Ground station makes the wired path venue-ready (isolation, power injection).
-4. RF emulation **sniffs the remote, which reveals the fixture's controllable
-   parameters** — directly informing the Build 5 channel map before any board is cut.
+4. RF emulation **[Closed — see §2.2]:** OTA sniffing did not yield usable data; direct
+   control (Build 5) is the preferred path.
 5. Direct control replaces the board with full per-channel command.
 6. Ethernet is optional, venue-driven only.
 7. Remote management (RDM / GDTF / OSC) makes the fixture behave like professional
@@ -191,8 +193,6 @@ exists) and **`fixture-output`** (specific to this fixture).
 | `rdm` | E1.20 codec + thin transaction layer | via above | yes |
 | `sacn` | E1.31 packet codec, transport-agnostic | none | yes (core) |
 | `artnet` | Art-Net packet codec, transport-agnostic | none | yes (core) |
-| `nrf24` | embedded-hal SPI driver for nRF24L01 | SPI | yes |
-| `led-lamp-rf` | PL1167-compatible remote protocol, on `nrf24` | via nrf24 | yes |
 | `fixture-output` | LED PWM, 28BYJ-48 stepper, onboard LED, on `esp-hal` | GPIO/PWM | yes |
 | `config-portal` | WiFi provisioning + HTTP config + persisted address | net/flash | yes |
 
@@ -200,19 +200,17 @@ exists) and **`fixture-output`** (specific to this fixture).
 
 Legend: ✅ usable as-is · ⚠️ exists, insufficient → extend upstream · 🔨 build ourselves · — not used
 
-| Logical crate | B1 Wireless | B2 Wired | B3 GndStn | B4 RF | B5 Direct | B6 Ethernet | B7 RemoteMgmt |
-|---------------|:----------:|:--------:|:---------:|:-----:|:---------:|:-----------:|:-------------:|
-| `dmx-core` | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
-| `dmx512-wire` | — | ⚠️ | — | — | (via transport) | — | — |
-| `dmx512-rs485` | — | ⚠️ | — | — | (via transport) | — | — |
-| `rdm` | — | ✅/⚠️ | — | — | optional | — | ✅/⚠️ |
-| `sacn` | ⚠️ | — | — | (source) | (source) | ⚠️/✅ | — |
-| `artnet` | — | — | — | — | — | ✅ | — |
-| `nrf24` | — | — | — | ✅ | — | — | — |
-| `led-lamp-rf` | — | — | — | 🔨 | — | — | — |
-| `fixture-output` | 🔨(LED) | 🔨(LED) | — | — | 🔨(full) | — | — |
-| `config-portal` | 🔨 | 🔨 | — | 🔨 | 🔨 | — | — |
-| runtime (`esp-hal` etc.) | ✅ | ✅ | — | ✅ | ✅ | (Pi std) | ✅ |
+| Logical crate | B1 Wireless | B2 Wired | B3 GndStn | B5 Direct | B6 Ethernet | B7 RemoteMgmt |
+|---------------|:----------:|:--------:|:---------:|:---------:|:-----------:|:-------------:|
+| `dmx-core` | ✅ | ✅ | — | ✅ | ✅ | ✅ |
+| `dmx512-wire` | — | ⚠️ | — | (via transport) | — | — |
+| `dmx512-rs485` | — | ⚠️ | — | (via transport) | — | — |
+| `rdm` | — | ✅/⚠️ | — | optional | — | ✅/⚠️ |
+| `sacn` | ⚠️ | — | — | (source) | ⚠️/✅ | — |
+| `artnet` | — | — | — | — | ✅ | — |
+| `fixture-output` | 🔨(LED) | 🔨(LED) | — | 🔨(full) | — | — |
+| `config-portal` | 🔨 | 🔨 | — | 🔨 | — | — |
+| runtime (`esp-hal` etc.) | ✅ | ✅ | — | ✅ | (Pi std) | ✅ |
 
 > B7 also pulls in tooling outside the logical-crate set: OSC (`rosc`) and GDTF
 > handling (evaluate Rust GDTF tooling; GDTF is XML, so worst case hand-author +
@@ -229,8 +227,6 @@ Legend: ✅ usable as-is · ⚠️ exists, insufficient → extend upstream · �
 | `sacn` | `sacn` / `sacn-unofficial`, else `e131` | ⚠️ | evaluate existing for no_std first; `e131` empty → implement + contribute |
 | `artnet` (std, Pi) | `artnet_protocol` | ✅ | std-only; fits Build 6 where real sockets exist |
 | `artnet` (no_std, embedded) | `tiny-artnet` | ⚠️ | minimal; extend upstream if embedded Art-Net needed |
-| `nrf24` | `embedded-nrf24l01` | ✅ | verify build for `xtensa-esp32s3-none-elf` |
-| `led-lamp-rf` | — | 🔨 | bespoke; port packet format from MiLight C/C++ refs |
 | `fixture-output` | — (opt. `stepper`) | 🔨 | onboard LED is a plain GPIO LED (LEDC); stepper table trivial |
 | `config-portal` | `esp-storage` + `esp-wifi` + `picoserve` | 🔨 | assembled glue; verify `picoserve` vs HAL version |
 | OSC (B7) | `rosc` | ✅ | sensor / fixture→console feedback |

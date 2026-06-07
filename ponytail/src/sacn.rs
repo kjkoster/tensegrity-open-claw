@@ -1,16 +1,18 @@
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_net::{
-    udp::{PacketMetadata, UdpSocket},
     Ipv4Address, Stack,
+    udp::{PacketMetadata, UdpSocket},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_time::{Duration, with_timeout};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
 use crate::DmxConfig;
 
 const SACN_PORT: u16 = 5568;
+const UNIVERSE_TIMEOUT: u64 = 30; // seconds
 
 // ACN Packet Identifier at bytes 4..16 of every E1.31 packet.
 const ACN_ID: &[u8; 12] = b"ASC-E1.17\0\0\0";
@@ -73,9 +75,25 @@ async fn task(
     let mut pkt_buf = [0u8; 638];
 
     loop {
-        let n = match select(socket.recv_from(&mut pkt_buf), config_signal.wait()).await {
-            Either::First(Ok((n, _))) => n,
-            Either::First(Err(_)) => continue,
+        let recv_fut = socket.recv_from(&mut pkt_buf);
+
+        let n = match select(
+            with_timeout(Duration::from_secs(UNIVERSE_TIMEOUT), recv_fut),
+            config_signal.wait(),
+        )
+        .await
+        {
+            Either::First(Ok(Ok((n, _)))) => n, // Packet received successfully
+            Either::First(Ok(Err(_))) => continue, // Socket error, try again
+            Either::First(Err(_)) => {
+                rprintln!(
+                    "did not see a universe for {} seconds, rejoining multicast group",
+                    UNIVERSE_TIMEOUT
+                );
+                stack.leave_multicast_group(multicast).ok();
+                stack.join_multicast_group(multicast).ok();
+                continue;
+            }
             Either::Second(new_config) => {
                 stack.leave_multicast_group(multicast).ok();
                 address = new_config.address;
