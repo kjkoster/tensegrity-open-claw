@@ -7,6 +7,8 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use embassy_time::{Duration, with_timeout};
 use rtt_target::rprintln;
 
+use crate::models::DmxConfig;
+
 const UNIVERSE_TIMEOUT: u64 = 30; // seconds
 
 // ACN Packet Identifier at bytes 4..16 of every E1.31 packet.
@@ -33,9 +35,8 @@ static BUFS: SacnBufs = SacnBufs {
 
 pub(crate) struct Listener {
     socket: UdpSocket<'static>,
-    stack: Stack<'static>,
-    address: u16,
-    universe: u16,
+    network_stack: Stack<'static>,
+    config: DmxConfig,
     multicast: Ipv4Address,
     last_value: Option<u8>,
     dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
@@ -43,42 +44,38 @@ pub(crate) struct Listener {
 
 impl Listener {
     pub(crate) fn new(
-        stack: Stack<'static>,
-        address: u16,
-        universe: u16,
-        port: u16,
+        network_stack: Stack<'static>,
+        config: DmxConfig,
         dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
     ) -> Self {
-        let multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
-        stack.join_multicast_group(multicast).ok();
+        let multicast = config.multicast_address();
+        network_stack.join_multicast_group(multicast).ok();
 
         // SAFETY: only one Listener exists at a time; main drops the previous
         // Listener before calling new(), so these buffers have no live borrowers.
         let mut socket = unsafe {
             UdpSocket::new(
-                stack,
+                network_stack,
                 &mut *BUFS.rx_meta.get(),
                 &mut *BUFS.rx_data.get(),
                 &mut *BUFS.tx_meta.get(),
                 &mut *BUFS.tx_data.get(),
             )
         };
-        socket.bind(port).ok();
+        socket.bind(config.sacn_port()).ok();
 
         rprintln!(
-            "sACN listener: address={} universe={} multicast=239.255.{}.{}:{}",
-            address,
-            universe,
-            (universe >> 8) as u8,
-            universe as u8,
-            port
+            "sACN listener: address={} universe={} multicast={}:{}",
+            config.address(),
+            config.universe(),
+            multicast,
+            config.sacn_port()
         );
 
         Self {
             socket,
-            stack,
-            address,
-            universe,
+            network_stack,
+            config,
             multicast,
             last_value: None,
             dmx_value,
@@ -102,10 +99,10 @@ impl Listener {
             .await
             {
                 Ok(Ok((n, _))) => {
-                    if let Some(val) = parse_e131_slot(&pkt_buf[..n], self.universe, self.address) {
+                    if let Some(val) = parse_e131_slot(&pkt_buf[..n], self.config.universe(), self.config.address()) {
                         if Some(val) != self.last_value {
                             self.last_value = Some(val);
-                            rprintln!("DMX ch {} = {}", self.address, val);
+                            rprintln!("DMX ch {} = {}", self.config.address(), val);
                             self.dmx_value.signal(val);
                         }
                     }
@@ -116,8 +113,8 @@ impl Listener {
                         "no universe for {} seconds, rejoining multicast group",
                         UNIVERSE_TIMEOUT
                     );
-                    self.stack.leave_multicast_group(self.multicast).ok();
-                    self.stack.join_multicast_group(self.multicast).ok();
+                    self.network_stack.leave_multicast_group(self.multicast).ok();
+                    self.network_stack.join_multicast_group(self.multicast).ok();
                 }
             }
         }
@@ -126,7 +123,7 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        self.stack.leave_multicast_group(self.multicast).ok();
+        self.network_stack.leave_multicast_group(self.multicast).ok();
         rprintln!("sACN listener destroyed");
     }
 }

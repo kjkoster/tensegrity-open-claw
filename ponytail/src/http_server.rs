@@ -14,18 +14,11 @@ use picoserve::{
 use rtt_target::rprintln;
 use static_cell::{ConstStaticCell, StaticCell};
 
-use crate::DmxConfig;
-
-pub struct WifiConfig {
-    pub ssid: String,
-    pub password: String,
-}
+use crate::models::{DmxConfig, WifiConfig};
 
 #[derive(Clone)]
 struct AppState {
-    dmx_address: &'static Mutex<CriticalSectionRawMutex, u16>,
-    universe: &'static Mutex<CriticalSectionRawMutex, u16>,
-    sacn_port: &'static Mutex<CriticalSectionRawMutex, u16>,
+    dmx_config: &'static Mutex<CriticalSectionRawMutex, DmxConfig>,
     ssid: String,
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
@@ -65,57 +58,50 @@ enum FormResult {
 }
 
 async fn handle_get(State(state): State<AppState>) -> Html {
-    let addr = *state.dmx_address.lock().await;
-    let uni = *state.universe.lock().await;
-    let port = *state.sacn_port.lock().await;
-    Html(build_html(addr, uni, port, &state.ssid, FormResult::None))
+    let config = *state.dmx_config.lock().await;
+    Html(build_html(config, &state.ssid, FormResult::None))
 }
 
 async fn handle_post(State(state): State<AppState>, Form(form): Form<ConfigForm>) -> Html {
     let result = process_form(&state, form).await;
-    let addr = *state.dmx_address.lock().await;
-    let uni = *state.universe.lock().await;
-    let port = *state.sacn_port.lock().await;
-    Html(build_html(addr, uni, port, &state.ssid, result))
+    let config = *state.dmx_config.lock().await;
+    Html(build_html(config, &state.ssid, result))
 }
 
 async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
     if form.dmx_address.is_some() || form.universe.is_some() || form.sacn_port.is_some() {
-        let valid_addr = form.dmx_address.filter(|&a| (1..=512).contains(&a));
-        let valid_uni = form.universe.filter(|&u| (1..=63999).contains(&u));
-        let valid_port = form.sacn_port.filter(|&p| p != 0);
-        match (valid_addr, valid_uni, valid_port) {
+        match (form.dmx_address, form.universe, form.sacn_port) {
             (Some(addr), Some(uni), Some(port)) => {
-                *state.dmx_address.lock().await = addr;
-                *state.universe.lock().await = uni;
-                *state.sacn_port.lock().await = port;
-                state.dmx_signal.signal(DmxConfig {
-                    address: addr,
-                    universe: uni,
-                    sacn_port: port,
-                });
-                rprintln!("DMX address={} universe={} sacn_port={}", addr, uni, port);
-                FormResult::DmxSaved
+                match DmxConfig::new(addr, uni, port) {
+                    Ok(config) => {
+                        *state.dmx_config.lock().await = config;
+                        rprintln!("DMX address={} universe={} sacn_port={}", addr, uni, port);
+                        state.dmx_signal.signal(config);
+                        FormResult::DmxSaved
+                    }
+                    Err(_) => FormResult::DmxError,
+                }
             }
             _ => FormResult::DmxError,
         }
     } else {
         match (form.ssid, form.password) {
-            (Some(s), Some(p)) if valid_ssid(&s) && valid_password(&p) => {
-                rprintln!("wifi credentials updated, ssid={}", s);
-                state.wifi_signal.signal(WifiConfig {
-                    ssid: s,
-                    password: p,
-                });
-                FormResult::WifiSaved
+            (Some(ssid), Some(password)) => {
+                match WifiConfig::new(ssid, password) {
+                    Ok(config) => {
+                        rprintln!("wifi credentials updated, ssid={}", config.ssid());
+                        state.wifi_signal.signal(config);
+                        FormResult::WifiSaved
+                    }
+                    Err(_) => FormResult::WifiError,
+                }
             }
-            (Some(_), Some(_)) => FormResult::WifiError,
             _ => FormResult::None,
         }
     }
 }
 
-fn build_html(dmx_address: u16, universe: u16, sacn_port: u16, ssid: &str, result: FormResult) -> String {
+fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
     let redirect = matches!(result, FormResult::DmxSaved | FormResult::WifiSaved);
     let dmx_msg = match result {
         FormResult::DmxSaved => r#"<p class="ok">DMX address, universe and sACN port saved.</p>"#,
@@ -155,15 +141,15 @@ fn build_html(dmx_address: u16, universe: u16, sacn_port: u16, ssid: &str, resul
     html.push_str(r#"<form method="POST" action="/">"#);
     html.push_str(r#"<label>Channel (1-512)"#);
     html.push_str(r#"<input type="number" name="dmx_address" min="1" max="512" value=""#);
-    push_u16(&mut html, dmx_address);
+    push_u16(&mut html, dmx_config.address());
     html.push_str(r#""></label>"#);
     html.push_str(r#"<label>sACN Universe (1-63999)"#);
     html.push_str(r#"<input type="number" name="universe" min="1" max="63999" value=""#);
-    push_u16(&mut html, universe);
+    push_u16(&mut html, dmx_config.universe());
     html.push_str(r#""></label>"#);
     html.push_str(r#"<label>sACN port (1-65535)"#);
     html.push_str(r#"<input type="number" name="sacn_port" min="1" max="65535" value=""#);
-    push_u16(&mut html, sacn_port);
+    push_u16(&mut html, dmx_config.sacn_port());
     html.push_str(r#""></label>"#);
     html.push_str(r#"<input type="submit" value="save"></form>"#);
     html.push_str("<h2>Wireless Network</h2>");
@@ -205,43 +191,28 @@ fn push_u16(s: &mut String, val: u16) {
     s.push_str(core::str::from_utf8(&buf[i..]).unwrap());
 }
 
-fn valid_ssid(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 32 && !s.bytes().any(|b| b == 0)
-}
-
-fn valid_password(s: &str) -> bool {
-    s.len() >= 8 && s.len() <= 64 && !s.bytes().any(|b| b == 0)
-}
-
 static HTTP_RX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_TX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_BUF: ConstStaticCell<[u8; 2048]> = ConstStaticCell::new([0; 2048]);
-static DMX_ADDR: StaticCell<Mutex<CriticalSectionRawMutex, u16>> = StaticCell::new();
-static UNIVERSE: StaticCell<Mutex<CriticalSectionRawMutex, u16>> = StaticCell::new();
-static SACN_PORT: StaticCell<Mutex<CriticalSectionRawMutex, u16>> = StaticCell::new();
+static DMX_CONFIG: StaticCell<Mutex<CriticalSectionRawMutex, DmxConfig>> = StaticCell::new();
 
 pub fn spawn(
     spawner: Spawner,
-    stack: Stack<'static>,
-    dmx_address: u16,
-    universe: u16,
-    sacn_port: u16,
-    ssid: String,
+    network_stack: Stack<'static>,
+    dmx_config: DmxConfig,
+    wifi_config: &WifiConfig,
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) {
-    let dmx_mutex = DMX_ADDR.init(Mutex::new(dmx_address));
-    let uni_mutex = UNIVERSE.init(Mutex::new(universe));
-    let port_mutex = SACN_PORT.init(Mutex::new(sacn_port));
+    let dmx_mutex = DMX_CONFIG.init(Mutex::new(dmx_config));
+    let ssid = wifi_config.ssid().into();
     spawner.spawn(
         task(
-            stack,
+            network_stack,
             HTTP_RX.take(),
             HTTP_TX.take(),
             HTTP_BUF.take(),
             dmx_mutex,
-            uni_mutex,
-            port_mutex,
             ssid,
             dmx_signal,
             wifi_signal,
@@ -252,21 +223,17 @@ pub fn spawn(
 
 #[embassy_executor::task]
 async fn task(
-    stack: Stack<'static>,
+    network_stack: Stack<'static>,
     rx_buf: &'static mut [u8; 1024],
     tx_buf: &'static mut [u8; 1024],
     http_buf: &'static mut [u8; 2048],
-    dmx_address: &'static Mutex<CriticalSectionRawMutex, u16>,
-    universe: &'static Mutex<CriticalSectionRawMutex, u16>,
-    sacn_port: &'static Mutex<CriticalSectionRawMutex, u16>,
+    dmx_config: &'static Mutex<CriticalSectionRawMutex, DmxConfig>,
     ssid: String,
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let state = AppState {
-        dmx_address,
-        universe,
-        sacn_port,
+        dmx_config,
         ssid,
         dmx_signal,
         wifi_signal,
@@ -281,7 +248,7 @@ async fn task(
         write: Duration::from_secs(5),
     });
     Server::new(&app, &config, http_buf)
-        .listen_and_serve(0u8, stack, 80, rx_buf, tx_buf)
+        .listen_and_serve(0u8, network_stack, 80, rx_buf, tx_buf)
         .await
         .into_never()
 }

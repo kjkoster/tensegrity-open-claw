@@ -8,6 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 mod http_server;
+mod models;
 mod sacn;
 mod storage;
 mod wifi;
@@ -28,6 +29,7 @@ use esp_hal::ledc::{
 };
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use models::{DmxConfig, WifiConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
@@ -43,51 +45,27 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-pub struct DmxConfig {
-    pub address: u16,
-    pub universe: u16,
-    pub sacn_port: u16,
-}
-
 static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
-static WIFI_SAVE: Signal<CriticalSectionRawMutex, http_server::WifiConfig> = Signal::new();
+static WIFI_SAVE: Signal<CriticalSectionRawMutex, WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
 async fn persist_dmx_config(
     storage: &'static storage::Storage,
     dmx_save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
-    stack: Stack<'static>,
+    network_stack: Stack<'static>,
 ) -> ! {
-    let mut listener = sacn::Listener::new(
-        stack,
-        storage.read_dmx_base_address(),
-        storage.read_universe(),
-        storage.read_sacn_port(),
-        &DMX_VALUE,
-    );
+    let mut listener = sacn::Listener::new(network_stack, storage.read_dmx_config(), &DMX_VALUE);
     loop {
         match select(listener.run(), dmx_save_signal.wait()).await {
             Either::First(never) => match never {},
             Either::Second(config) => {
-                if let Err(e) = storage.write_dmx_base_address(config.address) {
-                    rprintln!("storage write failed: {:?}", e);
-                }
-                if let Err(e) = storage.write_universe(config.universe) {
-                    rprintln!("storage write failed: {:?}", e);
-                }
-                if let Err(e) = storage.write_sacn_port(config.sacn_port) {
+                if let Err(e) = storage.write_dmx_config(config) {
                     rprintln!("storage write failed: {:?}", e);
                 }
                 drop(listener);
-                listener = sacn::Listener::new(
-                    stack,
-                    config.address,
-                    config.universe,
-                    config.sacn_port,
-                    &DMX_VALUE,
-                );
+                listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
             }
         }
     }
@@ -96,11 +74,10 @@ async fn persist_dmx_config(
 #[embassy_executor::task]
 async fn persist_wifi_config(
     storage: &'static storage::Storage,
-    wifi_save_signal: &'static Signal<CriticalSectionRawMutex, http_server::WifiConfig>,
+    wifi_save_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let config = wifi_save_signal.wait().await;
-    storage.write_ssid(&config.ssid).ok();
-    storage.write_password(&config.password).ok();
+    storage.write_wifi_config(&config).ok();
     // Brief pause so the HTTP response finishes sending before we reset.
     Timer::after(Duration::from_millis(500)).await;
     esp_hal::system::software_reset()
@@ -139,30 +116,21 @@ async fn main(spawner: Spawner) -> ! {
 
     rprintln!("Embassy initialized!");
 
+    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
+
     let rng = esp_hal::rng::Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
+    let wifi_config = storage.read_wifi_config();
+    let network_stack = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
 
-    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
+    spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, network_stack).unwrap());
     spawner.spawn(persist_wifi_config(storage, &WIFI_SAVE).unwrap());
-
-    let stack = wifi::connect(
-        spawner,
-        peripherals.WIFI,
-        seed,
-        storage.read_ssid(),
-        storage.read_password(),
-    )
-    .await;
-
-    spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, stack).unwrap());
 
     http_server::spawn(
         spawner,
-        stack,
-        storage.read_dmx_base_address(),
-        storage.read_universe(),
-        storage.read_sacn_port(),
-        storage.read_ssid(),
+        network_stack,
+        storage.read_dmx_config(),
+        &wifi_config,
         &DMX_SAVE,
         &WIFI_SAVE,
     );

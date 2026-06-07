@@ -1,11 +1,12 @@
 extern crate alloc;
 
-use alloc::string::String;
 use core::cell::RefCell;
 use critical_section::Mutex;
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use esp_hal::peripherals::FLASH;
 use esp_storage::{FlashStorage, FlashStorageError};
+
+use crate::models::{DmxConfig, WifiConfig};
 
 // Flash layout — first sector of the NVS partition (default IDF layout).
 // This project does not use IDF NVS, so the full 4 KiB sector is available
@@ -120,96 +121,48 @@ impl Storage {
         }
     }
 
-    pub fn read_dmx_base_address(&self) -> u16 {
-        critical_section::with(|cs| self.settings.borrow(cs).borrow().dmx_base_address)
-    }
-
-    pub fn read_universe(&self) -> u16 {
-        critical_section::with(|cs| self.settings.borrow(cs).borrow().universe)
-    }
-
-    pub fn read_sacn_port(&self) -> u16 {
-        critical_section::with(|cs| self.settings.borrow(cs).borrow().sacn_port)
-    }
-
-    pub fn read_ssid(&self) -> String {
+    pub fn read_dmx_config(&self) -> DmxConfig {
         critical_section::with(|cs| {
             let s = self.settings.borrow(cs).borrow();
-            let len = s.ssid_len as usize;
-            core::str::from_utf8(&s.ssid[..len])
+            DmxConfig::new(s.dmx_base_address, s.universe, s.sacn_port)
+                .expect("stored dmx config was corrupted")
+        })
+    }
+
+    pub fn read_wifi_config(&self) -> WifiConfig {
+        critical_section::with(|cs| {
+            let s = self.settings.borrow(cs).borrow();
+            let ssid_len = s.ssid_len as usize;
+            let pwd_len = s.password_len as usize;
+            let ssid = core::str::from_utf8(&s.ssid[..ssid_len])
                 .unwrap_or(DEFAULT_SSID)
-                .into()
-        })
-    }
-
-    pub fn read_password(&self) -> String {
-        critical_section::with(|cs| {
-            let s = self.settings.borrow(cs).borrow();
-            let len = s.password_len as usize;
-            core::str::from_utf8(&s.password[..len])
+                .into();
+            let password = core::str::from_utf8(&s.password[..pwd_len])
                 .unwrap_or(DEFAULT_PASSWORD)
-                .into()
+                .into();
+            WifiConfig::new(ssid, password).expect("stored wifi config was corrupted")
         })
     }
 
-    pub fn write_dmx_base_address(&self, addr: u16) -> Result<(), FlashStorageError> {
-        if !(1..=512).contains(&addr) {
-            return Err(FlashStorageError::OutOfBounds);
-        }
+    pub fn write_dmx_config(&self, config: DmxConfig) -> Result<(), FlashStorageError> {
         critical_section::with(|cs| {
-            self.settings.borrow(cs).borrow_mut().dmx_base_address = addr;
+            let mut s = self.settings.borrow(cs).borrow_mut();
+            s.dmx_base_address = config.address();
+            s.universe = config.universe();
+            s.sacn_port = config.sacn_port();
         });
         self.flush()
     }
 
-    pub fn write_ssid(&self, ssid: &str) -> Result<(), FlashStorageError> {
-        if ssid.is_empty() || ssid.len() > SSID_MAX {
-            return Err(FlashStorageError::OutOfBounds);
-        }
-        if ssid.bytes().any(|b| b == 0) {
-            return Err(FlashStorageError::OutOfBounds);
-        }
+    pub fn write_wifi_config(&self, config: &WifiConfig) -> Result<(), FlashStorageError> {
         critical_section::with(|cs| {
             let mut s = self.settings.borrow(cs).borrow_mut();
+            let ssid = config.ssid();
+            let password = config.password();
             s.ssid_len = ssid.len() as u8;
             s.ssid[..ssid.len()].copy_from_slice(ssid.as_bytes());
-        });
-        self.flush()
-    }
-
-    pub fn write_password(&self, password: &str) -> Result<(), FlashStorageError> {
-        // WPA2-PSK requires 8–63 ASCII characters; 64-byte form is a raw PMK hex string.
-        if password.len() < 8 || password.len() > PASSWORD_MAX {
-            return Err(FlashStorageError::OutOfBounds);
-        }
-        if password.bytes().any(|b| b == 0) {
-            return Err(FlashStorageError::OutOfBounds);
-        }
-        critical_section::with(|cs| {
-            let mut s = self.settings.borrow(cs).borrow_mut();
             s.password_len = password.len() as u8;
             s.password[..password.len()].copy_from_slice(password.as_bytes());
-        });
-        self.flush()
-    }
-
-    pub fn write_sacn_port(&self, port: u16) -> Result<(), FlashStorageError> {
-        if port == 0 {
-            return Err(FlashStorageError::OutOfBounds);
-        }
-        critical_section::with(|cs| {
-            self.settings.borrow(cs).borrow_mut().sacn_port = port;
-        });
-        self.flush()
-    }
-
-    pub fn write_universe(&self, universe: u16) -> Result<(), FlashStorageError> {
-        // E1.31 §9.1.1: universe 0 and 64000–65535 are reserved; valid range is 1–63999.
-        if !(1..=63999).contains(&universe) {
-            return Err(FlashStorageError::OutOfBounds);
-        }
-        critical_section::with(|cs| {
-            self.settings.borrow(cs).borrow_mut().universe = universe;
         });
         self.flush()
     }
