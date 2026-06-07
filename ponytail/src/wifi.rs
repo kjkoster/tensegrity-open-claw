@@ -1,9 +1,9 @@
-use alloc::boxed::Box;
 use alloc::string::String;
 use embassy_executor::Spawner;
 use embassy_net::{Runner, Stack, StackResources};
+use embassy_time::{Duration, Timer};
 use esp_hal::peripherals::WIFI;
-use esp_radio::wifi::{Interface, sta::StationConfig};
+use esp_radio::wifi::{Interface, WifiController, sta::StationConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
@@ -14,6 +14,30 @@ static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, Interface<'static>>) -> ! {
     runner.run().await
+}
+
+#[embassy_executor::task]
+async fn wifi_supervision_task(
+    mut controller: WifiController<'static>,
+    wifi_config: WifiConfig,
+) -> ! {
+    loop {
+        while controller.is_connected() {
+            Timer::after(Duration::from_secs(1)).await;
+        }
+
+        rprintln!("wifi disconnected, reconnecting to {}...", wifi_config.ssid());
+        loop {
+            match controller.connect_async().await {
+                Ok(_) => break,
+                Err(e) => {
+                    rprintln!("wifi reconnect failed ({:?}), retrying...", e);
+                    Timer::after(Duration::from_secs(1)).await;
+                }
+            }
+        }
+        rprintln!("wifi reconnected");
+    }
 }
 
 pub async fn connect(
@@ -42,8 +66,13 @@ pub async fn connect(
         ))
         .unwrap();
 
-    rprintln!("connecting to {}...", wifi_config.ssid());
-    controller.connect_async().await.unwrap();
+    loop {
+        rprintln!("connecting to {}...", wifi_config.ssid());
+        match controller.connect_async().await {
+            Ok(_) => break,
+            Err(e) => rprintln!("wifi connection failed ({:?}), retrying...", e),
+        }
+    }
     rprintln!("wifi connected, waiting for dhcp...");
     network_stack.wait_config_up().await;
 
@@ -56,10 +85,7 @@ pub async fn connect(
         }
     }
 
-    // Leak the controller so it is never dropped — dropping it disconnects Wi-Fi.
-    // Box::leak is intentional here: firmware runs forever and this is a one-time
-    // allocation that must outlive everything else.
-    Box::leak(Box::new(controller));
+    spawner.spawn(wifi_supervision_task(controller, wifi_config.clone()).unwrap());
 
     network_stack
 }
