@@ -1,5 +1,4 @@
-use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
+use core::cell::UnsafeCell;
 use embassy_net::{
     Ipv4Address, Stack,
     udp::{PacketMetadata, UdpSocket},
@@ -7,118 +6,128 @@ use embassy_net::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, with_timeout};
 use rtt_target::rprintln;
-use static_cell::StaticCell;
 
-use crate::DmxConfig;
-
-const SACN_PORT: u16 = 5568;
 const UNIVERSE_TIMEOUT: u64 = 30; // seconds
 
 // ACN Packet Identifier at bytes 4..16 of every E1.31 packet.
 const ACN_ID: &[u8; 12] = b"ASC-E1.17\0\0\0";
 
-// A full universe is 126 bytes of header + 512 slots = 638 bytes.
-// Senders may send partial universes, so we size for the maximum.
-static RX_META: StaticCell<[PacketMetadata; 4]> = StaticCell::new();
-static RX_DATA: StaticCell<[u8; 638]> = StaticCell::new();
-static TX_META: StaticCell<[PacketMetadata; 1]> = StaticCell::new();
-static TX_DATA: StaticCell<[u8; 64]> = StaticCell::new();
+// Socket ring-buffer storage. Lives 'static so UdpSocket<'static> can borrow it.
+// Only one Listener exists at a time; main enforces this by dropping the old one
+// before creating a new one.
+struct SacnBufs {
+    rx_meta: UnsafeCell<[PacketMetadata; 4]>,
+    rx_data: UnsafeCell<[u8; 638]>,
+    tx_meta: UnsafeCell<[PacketMetadata; 1]>,
+    tx_data: UnsafeCell<[u8; 64]>,
+}
+// SAFETY: single-task access guaranteed by the one-Listener-at-a-time invariant.
+unsafe impl Sync for SacnBufs {}
 
-pub fn spawn(
-    spawner: Spawner,
+static BUFS: SacnBufs = SacnBufs {
+    rx_meta: UnsafeCell::new([PacketMetadata::EMPTY; 4]),
+    rx_data: UnsafeCell::new([0u8; 638]),
+    tx_meta: UnsafeCell::new([PacketMetadata::EMPTY; 1]),
+    tx_data: UnsafeCell::new([0u8; 64]),
+};
+
+pub(crate) struct Listener {
+    socket: UdpSocket<'static>,
     stack: Stack<'static>,
     address: u16,
     universe: u16,
-    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
-    value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
-) {
-    spawner.spawn(task(stack, address, universe, config_signal, value_signal).unwrap());
+    multicast: Ipv4Address,
+    last_value: Option<u8>,
+    dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
 }
 
-/// Listens for sACN (E1.31) packets on UDP 5568, reads the DMX slot at
-/// `address` from each packet for the configured `universe`, signals and
-/// prints the value via RTT whenever it changes. Rejoins the correct
-/// multicast group whenever a new `DmxConfig` arrives on `config_signal`.
-#[embassy_executor::task]
-async fn task(
-    stack: Stack<'static>,
-    address: u16,
-    universe: u16,
-    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
-    value_signal: &'static Signal<CriticalSectionRawMutex, u8>,
-) -> ! {
-    let mut address = address;
-    let mut universe = universe;
+impl Listener {
+    pub(crate) fn new(
+        stack: Stack<'static>,
+        address: u16,
+        universe: u16,
+        port: u16,
+        dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
+    ) -> Self {
+        let multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
+        stack.join_multicast_group(multicast).ok();
 
-    // sACN multicast address: 239.255.(universe_hi).(universe_lo)
-    let mut multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
-    stack.join_multicast_group(multicast).ok();
-    rprintln!(
-        "sACN listening: address={} universe={} multicast=239.255.{}.{}:{}",
-        address,
-        universe,
-        (universe >> 8) as u8,
-        universe as u8,
-        SACN_PORT
-    );
-
-    let mut socket = UdpSocket::new(
-        stack,
-        RX_META.init([PacketMetadata::EMPTY; 4]),
-        RX_DATA.init([0; 638]),
-        TX_META.init([PacketMetadata::EMPTY; 1]),
-        TX_DATA.init([0; 64]),
-    );
-    socket.bind(SACN_PORT).ok();
-
-    let mut last_value: Option<u8> = None;
-    let mut pkt_buf = [0u8; 638];
-
-    loop {
-        let recv_fut = socket.recv_from(&mut pkt_buf);
-
-        let n = match select(
-            with_timeout(Duration::from_secs(UNIVERSE_TIMEOUT), recv_fut),
-            config_signal.wait(),
-        )
-        .await
-        {
-            Either::First(Ok(Ok((n, _)))) => n, // Packet received successfully
-            Either::First(Ok(Err(_))) => continue, // Socket error, try again
-            Either::First(Err(_)) => {
-                rprintln!(
-                    "did not see a universe for {} seconds, rejoining multicast group",
-                    UNIVERSE_TIMEOUT
-                );
-                stack.leave_multicast_group(multicast).ok();
-                stack.join_multicast_group(multicast).ok();
-                continue;
-            }
-            Either::Second(new_config) => {
-                stack.leave_multicast_group(multicast).ok();
-                address = new_config.address;
-                universe = new_config.universe;
-                multicast = Ipv4Address::new(239, 255, (universe >> 8) as u8, universe as u8);
-                stack.join_multicast_group(multicast).ok();
-                rprintln!(
-                    "sACN reconfigured: address={} universe={} multicast=239.255.{}.{}:{}",
-                    address,
-                    universe,
-                    (universe >> 8) as u8,
-                    universe as u8,
-                    SACN_PORT
-                );
-                continue;
-            }
+        // SAFETY: only one Listener exists at a time; main drops the previous
+        // Listener before calling new(), so these buffers have no live borrowers.
+        let mut socket = unsafe {
+            UdpSocket::new(
+                stack,
+                &mut *BUFS.rx_meta.get(),
+                &mut *BUFS.rx_data.get(),
+                &mut *BUFS.tx_meta.get(),
+                &mut *BUFS.tx_data.get(),
+            )
         };
-        let Some(val) = parse_e131_slot(&pkt_buf[..n], universe, address) else {
-            continue;
-        };
-        if Some(val) != last_value {
-            last_value = Some(val);
-            value_signal.signal(val);
-            rprintln!("DMX ch {} = {}", address, val);
+        socket.bind(port).ok();
+
+        rprintln!(
+            "sACN listener: address={} universe={} multicast=239.255.{}.{}:{}",
+            address,
+            universe,
+            (universe >> 8) as u8,
+            universe as u8,
+            port
+        );
+
+        Self {
+            socket,
+            stack,
+            address,
+            universe,
+            multicast,
+            last_value: None,
+            dmx_value,
         }
+    }
+
+    /// Runs forever, signaling `dmx_value` whenever the DMX value at the
+    /// configured address changes. Handles packet timeouts by rejoining the
+    /// multicast group internally.
+    #[allow(
+        clippy::large_stack_frames,
+        reason = "pkt_buf (638 bytes) must be held across the recv_from await"
+    )]
+    pub(crate) async fn run(&mut self) -> ! {
+        let mut pkt_buf = [0u8; 638];
+        loop {
+            match with_timeout(
+                Duration::from_secs(UNIVERSE_TIMEOUT),
+                self.socket.recv_from(&mut pkt_buf),
+            )
+            .await
+            {
+                Ok(Ok((n, _))) => {
+                    if let Some(val) = parse_e131_slot(&pkt_buf[..n], self.universe, self.address) {
+                        if Some(val) != self.last_value {
+                            self.last_value = Some(val);
+                            rprintln!("DMX ch {} = {}", self.address, val);
+                            self.dmx_value.signal(val);
+                        }
+                    }
+                }
+                Ok(Err(_)) => {}
+                Err(_) => {
+                    rprintln!(
+                        "no universe for {} seconds, rejoining multicast group",
+                        UNIVERSE_TIMEOUT
+                    );
+                    self.stack.leave_multicast_group(self.multicast).ok();
+                    self.stack.join_multicast_group(self.multicast).ok();
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        self.stack.leave_multicast_group(self.multicast).ok();
+        rprintln!("sACN listener destroyed");
     }
 }
 

@@ -11,25 +11,26 @@ use esp_storage::{FlashStorage, FlashStorageError};
 // This project does not use IDF NVS, so the full 4 KiB sector is available
 // as raw storage.
 //
-//   [0..4]    magic = b"DMX2"
+//   [0..4]    magic = b"DMX3"
 //   [4..6]    dmx_base_address  (u16 LE)
 //   [6]       ssid_len          (u8, 0..=32)
 //   [7..39]   ssid              (32 bytes, zero-padded)
 //   [39]      password_len      (u8, 0..=64)
 //   [40..104] password          (64 bytes, zero-padded)
 //   [104..106] universe         (u16 LE, 1..=63999)
-//   [106..108] padding
+//   [106..108] sacn_port        (u16 LE, 1..=65535)
 //
 // Total 108 bytes — a multiple of WORD_SIZE (4), so reads and writes are
 // always aligned.
 const BASE: u32 = 0x9000;
-const MAGIC: [u8; 4] = *b"DMX2";
+const MAGIC: [u8; 4] = *b"DMX3";
 const SSID_MAX: usize = 32;
 const PASSWORD_MAX: usize = 64;
 const RECORD_SIZE: usize = 108;
 
 const DEFAULT_DMX_BASE_ADDRESS: u16 = 333;
 const DEFAULT_UNIVERSE: u16 = 1;
+const DEFAULT_SACN_PORT: u16 = 5568;
 const DEFAULT_SSID: &str = "radiowaves";
 const DEFAULT_PASSWORD: &str = "IkWilInternetten!!";
 
@@ -51,6 +52,7 @@ const PWD_INIT: ([u8; PASSWORD_MAX], u8) = str_to_fixed(DEFAULT_PASSWORD);
 struct Settings {
     dmx_base_address: u16,
     universe: u16,
+    sacn_port: u16,
     ssid: [u8; SSID_MAX],
     ssid_len: u8,
     password: [u8; PASSWORD_MAX],
@@ -62,6 +64,7 @@ impl Default for Settings {
         Self {
             dmx_base_address: DEFAULT_DMX_BASE_ADDRESS,
             universe: DEFAULT_UNIVERSE,
+            sacn_port: DEFAULT_SACN_PORT,
             ssid: SSID_INIT.0,
             ssid_len: SSID_INIT.1,
             password: PWD_INIT.0,
@@ -93,14 +96,17 @@ impl Storage {
             let ssid_len = rec.0[6] as usize;
             let pwd_len = rec.0[39] as usize;
             let universe = u16::from_le_bytes([rec.0[104], rec.0[105]]);
+            let sacn_port = u16::from_le_bytes([rec.0[106], rec.0[107]]);
 
             if (1..=512).contains(&dmx)
                 && ssid_len <= SSID_MAX
                 && pwd_len <= PASSWORD_MAX
                 && (1..=63999).contains(&universe)
+                && sacn_port != 0
             {
                 settings.dmx_base_address = dmx;
                 settings.universe = universe;
+                settings.sacn_port = sacn_port;
                 settings.ssid_len = ssid_len as u8;
                 settings.ssid[..ssid_len].copy_from_slice(&rec.0[7..7 + ssid_len]);
                 settings.password_len = pwd_len as u8;
@@ -120,6 +126,10 @@ impl Storage {
 
     pub fn read_universe(&self) -> u16 {
         critical_section::with(|cs| self.settings.borrow(cs).borrow().universe)
+    }
+
+    pub fn read_sacn_port(&self) -> u16 {
+        critical_section::with(|cs| self.settings.borrow(cs).borrow().sacn_port)
     }
 
     pub fn read_ssid(&self) -> String {
@@ -183,6 +193,16 @@ impl Storage {
         self.flush()
     }
 
+    pub fn write_sacn_port(&self, port: u16) -> Result<(), FlashStorageError> {
+        if port == 0 {
+            return Err(FlashStorageError::OutOfBounds);
+        }
+        critical_section::with(|cs| {
+            self.settings.borrow(cs).borrow_mut().sacn_port = port;
+        });
+        self.flush()
+    }
+
     pub fn write_universe(&self, universe: u16) -> Result<(), FlashStorageError> {
         // E1.31 §9.1.1: universe 0 and 64000–65535 are reserved; valid range is 1–63999.
         if !(1..=63999).contains(&universe) {
@@ -208,6 +228,7 @@ impl Storage {
             rec.0[39] = s.password_len;
             rec.0[40..40 + pwd_len].copy_from_slice(&s.password[..pwd_len]);
             rec.0[104..106].copy_from_slice(&s.universe.to_le_bytes());
+            rec.0[106..108].copy_from_slice(&s.sacn_port.to_le_bytes());
         });
 
         // Take storage out so the erase/write (~40 ms) runs outside any critical

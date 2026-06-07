@@ -13,6 +13,8 @@ mod storage;
 mod wifi;
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
+use embassy_net::Stack;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
@@ -44,41 +46,59 @@ esp_bootloader_esp_idf::esp_app_desc!();
 pub struct DmxConfig {
     pub address: u16,
     pub universe: u16,
+    pub sacn_port: u16,
 }
 
 static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
-static DMX_CONFIG: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
 static WIFI_SAVE: Signal<CriticalSectionRawMutex, http_server::WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
-async fn dmx_change_task(
+async fn persist_dmx_config(
     storage: &'static storage::Storage,
-    save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
-    config_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
+    dmx_save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
+    stack: Stack<'static>,
 ) -> ! {
+    let mut listener = sacn::Listener::new(
+        stack,
+        storage.read_dmx_base_address(),
+        storage.read_universe(),
+        storage.read_sacn_port(),
+        &DMX_VALUE,
+    );
     loop {
-        let config = save_signal.wait().await;
-        if let Err(e) = storage.write_dmx_base_address(config.address) {
-            rprintln!("storage write failed: {:?}", e);
+        match select(listener.run(), dmx_save_signal.wait()).await {
+            Either::First(never) => match never {},
+            Either::Second(config) => {
+                if let Err(e) = storage.write_dmx_base_address(config.address) {
+                    rprintln!("storage write failed: {:?}", e);
+                }
+                if let Err(e) = storage.write_universe(config.universe) {
+                    rprintln!("storage write failed: {:?}", e);
+                }
+                if let Err(e) = storage.write_sacn_port(config.sacn_port) {
+                    rprintln!("storage write failed: {:?}", e);
+                }
+                drop(listener);
+                listener = sacn::Listener::new(
+                    stack,
+                    config.address,
+                    config.universe,
+                    config.sacn_port,
+                    &DMX_VALUE,
+                );
+            }
         }
-        if let Err(e) = storage.write_universe(config.universe) {
-            rprintln!("storage write failed: {:?}", e);
-        }
-        config_signal.signal(DmxConfig {
-            address: config.address,
-            universe: config.universe,
-        });
     }
 }
 
 #[embassy_executor::task]
-async fn persist_wifi_task(
+async fn persist_wifi_config(
     storage: &'static storage::Storage,
-    wifi_signal: &'static Signal<CriticalSectionRawMutex, http_server::WifiConfig>,
+    wifi_save_signal: &'static Signal<CriticalSectionRawMutex, http_server::WifiConfig>,
 ) -> ! {
-    let config = wifi_signal.wait().await;
+    let config = wifi_save_signal.wait().await;
     storage.write_ssid(&config.ssid).ok();
     storage.write_password(&config.password).ok();
     // Brief pause so the HTTP response finishes sending before we reset.
@@ -123,8 +143,7 @@ async fn main(spawner: Spawner) -> ! {
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
 
     let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
-    spawner.spawn(dmx_change_task(storage, &DMX_SAVE, &DMX_CONFIG).unwrap());
-    spawner.spawn(persist_wifi_task(storage, &WIFI_SAVE).unwrap());
+    spawner.spawn(persist_wifi_config(storage, &WIFI_SAVE).unwrap());
 
     let stack = wifi::connect(
         spawner,
@@ -135,22 +154,17 @@ async fn main(spawner: Spawner) -> ! {
     )
     .await;
 
+    spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, stack).unwrap());
+
     http_server::spawn(
         spawner,
         stack,
         storage.read_dmx_base_address(),
         storage.read_universe(),
+        storage.read_sacn_port(),
         storage.read_ssid(),
         &DMX_SAVE,
         &WIFI_SAVE,
-    );
-    sacn::spawn(
-        spawner,
-        stack,
-        storage.read_dmx_base_address(),
-        storage.read_universe(),
-        &DMX_CONFIG,
-        &DMX_VALUE,
     );
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
