@@ -2,15 +2,11 @@ extern crate alloc;
 
 use core::cell::RefCell;
 use critical_section::Mutex;
-use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
-use esp_hal::peripherals::FLASH;
-use esp_storage::{FlashStorage, FlashStorageError};
+use embedded_storage::nor_flash::NorFlash;
 
 use crate::models::{DmxConfig, WifiConfig};
 
-// Flash layout — first sector of the NVS partition (default IDF layout).
-// This project does not use IDF NVS, so the full 4 KiB sector is available
-// as raw storage.
+// Flash layout — first sector of the configured flash partition.
 //
 //   [0..4]    magic = b"DMX3"
 //   [4..6]    dmx_base_address  (u16 LE)
@@ -23,7 +19,6 @@ use crate::models::{DmxConfig, WifiConfig};
 //
 // Total 108 bytes — a multiple of WORD_SIZE (4), so reads and writes are
 // always aligned.
-const BASE: u32 = 0x9000;
 const MAGIC: [u8; 4] = *b"DMX3";
 const SSID_MAX: usize = 32;
 const PASSWORD_MAX: usize = 64;
@@ -78,21 +73,21 @@ impl Default for Settings {
 #[repr(C, align(4))]
 struct AlignedRecord([u8; RECORD_SIZE]);
 
-pub struct Storage {
+pub struct Storage<F: NorFlash> {
     settings: Mutex<RefCell<Settings>>,
-    flash: Mutex<RefCell<Option<FlashStorage<'static>>>>,
+    flash: Mutex<RefCell<Option<F>>>,
+    base: u32,
 }
 
-impl Storage {
+impl<F: NorFlash> Storage<F> {
     /// Load persisted settings from flash, falling back to compiled-in
     /// defaults when no valid record is found (first boot or erased flash).
     #[allow(clippy::large_stack_frames)] // called once at boot; Clippy over-counts inlined Mutex/RefCell temporaries
-    pub fn new(flash: FLASH<'static>) -> Self {
-        let mut fs = FlashStorage::new(flash);
+    pub fn new(mut flash: F, base: u32) -> Self {
         let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
         let mut settings = Settings::default();
 
-        if fs.read(BASE, &mut rec.0).is_ok() && rec.0[..4] == MAGIC {
+        if flash.read(base, &mut rec.0).is_ok() && rec.0[..4] == MAGIC {
             let dmx = u16::from_le_bytes([rec.0[4], rec.0[5]]);
             let ssid_len = rec.0[6] as usize;
             let pwd_len = rec.0[39] as usize;
@@ -117,7 +112,8 @@ impl Storage {
 
         Self {
             settings: Mutex::new(RefCell::new(settings)),
-            flash: Mutex::new(RefCell::new(Some(fs))),
+            flash: Mutex::new(RefCell::new(Some(flash))),
+            base,
         }
     }
 
@@ -144,7 +140,7 @@ impl Storage {
         })
     }
 
-    pub fn write_dmx_config(&self, config: DmxConfig) -> Result<(), FlashStorageError> {
+    pub fn write_dmx_config(&self, config: DmxConfig) -> Result<(), F::Error> {
         critical_section::with(|cs| {
             let mut s = self.settings.borrow(cs).borrow_mut();
             s.dmx_base_address = config.address();
@@ -154,7 +150,7 @@ impl Storage {
         self.flush()
     }
 
-    pub fn write_wifi_config(&self, config: &WifiConfig) -> Result<(), FlashStorageError> {
+    pub fn write_wifi_config(&self, config: &WifiConfig) -> Result<(), F::Error> {
         critical_section::with(|cs| {
             let mut s = self.settings.borrow(cs).borrow_mut();
             let ssid = config.ssid();
@@ -167,7 +163,7 @@ impl Storage {
         self.flush()
     }
 
-    fn flush(&self) -> Result<(), FlashStorageError> {
+    fn flush(&self) -> Result<(), F::Error> {
         let mut rec = AlignedRecord([0xFF; RECORD_SIZE]);
 
         critical_section::with(|cs| {
@@ -189,8 +185,8 @@ impl Storage {
         let mut opt = critical_section::with(|cs| self.flash.borrow(cs).borrow_mut().take());
 
         let result = if let Some(fs) = opt.as_mut() {
-            fs.erase(BASE, BASE + FlashStorage::SECTOR_SIZE)
-                .and_then(|_| fs.write(BASE, &rec.0))
+            fs.erase(self.base, self.base + F::ERASE_SIZE as u32)
+                .and_then(|_| fs.write(self.base, &rec.0))
         } else {
             Ok(())
         };

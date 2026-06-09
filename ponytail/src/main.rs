@@ -8,6 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 mod http_server;
+mod led_fixture;
 mod models;
 mod sacn;
 mod storage;
@@ -20,7 +21,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::DriveMode;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::ledc::{
     LSGlobalClkSource, Ledc, LowSpeed,
@@ -29,6 +29,7 @@ use esp_hal::ledc::{
 };
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use esp_storage::FlashStorage;
 use models::{DmxConfig, WifiConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
@@ -45,14 +46,14 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static STORAGE: StaticCell<storage::Storage> = StaticCell::new();
+static STORAGE: StaticCell<storage::Storage<FlashStorage<'static>>> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
 static WIFI_SAVE: Signal<CriticalSectionRawMutex, WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
 async fn persist_dmx_config(
-    storage: &'static storage::Storage,
+    storage: &'static storage::Storage<FlashStorage<'static>>,
     dmx_save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     network_stack: Stack<'static>,
 ) -> ! {
@@ -73,7 +74,7 @@ async fn persist_dmx_config(
 
 #[embassy_executor::task]
 async fn persist_wifi_config(
-    storage: &'static storage::Storage,
+    storage: &'static storage::Storage<FlashStorage<'static>>,
     wifi_save_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let config = wifi_save_signal.wait().await;
@@ -116,7 +117,7 @@ async fn main(spawner: Spawner) -> ! {
 
     rprintln!("Embassy initialized!");
 
-    let storage = STORAGE.init(storage::Storage::new(peripherals.FLASH));
+    let storage = STORAGE.init(storage::Storage::new(FlashStorage::new(peripherals.FLASH), 0x9000));
 
     let rng = esp_hal::rng::Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
@@ -136,8 +137,6 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
-    // LEDC duty 0% = GPIO low = LED on; duty 100% = GPIO high = LED off.
-    // Invert DMX value: 0 → 100% duty (off), 255 → 0% duty (full brightness).
     let mut ledc = Ledc::new(peripherals.LEDC);
     ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
 
@@ -155,13 +154,9 @@ async fn main(spawner: Spawner) -> ! {
         .configure(channel::config::Config {
             timer: &lstimer,
             duty_pct: 0,
-            drive_mode: DriveMode::PushPull,
+            drive_mode: esp_hal::gpio::DriveMode::PushPull,
         })
         .unwrap();
 
-    loop {
-        let val = DMX_VALUE.wait().await;
-        let duty_pct = 100 - (val as u32 * 100 / 255) as u8;
-        led_channel.set_duty(duty_pct).ok();
-    }
+    led_fixture::run(&DMX_VALUE, &mut led_channel).await
 }
