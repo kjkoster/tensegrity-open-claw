@@ -61,7 +61,7 @@ pub async fn connect(
     controller
         .set_config(&esp_radio::wifi::Config::Station(
             StationConfig::default()
-                .with_ssid(String::from(wifi_config.ssid()))
+                .with_ssid(wifi_config.ssid())
                 .with_password(String::from(wifi_config.password())),
         ))
         .unwrap();

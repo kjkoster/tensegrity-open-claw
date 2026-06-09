@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use core::cell::RefCell;
+use core::{cell::RefCell, str::from_utf8};
 use critical_section::Mutex;
 use embedded_storage::nor_flash::NorFlash;
 
@@ -130,10 +130,10 @@ impl<F: NorFlash> Storage<F> {
             let s = self.settings.borrow(cs).borrow();
             let ssid_len = s.ssid_len as usize;
             let pwd_len = s.password_len as usize;
-            let ssid = core::str::from_utf8(&s.ssid[..ssid_len])
+            let ssid = from_utf8(&s.ssid[..ssid_len])
                 .unwrap_or(DEFAULT_SSID)
                 .into();
-            let password = core::str::from_utf8(&s.password[..pwd_len])
+            let password = from_utf8(&s.password[..pwd_len])
                 .unwrap_or(DEFAULT_PASSWORD)
                 .into();
             WifiConfig::new(ssid, password).expect("stored wifi config was corrupted")

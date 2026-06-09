@@ -1,12 +1,13 @@
 extern crate alloc;
 
 use alloc::string::String;
+use core::fmt::Write;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Duration;
 use picoserve::{
-    Router, Server,
+    Router, Server, Timeouts,
     extract::{Form, State},
     response::Content,
     routing::get,
@@ -15,6 +16,8 @@ use rtt_target::rprintln;
 use static_cell::{ConstStaticCell, StaticCell};
 
 use crate::models::{DmxConfig, WifiConfig};
+
+use FormResult::{DmxError, DmxSaved, WifiError, WifiSaved};
 
 #[derive(Clone)]
 struct AppState {
@@ -77,12 +80,12 @@ async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
                         *state.dmx_config.lock().await = config;
                         rprintln!("DMX address={} universe={} sacn_port={}", addr, uni, port);
                         state.dmx_signal.signal(config);
-                        FormResult::DmxSaved
+                        DmxSaved
                     }
-                    Err(_) => FormResult::DmxError,
+                    Err(_) => DmxError,
                 }
             }
-            _ => FormResult::DmxError,
+            _ => DmxError,
         }
     } else {
         match (form.ssid, form.password) {
@@ -91,9 +94,9 @@ async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
                     Ok(config) => {
                         rprintln!("wifi credentials updated, ssid={}", config.ssid());
                         state.wifi_signal.signal(config);
-                        FormResult::WifiSaved
+                        WifiSaved
                     }
-                    Err(_) => FormResult::WifiError,
+                    Err(_) => WifiError,
                 }
             }
             _ => FormResult::None,
@@ -102,17 +105,17 @@ async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
 }
 
 fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
-    let redirect = matches!(result, FormResult::DmxSaved | FormResult::WifiSaved);
+    let redirect = matches!(result, DmxSaved | WifiSaved);
     let dmx_msg = match result {
-        FormResult::DmxSaved => r#"<p class="ok">DMX address, universe and sACN port saved.</p>"#,
-        FormResult::DmxError => {
+        DmxSaved => r#"<p class="ok">DMX address, universe and sACN port saved.</p>"#,
+        DmxError => {
             r#"<p class="err">Channel 1-512; universe 1-63999; port 1-65535.</p>"#
         }
         _ => "",
     };
     let wifi_msg = match result {
-        FormResult::WifiSaved => r#"<p class="ok">network config saved, rebooting...</p>"#,
-        FormResult::WifiError => {
+        WifiSaved => r#"<p class="ok">network config saved, rebooting...</p>"#,
+        WifiError => {
             r#"<p class="err">SSID must be 1-32 chars; password 8-64 chars.</p>"#
         }
         _ => "",
@@ -140,17 +143,11 @@ fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
     html.push_str(dmx_msg);
     html.push_str(r#"<form method="POST" action="/">"#);
     html.push_str(r#"<label>Channel (1-512)"#);
-    html.push_str(r#"<input type="number" name="dmx_address" min="1" max="512" value=""#);
-    push_u16(&mut html, dmx_config.address());
-    html.push_str(r#""></label>"#);
+    write!(html, r#"<input type="number" name="dmx_address" min="1" max="512" value="{}"></label>"#, dmx_config.address()).ok();
     html.push_str(r#"<label>sACN Universe (1-63999)"#);
-    html.push_str(r#"<input type="number" name="universe" min="1" max="63999" value=""#);
-    push_u16(&mut html, dmx_config.universe());
-    html.push_str(r#""></label>"#);
+    write!(html, r#"<input type="number" name="universe" min="1" max="63999" value="{}"></label>"#, dmx_config.universe()).ok();
     html.push_str(r#"<label>sACN port (1-65535)"#);
-    html.push_str(r#"<input type="number" name="sacn_port" min="1" max="65535" value=""#);
-    push_u16(&mut html, dmx_config.sacn_port());
-    html.push_str(r#""></label>"#);
+    write!(html, r#"<input type="number" name="sacn_port" min="1" max="65535" value="{}"></label>"#, dmx_config.sacn_port()).ok();
     html.push_str(r#"<input type="submit" value="save"></form>"#);
     html.push_str("<h2>Wireless Network</h2>");
     html.push_str(wifi_msg);
@@ -176,20 +173,6 @@ fn html_attr_escape(out: &mut String, s: &str) {
     }
 }
 
-fn push_u16(s: &mut String, val: u16) {
-    let mut buf = [0u8; 5];
-    let mut i = 5usize;
-    let mut v = val;
-    loop {
-        i -= 1;
-        buf[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        if v == 0 {
-            break;
-        }
-    }
-    s.push_str(core::str::from_utf8(&buf[i..]).unwrap());
-}
 
 static HTTP_RX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_TX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
@@ -241,7 +224,7 @@ async fn task(
     let app = Router::new()
         .route("/", get(handle_get).post(handle_post))
         .with_state(state);
-    let config = picoserve::Config::new(picoserve::Timeouts {
+    let config = picoserve::Config::new(Timeouts {
         start_read_request: Duration::from_secs(5),
         persistent_start_read_request: Duration::from_secs(1),
         read_request: Duration::from_secs(3),
