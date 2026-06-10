@@ -1,7 +1,7 @@
 [package]
 edition      = "2024"
 name         = "brain"
-rust-version = "1.85"
+rust-version = "1.96"
 version      = "0.1.0"
 
 [dependencies]
