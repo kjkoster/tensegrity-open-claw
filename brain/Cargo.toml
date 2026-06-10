@@ -1,0 +1,9 @@
+[package]
+edition      = "2024"
+name         = "brain"
+rust-version = "1.85"
+version      = "0.1.0"
+
+[dependencies]
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
+embassy-time     = { version = "0.5.0",  features = ["std"] }
