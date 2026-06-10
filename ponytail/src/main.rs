@@ -25,7 +25,7 @@ use esp_hal::{
     interrupt::software::SoftwareInterruptControl,
     ledc::{
         LSGlobalClkSource, Ledc, LowSpeed,
-        channel::{self, ChannelIFace},
+        channel::{self, ChannelIFace, Number as ChannelNumber},
         timer::{self, TimerIFace},
     },
     rng::Rng,
@@ -33,7 +33,7 @@ use esp_hal::{
     timer::timg::TimerGroup,
 };
 use esp_storage::FlashStorage;
-use models::{DmxConfig, WifiConfig};
+use models::{DmxConfig, DmxValue, WifiConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 use storage::Storage;
@@ -52,7 +52,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 static STORAGE: StaticCell<Storage<FlashStorage<'static>>> = StaticCell::new();
 static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
-static DMX_VALUE: Signal<CriticalSectionRawMutex, u8> = Signal::new();
+static DMX_VALUE: Signal<CriticalSectionRawMutex, DmxValue> = Signal::new();
 static WIFI_SAVE: Signal<CriticalSectionRawMutex, WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
@@ -156,14 +156,34 @@ async fn main(spawner: Spawner) -> ! {
         })
         .unwrap();
 
-    let mut led_channel = ledc.channel::<LowSpeed>(channel::Number::Channel0, peripherals.GPIO21);
-    led_channel
-        .configure(channel::config::Config {
-            timer: &lstimer,
-            duty_pct: 0,
-            drive_mode: DriveMode::PushPull,
-        })
-        .unwrap();
+    let ch_cfg = channel::config::Config {
+        timer: &lstimer,
+        duty_pct: 0,
+        drive_mode: DriveMode::PushPull,
+    };
 
-    led_fixture::run(&DMX_VALUE, &mut led_channel).await
+    let mut onboard_channel = ledc.channel::<LowSpeed>(ChannelNumber::Channel0, peripherals.GPIO21);
+    onboard_channel.configure(ch_cfg).unwrap();
+
+    let mut red_channel = ledc.channel::<LowSpeed>(ChannelNumber::Channel1, peripherals.GPIO9);
+    red_channel.configure(ch_cfg).unwrap();
+
+    let mut green_channel = ledc.channel::<LowSpeed>(ChannelNumber::Channel2, peripherals.GPIO8);
+    green_channel.configure(ch_cfg).unwrap();
+
+    let mut blue_channel = ledc.channel::<LowSpeed>(ChannelNumber::Channel3, peripherals.GPIO7);
+    blue_channel.configure(ch_cfg).unwrap();
+
+    let mut white_channel = ledc.channel::<LowSpeed>(ChannelNumber::Channel4, peripherals.GPIO44);
+    white_channel.configure(ch_cfg).unwrap();
+
+    led_fixture::run(
+        &DMX_VALUE,
+        &mut onboard_channel,
+        &mut red_channel,
+        &mut green_channel,
+        &mut blue_channel,
+        &mut white_channel,
+    )
+    .await
 }

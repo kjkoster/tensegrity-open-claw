@@ -3,6 +3,23 @@ extern crate alloc;
 use alloc::string::String;
 use embassy_net::Ipv4Address;
 
+#[derive(Clone, Copy, PartialEq)]
+pub struct DmxValue([u8; 5]);
+
+impl DmxValue {
+    pub const LEN: usize = 5;
+
+    pub fn new(slots: [u8; Self::LEN]) -> Self {
+        Self(slots)
+    }
+
+    pub fn intensity(self) -> u8 { self.0[0] }
+    pub fn red(self) -> u8 { self.0[1] }
+    pub fn green(self) -> u8 { self.0[2] }
+    pub fn blue(self) -> u8 { self.0[3] }
+    pub fn white(self) -> u8 { self.0[4] }
+}
+
 #[derive(Clone, Copy)]
 pub struct DmxConfig {
     address: u16,

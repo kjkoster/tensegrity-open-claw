@@ -7,7 +7,7 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use embassy_time::{Duration, with_timeout};
 use rtt_target::rprintln;
 
-use crate::models::DmxConfig;
+use crate::models::{DmxConfig, DmxValue};
 
 const UNIVERSE_TIMEOUT: u64 = 30; // seconds
 
@@ -38,15 +38,15 @@ pub(crate) struct Listener {
     network_stack: Stack<'static>,
     config: DmxConfig,
     multicast: Ipv4Address,
-    last_value: Option<u8>,
-    dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
+    last_value: Option<DmxValue>,
+    dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
 }
 
 impl Listener {
     pub(crate) fn new(
         network_stack: Stack<'static>,
         config: DmxConfig,
-        dmx_value: &'static Signal<CriticalSectionRawMutex, u8>,
+        dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
     ) -> Self {
         let multicast = config.multicast_address();
         network_stack.join_multicast_group(multicast).ok();
@@ -99,10 +99,22 @@ impl Listener {
             .await
             {
                 Ok(Ok((n, _))) => {
-                    if let Some(val) = parse_e131_slot(&pkt_buf[..n], self.config.universe(), self.config.address()) {
+                    if let Some(val) = parse_e131_slots(
+                        &pkt_buf[..n],
+                        self.config.universe(),
+                        self.config.address(),
+                    ) {
                         if Some(val) != self.last_value {
                             self.last_value = Some(val);
-                            rprintln!("DMX ch {} = {}", self.config.address(), val);
+                            rprintln!(
+                                "DMX ch {} = I:{} R:{} G:{} B:{} W:{}",
+                                self.config.address(),
+                                val.intensity(),
+                                val.red(),
+                                val.green(),
+                                val.blue(),
+                                val.white(),
+                            );
                             self.dmx_value.signal(val);
                         }
                     }
@@ -113,7 +125,9 @@ impl Listener {
                         "no universe for {} seconds, rejoining multicast group",
                         UNIVERSE_TIMEOUT
                     );
-                    self.network_stack.leave_multicast_group(self.multicast).ok();
+                    self.network_stack
+                        .leave_multicast_group(self.multicast)
+                        .ok();
                     self.network_stack.join_multicast_group(self.multicast).ok();
                 }
             }
@@ -123,25 +137,29 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        self.network_stack.leave_multicast_group(self.multicast).ok();
+        self.network_stack
+            .leave_multicast_group(self.multicast)
+            .ok();
         rprintln!("sACN listener destroyed");
     }
 }
 
-/// Extracts DMX `slot` (1-indexed) from an E1.31 data packet for `universe`.
+/// Extracts five consecutive DMX slots (I, R, G, B, W) from an E1.31 data packet.
+/// `base_address` is the 1-indexed DMX address of the Intensity slot; Red through
+/// White follow at base_address+1 through base_address+4.
 /// Returns None if the packet is invalid, for a different universe, uses a
-/// non-zero start code, or does not contain the requested slot.
+/// non-zero start code, or does not contain all five slots.
 ///
 /// E1.31 byte offsets used:
-///   4..16   ACN Packet Identifier
-///   18..22  Root vector    = 0x00000004
-///   40..44  Framing vector = 0x00000002
+///   4..16    ACN Packet Identifier
+///   18..22   Root vector    = 0x00000004
+///   40..44   Framing vector = 0x00000002
 ///   113..115 Universe (BE u16)
-///   117     DMP vector     = 0x02
+///   117      DMP vector     = 0x02
 ///   123..125 Property count (includes start code at slot 0)
-///   125     DMX start code = 0x00
-///   126+    DMX slots 1..N
-fn parse_e131_slot(pkt: &[u8], universe: u16, slot: u16) -> Option<u8> {
+///   125      DMX start code = 0x00
+///   126+     DMX slots 1..N
+fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxValue> {
     if pkt.len() < 126 {
         return None;
     }
@@ -163,10 +181,16 @@ fn parse_e131_slot(pkt: &[u8], universe: u16, slot: u16) -> Option<u8> {
     if pkt[125] != 0x00 {
         return None;
     }
+
     let prop_count = u16::from_be_bytes([pkt[123], pkt[124]]);
-    let offset = 125 + slot as usize;
-    if slot >= prop_count || offset >= pkt.len() {
+    let last_slot = base_address + DmxValue::LEN as u16 - 1;
+
+    let base = 125 + base_address as usize;
+    let last_offset = 125 + last_slot as usize;
+
+    if last_slot >= prop_count || last_offset >= pkt.len() {
         return None;
     }
-    Some(pkt[offset])
+    let slots: [u8; DmxValue::LEN] = pkt[base..base + DmxValue::LEN].try_into().ok()?;
+    Some(DmxValue::new(slots))
 }
