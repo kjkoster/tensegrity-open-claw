@@ -1,0 +1,11 @@
+[Unit]
+Description=Tensegrity Open Claw Brain Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/brain
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
