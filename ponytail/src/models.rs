@@ -3,6 +3,8 @@ extern crate alloc;
 use alloc::string::String;
 use embassy_net::Ipv4Address;
 
+pub const DMX_MAXVALUE: u8 = 255;
+
 #[derive(Clone, Copy, PartialEq)]
 pub struct DmxValue([u8; 5]);
 

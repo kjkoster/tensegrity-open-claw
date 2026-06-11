@@ -14,7 +14,7 @@ const SACN_PORT: u16 = 5568;
 const FRAME_RATE_HZ: u64 = 44;
 
 // ── Noise engine config ──────────────────────────────────────────────────────
-const NOISE_SPEED: f64 = 0.25; // cells per second
+const NOISE_SPEED: f64 = 1.5; // cells per second
 const CONTRAST: f64 = 1.6;
 const GAMMA: f64 = 2.2;
 const W_GAIN: f64 = 0.6; // White channel trim
