@@ -23,10 +23,6 @@ declare -A DEVICE_MAP=(
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
-flash_esp32s3() {  # $1 = port, $2 = elf
-  espflash flash --port "$1" "$2"
-}
-
 # --- 1. brain daemon -------------------------------------------------------
 step "install and restart brain daemon"
 sudo install -m 0755 "$BIN_DIR/brain" /usr/local/bin/brain
@@ -47,7 +43,7 @@ for dev in /dev/serial/by-id/*; do
   if [[ -v DEVICE_MAP["$name"] ]]; then
     binary="${DEVICE_MAP[$name]}"
     echo ">> $name  -> $binary"
-    flash_esp32s3 "$dev" "$BIN_DIR/$binary"
+    espflash flash --port "$dev" "$BIN_DIR/$binary"
   else
     echo "ERROR: unknown device $name — add it to DEVICE_MAP in remote-deploy.sh" >&2
     exit 1

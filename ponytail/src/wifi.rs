@@ -3,7 +3,7 @@ use embassy_executor::Spawner;
 use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_hal::peripherals::WIFI;
-use esp_radio::wifi::{Interface, WifiController, sta::StationConfig};
+use esp_radio::wifi::{Interface, PowerSaveMode, WifiController, sta::StationConfig};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
@@ -45,11 +45,12 @@ pub async fn connect(
     wifi: WIFI<'static>,
     seed: u64,
     wifi_config: &WifiConfig,
-) -> Stack<'static> {
+) -> (Stack<'static>, [u8; 6]) {
     let (mut controller, interfaces) =
         esp_radio::wifi::new(wifi, Default::default())
             .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
 
+    let mac = interfaces.station.mac_address();
     let (network_stack, runner) = embassy_net::new(
         interfaces.station,
         embassy_net::Config::dhcpv4(Default::default()),
@@ -64,6 +65,12 @@ pub async fn connect(
                 .with_ssid(wifi_config.ssid())
                 .with_password(String::from(wifi_config.password())),
         ))
+        .unwrap();
+
+    // Disable WiFi sleep mode: the radio powers down between beacon intervals, causing multicast
+    // UDP packets (sACN/E1.31) to be silently dropped during the sleep window.
+    controller
+        .set_power_saving(PowerSaveMode::None)
         .unwrap();
 
     loop {
@@ -87,5 +94,5 @@ pub async fn connect(
 
     spawner.spawn(wifi_supervision_task(controller, wifi_config.clone()).unwrap());
 
-    network_stack
+    (network_stack, mac)
 }

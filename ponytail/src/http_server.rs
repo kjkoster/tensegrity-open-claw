@@ -23,6 +23,7 @@ use FormResult::{DmxError, DmxSaved, WifiError, WifiSaved};
 struct AppState {
     dmx_config: &'static Mutex<CriticalSectionRawMutex, DmxConfig>,
     ssid: String,
+    mac_address: [u8; 6],
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 }
@@ -62,62 +63,59 @@ enum FormResult {
 
 async fn handle_get(State(state): State<AppState>) -> Html {
     let config = *state.dmx_config.lock().await;
-    Html(build_html(config, &state.ssid, FormResult::None))
+    Html(build_html(
+        config,
+        &state.ssid,
+        state.mac_address,
+        FormResult::None,
+    ))
 }
 
 async fn handle_post(State(state): State<AppState>, Form(form): Form<ConfigForm>) -> Html {
     let result = process_form(&state, form).await;
     let config = *state.dmx_config.lock().await;
-    Html(build_html(config, &state.ssid, result))
+    Html(build_html(config, &state.ssid, state.mac_address, result))
 }
 
 async fn process_form(state: &AppState, form: ConfigForm) -> FormResult {
     if form.dmx_address.is_some() || form.universe.is_some() || form.sacn_port.is_some() {
         match (form.dmx_address, form.universe, form.sacn_port) {
-            (Some(addr), Some(uni), Some(port)) => {
-                match DmxConfig::new(addr, uni, port) {
-                    Ok(config) => {
-                        *state.dmx_config.lock().await = config;
-                        rprintln!("DMX address={} universe={} sacn_port={}", addr, uni, port);
-                        state.dmx_signal.signal(config);
-                        DmxSaved
-                    }
-                    Err(_) => DmxError,
+            (Some(addr), Some(uni), Some(port)) => match DmxConfig::new(addr, uni, port) {
+                Ok(config) => {
+                    *state.dmx_config.lock().await = config;
+                    rprintln!("DMX address={} universe={} sacn_port={}", addr, uni, port);
+                    state.dmx_signal.signal(config);
+                    DmxSaved
                 }
-            }
+                Err(_) => DmxError,
+            },
             _ => DmxError,
         }
     } else {
         match (form.ssid, form.password) {
-            (Some(ssid), Some(password)) => {
-                match WifiConfig::new(ssid, password) {
-                    Ok(config) => {
-                        rprintln!("wifi credentials updated, ssid={}", config.ssid());
-                        state.wifi_signal.signal(config);
-                        WifiSaved
-                    }
-                    Err(_) => WifiError,
+            (Some(ssid), Some(password)) => match WifiConfig::new(ssid, password) {
+                Ok(config) => {
+                    rprintln!("wifi credentials updated, ssid={}", config.ssid());
+                    state.wifi_signal.signal(config);
+                    WifiSaved
                 }
-            }
+                Err(_) => WifiError,
+            },
             _ => FormResult::None,
         }
     }
 }
 
-fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
+fn build_html(dmx_config: DmxConfig, ssid: &str, mac: [u8; 6], result: FormResult) -> String {
     let redirect = matches!(result, DmxSaved | WifiSaved);
     let dmx_msg = match result {
         DmxSaved => r#"<p class="ok">DMX address, universe and sACN port saved.</p>"#,
-        DmxError => {
-            r#"<p class="err">Channel 1-512; universe 1-63999; port 1-65535.</p>"#
-        }
+        DmxError => r#"<p class="err">Channel 1-512; universe 1-63999; port 1-65535.</p>"#,
         _ => "",
     };
     let wifi_msg = match result {
         WifiSaved => r#"<p class="ok">network config saved, rebooting...</p>"#,
-        WifiError => {
-            r#"<p class="err">SSID must be 1-32 chars; password 8-64 chars.</p>"#
-        }
+        WifiError => r#"<p class="err">SSID must be 1-32 chars; password 8-64 chars.</p>"#,
         _ => "",
     };
 
@@ -136,6 +134,7 @@ fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
         "h2{margin-top:1.5em}",
         "input{display:block;width:100%;box-sizing:border-box;padding:.4em;font-size:1em;margin-top:.4em}",
         "input[type=submit]{background:#0066cc;color:#fff;border:none;border-radius:3px;cursor:pointer}",
+        "input[readonly]{color:#708090}",
         "</style></head>",
     ));
     html.push_str("<body>");
@@ -143,16 +142,38 @@ fn build_html(dmx_config: DmxConfig, ssid: &str, result: FormResult) -> String {
     html.push_str(dmx_msg);
     html.push_str(r#"<form method="POST" action="/">"#);
     html.push_str(r#"<label>Channel (1-512)"#);
-    write!(html, r#"<input type="number" name="dmx_address" min="1" max="512" value="{}"></label>"#, dmx_config.address()).ok();
+    write!(
+        html,
+        r#"<input type="number" name="dmx_address" min="1" max="512" value="{}"></label>"#,
+        dmx_config.address()
+    )
+    .ok();
     html.push_str(r#"<label>sACN Universe (1-63999)"#);
-    write!(html, r#"<input type="number" name="universe" min="1" max="63999" value="{}"></label>"#, dmx_config.universe()).ok();
+    write!(
+        html,
+        r#"<input type="number" name="universe" min="1" max="63999" value="{}"></label>"#,
+        dmx_config.universe()
+    )
+    .ok();
     html.push_str(r#"<label>sACN port (1-65535)"#);
-    write!(html, r#"<input type="number" name="sacn_port" min="1" max="65535" value="{}"></label>"#, dmx_config.sacn_port()).ok();
+    write!(
+        html,
+        r#"<input type="number" name="sacn_port" min="1" max="65535" value="{}"></label>"#,
+        dmx_config.sacn_port()
+    )
+    .ok();
     html.push_str(r#"<input type="submit" value="save"></form>"#);
     html.push_str("<h2>Wireless Network</h2>");
     html.push_str(wifi_msg);
-    html.push_str(r#"<form method="POST" action="/"><label>Network"#);
-    html.push_str(r#"<input type="text" name="ssid" value=""#);
+    html.push_str(r#"<form method="POST" action="/">"#);
+    html.push_str(r#"<label>MAC Address"#);
+    write!(
+        html,
+        r#"<input type="text" value="{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}" readonly></label>"#,
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    )
+    .ok();
+    html.push_str(r#"<label>SSID<input type="text" name="ssid" value=""#);
     html_attr_escape(&mut html, ssid);
     html.push_str(r#""></label>"#);
     html.push_str(r#"<label>Password<input type="password" name="password"></label>"#);
@@ -173,7 +194,6 @@ fn html_attr_escape(out: &mut String, s: &str) {
     }
 }
 
-
 static HTTP_RX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_TX: ConstStaticCell<[u8; 1024]> = ConstStaticCell::new([0; 1024]);
 static HTTP_BUF: ConstStaticCell<[u8; 2048]> = ConstStaticCell::new([0; 2048]);
@@ -184,6 +204,7 @@ pub fn spawn(
     network_stack: Stack<'static>,
     dmx_config: DmxConfig,
     wifi_config: &WifiConfig,
+    mac_address: [u8; 6],
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) {
@@ -197,6 +218,7 @@ pub fn spawn(
             HTTP_BUF.take(),
             dmx_mutex,
             ssid,
+            mac_address,
             dmx_signal,
             wifi_signal,
         )
@@ -212,12 +234,14 @@ async fn task(
     http_buf: &'static mut [u8; 2048],
     dmx_config: &'static Mutex<CriticalSectionRawMutex, DmxConfig>,
     ssid: String,
+    mac_address: [u8; 6],
     dmx_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     wifi_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let state = AppState {
         dmx_config,
         ssid,
+        mac_address,
         dmx_signal,
         wifi_signal,
     };

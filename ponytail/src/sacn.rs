@@ -9,7 +9,7 @@ use rtt_target::rprintln;
 
 use crate::models::{DmxConfig, DmxValue};
 
-const UNIVERSE_TIMEOUT: u64 = 30; // seconds
+const UNIVERSE_TIMEOUT: u64 = 5; // seconds
 
 // ACN Packet Identifier at bytes 4..16 of every E1.31 packet.
 const ACN_ID: &[u8; 12] = b"ASC-E1.17\0\0\0";
@@ -98,14 +98,16 @@ impl Listener {
         }
     }
 
-    /// Runs forever, signaling `dmx_value` whenever the DMX value at the
-    /// configured address changes. Handles packet timeouts by rejoining the
-    /// multicast group internally.
+    /// Signals `dmx_value` whenever the DMX value at the configured address changes.
+    /// Returns on timeout so the caller can drop and recreate the Listener, which
+    /// rebinds the socket and sends a fresh IGMP join. Rejoining the multicast group
+    /// in-place after a timeout is not sufficient: the socket may be stale from the
+    /// WiFi disconnect and embassy_net may not deliver packets to it after reconnect.
     #[allow(
         clippy::large_stack_frames,
         reason = "pkt_buf (638 bytes) must be held across the recv_from await"
     )]
-    pub(crate) async fn run(&mut self) -> ! {
+    pub(crate) async fn run(&mut self) {
         let mut pkt_buf = [0u8; MAX_PACKET_LEN];
         loop {
             match with_timeout(
@@ -122,15 +124,6 @@ impl Listener {
                     ) {
                         if Some(val) != self.last_value {
                             self.last_value = Some(val);
-                            rprintln!(
-                                "DMX ch {} = I:{} R:{} G:{} B:{} W:{}",
-                                self.config.address(),
-                                val.intensity(),
-                                val.red(),
-                                val.green(),
-                                val.blue(),
-                                val.white(),
-                            );
                             self.dmx_value.signal(val);
                         }
                     }
@@ -138,13 +131,10 @@ impl Listener {
                 Ok(Err(_)) => {}
                 Err(_) => {
                     rprintln!(
-                        "no universe for {} seconds, rejoining multicast group",
+                        "no universe for {} seconds, recreating socket",
                         UNIVERSE_TIMEOUT
                     );
-                    self.network_stack
-                        .leave_multicast_group(self.multicast)
-                        .ok();
-                    self.network_stack.join_multicast_group(self.multicast).ok();
+                    return;
                 }
             }
         }
@@ -172,10 +162,22 @@ fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxV
     if &pkt[ACN_ID_OFFSET..ACN_ID_OFFSET + ACN_ID.len()] != ACN_ID {
         return None;
     }
-    if u32::from_be_bytes([pkt[ROOT_VECTOR_OFFSET], pkt[ROOT_VECTOR_OFFSET + 1], pkt[ROOT_VECTOR_OFFSET + 2], pkt[ROOT_VECTOR_OFFSET + 3]]) != ROOT_VECTOR {
+    if u32::from_be_bytes([
+        pkt[ROOT_VECTOR_OFFSET],
+        pkt[ROOT_VECTOR_OFFSET + 1],
+        pkt[ROOT_VECTOR_OFFSET + 2],
+        pkt[ROOT_VECTOR_OFFSET + 3],
+    ]) != ROOT_VECTOR
+    {
         return None;
     }
-    if u32::from_be_bytes([pkt[FRAMING_VECTOR_OFFSET], pkt[FRAMING_VECTOR_OFFSET + 1], pkt[FRAMING_VECTOR_OFFSET + 2], pkt[FRAMING_VECTOR_OFFSET + 3]]) != FRAMING_VECTOR {
+    if u32::from_be_bytes([
+        pkt[FRAMING_VECTOR_OFFSET],
+        pkt[FRAMING_VECTOR_OFFSET + 1],
+        pkt[FRAMING_VECTOR_OFFSET + 2],
+        pkt[FRAMING_VECTOR_OFFSET + 3],
+    ]) != FRAMING_VECTOR
+    {
         return None;
     }
     if u16::from_be_bytes([pkt[UNIVERSE_OFFSET], pkt[UNIVERSE_OFFSET + 1]]) != universe {

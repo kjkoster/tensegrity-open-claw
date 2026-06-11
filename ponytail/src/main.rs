@@ -61,16 +61,18 @@ async fn persist_dmx_config(
     dmx_save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
     network_stack: Stack<'static>,
 ) -> ! {
-    let mut listener = sacn::Listener::new(network_stack, storage.read_dmx_config(), &DMX_VALUE);
+    let mut config = storage.read_dmx_config();
     loop {
+        let mut listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
         match select(listener.run(), dmx_save_signal.wait()).await {
-            Either::First(never) => match never {},
-            Either::Second(config) => {
+            Either::First(()) => {
+                // Timeout: drop listener (leaves multicast group), recreate on next iteration.
+            }
+            Either::Second(new_config) => {
+                config = new_config;
                 if let Err(e) = storage.write_dmx_config(config) {
                     rprintln!("storage write failed: {:?}", e);
                 }
-                drop(listener);
-                listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
             }
         }
     }
@@ -129,7 +131,7 @@ async fn main(spawner: Spawner) -> ! {
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
     let wifi_config = storage.read_wifi_config();
-    let network_stack = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
+    let (network_stack, mac_address) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
 
     spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, network_stack).unwrap());
     spawner.spawn(persist_wifi_config(storage, &WIFI_SAVE).unwrap());
@@ -139,6 +141,7 @@ async fn main(spawner: Spawner) -> ! {
         network_stack,
         storage.read_dmx_config(),
         &wifi_config,
+        mac_address,
         &DMX_SAVE,
         &WIFI_SAVE,
     );
