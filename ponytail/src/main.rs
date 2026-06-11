@@ -20,7 +20,7 @@ use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Timer};
 use esp_hal::{
-    clock::CpuClock,
+    clock::{CpuClock, cpu_clock},
     gpio::DriveMode,
     interrupt::software::SoftwareInterruptControl,
     ledc::{
@@ -63,6 +63,7 @@ async fn persist_dmx_config(
 ) -> ! {
     let mut config = storage.read_dmx_config();
     loop {
+        network_stack.wait_config_up().await;
         let mut listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
         match select(listener.run(), dmx_save_signal.wait()).await {
             Either::First(()) => {
@@ -84,7 +85,9 @@ async fn persist_wifi_config(
     wifi_save_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
 ) -> ! {
     let config = wifi_save_signal.wait().await;
-    storage.write_wifi_config(&config).ok();
+    if let Err(e) = storage.write_wifi_config(&config) {
+        rprintln!("wifi config write failed: {:?}", e);
+    }
     // Brief pause so the HTTP response finishes sending before we reset.
     Timer::after(Duration::from_millis(500)).await;
     esp_hal::system::software_reset()
@@ -122,6 +125,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     rprintln!("Embassy initialized!");
+    rprintln!("cpu={} MHz", cpu_clock().as_mhz());
 
     let storage = STORAGE.init(storage::Storage::new(
         FlashStorage::new(peripherals.FLASH),
@@ -132,6 +136,11 @@ async fn main(spawner: Spawner) -> ! {
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
     let wifi_config = storage.read_wifi_config();
     let (network_stack, mac_address) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
+    rprintln!(
+        "mac={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        mac_address[0], mac_address[1], mac_address[2],
+        mac_address[3], mac_address[4], mac_address[5]
+    );
 
     spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, network_stack).unwrap());
     spawner.spawn(persist_wifi_config(storage, &WIFI_SAVE).unwrap());

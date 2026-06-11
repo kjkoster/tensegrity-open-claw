@@ -65,7 +65,9 @@ impl Listener {
         dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
     ) -> Self {
         let multicast = config.multicast_address();
-        network_stack.join_multicast_group(multicast).ok();
+        if let Err(e) = network_stack.join_multicast_group(multicast) {
+            rprintln!("multicast join error: {:?}", e);
+        }
 
         // SAFETY: only one Listener exists at a time; main drops the previous
         // Listener before calling new(), so these buffers have no live borrowers.
@@ -78,7 +80,9 @@ impl Listener {
                 &mut *BUFS.tx_data.get(),
             )
         };
-        socket.bind(config.sacn_port()).ok();
+        if let Err(e) = socket.bind(config.sacn_port()) {
+            rprintln!("socket bind error: {:?}", e);
+        }
 
         rprintln!(
             "sACN listener: address={} universe={} multicast={}:{}",
@@ -128,7 +132,9 @@ impl Listener {
                         }
                     }
                 }
-                Ok(Err(_)) => {}
+                Ok(Err(e)) => {
+                    rprintln!("recv_from error: {:?}", e);
+                }
                 Err(_) => {
                     rprintln!(
                         "no universe for {} seconds, recreating socket",
@@ -143,9 +149,9 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        self.network_stack
-            .leave_multicast_group(self.multicast)
-            .ok();
+        if let Err(e) = self.network_stack.leave_multicast_group(self.multicast) {
+            rprintln!("multicast leave error: {:?}", e);
+        }
         rprintln!("sACN listener destroyed");
     }
 }

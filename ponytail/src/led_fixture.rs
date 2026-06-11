@@ -1,5 +1,6 @@
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embedded_hal::pwm::SetDutyCycle;
+use rtt_target::rprintln;
 
 use crate::models::{DMX_MAXVALUE, DmxValue};
 
@@ -17,10 +18,20 @@ pub async fn run(
         let intensity = val.intensity();
         let duty = |v: u8| -> u16 { (v as u32 * max as u32 / DMX_MAXVALUE as u32) as u16 };
         let dimmed = |c: u8| -> u16 { duty((c as u32 * intensity as u32 / DMX_MAXVALUE as u32) as u8) };
-        onboard.set_duty_cycle(max - duty(intensity)).ok();
-        red.set_duty_cycle(dimmed(val.red())).ok();
-        green.set_duty_cycle(dimmed(val.green())).ok();
-        blue.set_duty_cycle(dimmed(val.blue())).ok();
-        white.set_duty_cycle(dimmed(val.white())).ok();
+        if let Err(e) = onboard.set_duty_cycle(max - duty(intensity)) {
+            rprintln!("onboard set_duty_cycle error: {:?}", e);
+        }
+        if let Err(e) = red.set_duty_cycle(dimmed(val.red())) {
+            rprintln!("red set_duty_cycle error: {:?}", e);
+        }
+        if let Err(e) = green.set_duty_cycle(dimmed(val.green())) {
+            rprintln!("green set_duty_cycle error: {:?}", e);
+        }
+        if let Err(e) = blue.set_duty_cycle(dimmed(val.blue())) {
+            rprintln!("blue set_duty_cycle error: {:?}", e);
+        }
+        if let Err(e) = white.set_duty_cycle(dimmed(val.white())) {
+            rprintln!("white set_duty_cycle error: {:?}", e);
+        }
     }
 }
