@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # remote-deploy.sh — runs ON claw-pi (pushed there by deploy.sh).
-# Installs/restarts the brain daemon, then flashes every attached MCU based on
-# its /dev/serial/by-id name. Absent boards are simply skipped.
+# Builds brain natively, installs/restarts the brain daemon, then flashes
+# every attached MCU based on its /dev/serial/by-id name.
+# Absent boards are simply skipped.
 #
 set -euo pipefail
 
@@ -23,17 +24,21 @@ declare -A DEVICE_MAP=(
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
-# --- 1. brain daemon -------------------------------------------------------
+# --- 1. build brain natively on the Pi ------------------------------------
+step "build brain"
+( cd "$HOME/brain" && cargo build --release )
+
+# --- 2. brain daemon -------------------------------------------------------
 step "install and restart brain daemon"
-sudo install -m 0755 "$BIN_DIR/brain" /usr/local/bin/brain
-sudo install -m 0644 "$BIN_DIR/brain.service" /etc/systemd/system/brain.service
+sudo install -m 0755 "$HOME/brain/target/release/brain" /usr/local/bin/brain
+sudo install -m 0644 "$HOME/brain/brain.service" /etc/systemd/system/brain.service
 echo "brain daemon installed"
 sudo systemctl daemon-reload
 sudo systemctl enable brain
 sudo systemctl restart brain
 echo "brain daemon restarted"
 
-# --- 2. flash attached microcontrollers ------------------------------------
+# --- 3. flash attached microcontrollers ------------------------------------
 step "flash attached microcontrollers"
 shopt -s nullglob
 found=0
