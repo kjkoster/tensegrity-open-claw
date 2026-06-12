@@ -1,6 +1,6 @@
 use core::cell::UnsafeCell;
 use embassy_net::{
-    Ipv4Address, Stack,
+    Stack,
     udp::{PacketMetadata, UdpSocket},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
@@ -51,9 +51,7 @@ static BUFS: SacnBufs = SacnBufs {
 
 pub(crate) struct Listener {
     socket: UdpSocket<'static>,
-    network_stack: Stack<'static>,
     config: DmxConfig,
-    multicast: Ipv4Address,
     last_value: Option<DmxValue>,
     dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
 }
@@ -94,9 +92,7 @@ impl Listener {
 
         Self {
             socket,
-            network_stack,
             config,
-            multicast,
             last_value: None,
             dmx_value,
         }
@@ -149,9 +145,6 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        if let Err(e) = self.network_stack.leave_multicast_group(self.multicast) {
-            rprintln!("multicast leave error: {:?}", e);
-        }
         rprintln!("sACN listener destroyed");
     }
 }
