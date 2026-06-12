@@ -1,3 +1,4 @@
+mod audio;
 mod fixture;
 mod perlin;
 mod sacn;
@@ -81,6 +82,9 @@ async fn noise_task(socket: UdpSocket, cid: [u8; 16]) -> ! {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    // Audio capture runs on its own OS thread, alongside Embassy.
+    let _audio = audio::spawn_capture();
+
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
     socket
         .set_multicast_ttl_v4(1)
