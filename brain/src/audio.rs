@@ -1,28 +1,40 @@
-use alsa::pcm::{Access, Format, HwParams, PCM};
+//! Audio capture on a dedicated OS thread (SOUND.md §3, §8.2): blocking ALSA
+//! reads pace the fast path, which publishes a fresh ControlState per period.
+//! The thread never dies — xruns recover in place, a lost device is reopened
+//! with backoff, and the sculpture keeps breathing on stale snapshots.
+
+use crate::config as cfg;
+use crate::control::ControlPublisher;
+use crate::features::FeaturePipeline;
+use alsa::pcm::{Access, Format, Frames, HwParams, PCM};
 use alsa::{Direction, ValueOr};
 use std::error::Error;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-// ── Capture config ───────────────────────────────────────────────────────────
-const ALSA_DEVICE: &str = "plughw:CARD=io2,DEV=0"; // confirm with `arecord -L`
-const SAMPLE_RATE: u32 = 48_000;
-const CHANNELS: usize = 2;
-const CAPTURE_SECS: u32 = 60;
-const READ_FRAMES: usize = 4096;
-
-// ── USB identity of the Alesis io|2 (from your lsusb dump) ────────────────────
+// ── USB identity of the Alesis io|2 ──────────────────────────────────────────
 const USB_VENDOR: u16 = 0x13b2;
 const USB_PRODUCT: u16 = 0x0008;
 
 /// Spawns the capture on its own thread and returns immediately, so the embassy
 /// executor / DMX loop keeps running. Detach the handle or join it as you like.
-pub fn spawn_capture() -> JoinHandle<()> {
+pub fn spawn_capture(publisher: ControlPublisher) -> JoinHandle<()> {
     thread::Builder::new()
         .name("audio-capture".into())
-        .spawn(|| {
+        .spawn(move || {
             probe_usb();
-            if let Err(e) = capture_to_tmp() {
-                eprintln!("audio: capture failed: {e}");
+            let mut backoff_s = 1u64;
+            loop {
+                let opened = Instant::now();
+                if let Err(e) = capture(&publisher) {
+                    eprintln!("audio: capture failed: {e}");
+                }
+                if opened.elapsed().as_secs() > 60 {
+                    backoff_s = 1;
+                }
+                eprintln!("audio: reopening device in {backoff_s}s (sculpture keeps breathing)");
+                thread::sleep(Duration::from_secs(backoff_s));
+                backoff_s = (backoff_s * 2).min(cfg::DEVICE_RETRY_MAX_S);
             }
         })
         .expect("failed to spawn audio-capture thread")
@@ -89,9 +101,11 @@ fn probe_usb() {
     eprintln!("audio: WARNING — io|2 not present on the USB bus; capture will likely fail");
 }
 
-fn capture_to_tmp() -> Result<(), Box<dyn Error>> {
-    eprintln!("audio: opening ALSA device \"{ALSA_DEVICE}\"…");
-    let pcm = PCM::new(ALSA_DEVICE, Direction::Capture, false)?;
+/// Opens the device and runs the capture/feature loop until an unrecoverable
+/// error. Only returns on error; the caller reopens with backoff.
+fn capture(publisher: &ControlPublisher) -> Result<(), Box<dyn Error>> {
+    eprintln!("audio: opening ALSA device \"{}\"…", cfg::ALSA_DEVICE);
+    let pcm = PCM::new(cfg::ALSA_DEVICE, Direction::Capture, false)?;
 
     let (rate, period) = {
         let hwp = HwParams::any(&pcm)?;
@@ -102,67 +116,57 @@ fn capture_to_tmp() -> Result<(), Box<dyn Error>> {
             hwp.get_channels_min()?,
             hwp.get_channels_max()?,
         );
-        hwp.set_channels(CHANNELS as u32)?;
-        hwp.set_rate(SAMPLE_RATE, ValueOr::Nearest)?;
+        hwp.set_channels(cfg::CHANNELS as u32)?;
+        hwp.set_rate(cfg::REQUESTED_RATE_HZ, ValueOr::Nearest)?;
         hwp.set_format(Format::s16())?; // plug layer converts native 24-bit -> 16-bit
         hwp.set_access(Access::RWInterleaved)?;
+        hwp.set_period_size_near(cfg::PERIOD_FRAMES as Frames, ValueOr::Nearest)?;
+        hwp.set_buffer_size_near((cfg::PERIOD_FRAMES * cfg::PERIODS_PER_BUFFER) as Frames)?;
         pcm.hw_params(&hwp)?;
 
         let cur = pcm.hw_params_current()?;
-        (cur.get_rate()?, cur.get_period_size()?)
+        (cur.get_rate()?, cur.get_period_size()? as usize)
     };
-    eprintln!("audio:   negotiated {rate} Hz, {CHANNELS} ch, S16_LE, period {period} frames");
+    eprintln!(
+        "audio:   negotiated {rate} Hz, {} ch, S16_LE, period {period} frames",
+        cfg::CHANNELS
+    );
 
     let io = pcm.io_i16()?;
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: rate,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
+    let mut pipeline = FeaturePipeline::new(rate as f32, period);
+    let mut buf = vec![0i16; period * cfg::CHANNELS];
+    let mut last_status = Instant::now();
 
-    let mut writers = Vec::with_capacity(CHANNELS);
-    for ch in 0..CHANNELS {
-        let path = format!("/tmp/capture.{ch}.wav");
-        eprintln!("audio:   writing channel {ch} -> {path}");
-        writers.push(hound::WavWriter::create(&path, spec)?);
-    }
-
-    let total = (rate * CAPTURE_SECS) as usize;
-    let mut buf = vec![0i16; READ_FRAMES * CHANNELS];
-    let mut done = 0usize;
-    let mut next_mark = rate as usize * 10; // progress log every ~10s of audio
-
-    eprintln!("audio: capturing {CAPTURE_SECS}s…");
     pcm.prepare()?;
-    while done < total {
-        let frames = match io.readi(&mut buf) {
-            Ok(f) => f,
+    eprintln!("audio: capture running — publishing ControlState at block rate");
+    loop {
+        match io.readi(&mut buf) {
+            Ok(frames) => {
+                let state = pipeline.process_block(&buf[..frames * cfg::CHANNELS]);
+                publisher.publish(state);
+
+                if last_status.elapsed().as_secs_f32() >= cfg::STATUS_INTERVAL_S {
+                    last_status = Instant::now();
+                    eprintln!(
+                        "audio: status {} music={:.2} energy={:.2} floor={:.4} agc_ref={:.4} \
+                         bpm={:.0}/{:.2} onset_density={:.2} xruns={}",
+                        if state.state == 1 { "MUSIC" } else { "SILENCE" },
+                        state.music_amount,
+                        state.energy,
+                        state.noise_floor,
+                        state.agc_ref,
+                        state.bpm,
+                        state.tempo_confidence,
+                        state.onset_density,
+                        state.xrun_count,
+                    );
+                }
+            }
             Err(e) => {
+                pipeline.note_xrun();
                 eprintln!("audio:   xrun ({e}), recovering");
                 pcm.try_recover(e, true)?;
-                continue;
-            }
-        };
-        for f in 0..frames {
-            for ch in 0..CHANNELS {
-                writers[ch].write_sample(buf[f * CHANNELS + ch])?;
             }
         }
-        done += frames;
-        if done >= next_mark {
-            eprintln!(
-                "audio:   {}s / {CAPTURE_SECS}s ({done} frames)",
-                done / rate as usize
-            );
-            next_mark += rate as usize * 10;
-        }
     }
-
-    for (ch, w) in writers.into_iter().enumerate() {
-        w.finalize()?;
-        eprintln!("audio: finalized /tmp/capture.{ch}.wav");
-    }
-    eprintln!("audio: done — {total} frames per channel at {rate} Hz");
-    Ok(())
 }
