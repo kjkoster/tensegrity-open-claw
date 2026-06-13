@@ -82,13 +82,9 @@ impl Listener {
             rprintln!("socket bind error: {:?}", e);
         }
 
-        rprintln!(
-            "sACN listener: address={} universe={} multicast={}:{}",
-            config.address(),
-            config.universe(),
-            multicast,
-            config.sacn_port()
-        );
+        rprintln!("dmx address:    {}", config.address(),);
+        rprintln!("dmx universe:   {}", config.universe(),);
+        rprintln!("sacn multicast: {}:{}", multicast, config.sacn_port());
 
         Self {
             socket,

@@ -26,7 +26,10 @@ async fn wifi_supervision_task(
             Timer::after(Duration::from_secs(1)).await;
         }
 
-        rprintln!("wifi disconnected, reconnecting to {}...", wifi_config.ssid());
+        rprintln!(
+            "wifi disconnected, reconnecting to {}...",
+            wifi_config.ssid()
+        );
         loop {
             match controller.connect_async().await {
                 Ok(_) => break,
@@ -46,9 +49,8 @@ pub async fn connect(
     seed: u64,
     wifi_config: &WifiConfig,
 ) -> (Stack<'static>, [u8; 6]) {
-    let (mut controller, interfaces) =
-        esp_radio::wifi::new(wifi, Default::default())
-            .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
+    let (mut controller, interfaces) = esp_radio::wifi::new(wifi, Default::default())
+        .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
 
     let mac = interfaces.station.mac_address();
     let (network_stack, runner) = embassy_net::new(
@@ -69,9 +71,7 @@ pub async fn connect(
 
     // Disable WiFi sleep mode: the radio powers down between beacon intervals, causing multicast
     // UDP packets (sACN/E1.31) to be silently dropped during the sleep window.
-    controller
-        .set_power_saving(PowerSaveMode::None)
-        .unwrap();
+    controller.set_power_saving(PowerSaveMode::None).unwrap();
 
     loop {
         rprintln!("connecting to {}...", wifi_config.ssid());
@@ -84,11 +84,10 @@ pub async fn connect(
     network_stack.wait_config_up().await;
 
     if let Some(cfg) = network_stack.config_v4() {
-        rprintln!("ip address: {}", cfg.address.address());
-        rprintln!("netmask:    {}", cfg.address.netmask());
-        rprintln!("dmx config: http://{}/", cfg.address.address());
+        rprintln!("ip address:     {}", cfg.address.address());
+        rprintln!("netmask:        {}", cfg.address.netmask());
         for dns in cfg.dns_servers.iter() {
-            rprintln!("nameserver: {}", dns);
+            rprintln!("nameserver:     {}", dns);
         }
     }
 

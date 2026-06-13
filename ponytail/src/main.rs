@@ -7,20 +7,18 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-mod http_server;
+mod config;
 mod led_fixture;
 mod models;
 mod sacn;
-mod storage;
 mod wifi;
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use embassy_time::{Duration, Timer};
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
+    efuse::{self, InterfaceMacAddress},
     gpio::DriveMode,
     interrupt::software::SoftwareInterruptControl,
     ledc::{
@@ -32,11 +30,8 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-use esp_storage::FlashStorage;
-use models::{DmxConfig, DmxValue, WifiConfig};
+use models::{DmxConfig, DmxValue};
 use rtt_target::rprintln;
-use static_cell::StaticCell;
-use storage::Storage;
 
 extern crate alloc;
 
@@ -50,47 +45,17 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static STORAGE: StaticCell<Storage<FlashStorage<'static>>> = StaticCell::new();
-static DMX_SAVE: Signal<CriticalSectionRawMutex, DmxConfig> = Signal::new();
 static DMX_VALUE: Signal<CriticalSectionRawMutex, DmxValue> = Signal::new();
-static WIFI_SAVE: Signal<CriticalSectionRawMutex, WifiConfig> = Signal::new();
 
 #[embassy_executor::task]
-async fn persist_dmx_config(
-    storage: &'static Storage<FlashStorage<'static>>,
-    dmx_save_signal: &'static Signal<CriticalSectionRawMutex, DmxConfig>,
-    network_stack: Stack<'static>,
-) -> ! {
-    let mut config = storage.read_dmx_config();
+async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
     loop {
         network_stack.wait_config_up().await;
         let mut listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
-        match select(listener.run(), dmx_save_signal.wait()).await {
-            Either::First(()) => {
-                // Timeout: drop listener (leaves multicast group), recreate on next iteration.
-            }
-            Either::Second(new_config) => {
-                config = new_config;
-                if let Err(e) = storage.write_dmx_config(config) {
-                    rprintln!("storage write failed: {:?}", e);
-                }
-            }
-        }
+        // run() returns on a universe timeout; drop the listener (leaving the
+        // multicast group) and recreate it so it rejoins with a fresh socket.
+        listener.run().await;
     }
-}
-
-#[embassy_executor::task]
-async fn persist_wifi_config(
-    storage: &'static Storage<FlashStorage<'static>>,
-    wifi_save_signal: &'static Signal<CriticalSectionRawMutex, WifiConfig>,
-) -> ! {
-    let config = wifi_save_signal.wait().await;
-    if let Err(e) = storage.write_wifi_config(&config) {
-        rprintln!("wifi config write failed: {:?}", e);
-    }
-    // Brief pause so the HTTP response finishes sending before we reset.
-    Timer::after(Duration::from_millis(500)).await;
-    esp_hal::system::software_reset()
 }
 
 #[allow(
@@ -124,36 +89,34 @@ async fn main(spawner: Spawner) -> ! {
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    rprintln!("Embassy initialized!");
-    rprintln!("cpu={} MHz", cpu_clock().as_mhz());
+    rprintln!("");
+    rprintln!("cpu:            {} MHz", cpu_clock().as_mhz());
 
-    let storage = STORAGE.init(storage::Storage::new(
-        FlashStorage::new(peripherals.FLASH),
-        0x9000,
-    ));
+    // Read this board's station MAC from efuse (before WiFi starts) and use it to
+    // pick its compiled-in configuration. See config.rs for the why and the
+    // first-time provisioning procedure.
+    let mac_address: [u8; 6] = efuse::interface_mac_address(InterfaceMacAddress::Station)
+        .as_bytes()
+        .try_into()
+        .unwrap();
+    rprintln!(
+        "mac address:    {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        mac_address[0],
+        mac_address[1],
+        mac_address[2],
+        mac_address[3],
+        mac_address[4],
+        mac_address[5]
+    );
+
+    let dmx_config = config::dmx_config_for(mac_address);
+    let wifi_config = config::wifi_config();
 
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
-    let wifi_config = storage.read_wifi_config();
-    let (network_stack, mac_address) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
-    rprintln!(
-        "mac={:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        mac_address[0], mac_address[1], mac_address[2],
-        mac_address[3], mac_address[4], mac_address[5]
-    );
+    let (network_stack, _) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
 
-    spawner.spawn(persist_dmx_config(storage, &DMX_SAVE, network_stack).unwrap());
-    spawner.spawn(persist_wifi_config(storage, &WIFI_SAVE).unwrap());
-
-    http_server::spawn(
-        spawner,
-        network_stack,
-        storage.read_dmx_config(),
-        &wifi_config,
-        mac_address,
-        &DMX_SAVE,
-        &WIFI_SAVE,
-    );
+    spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut ledc = Ledc::new(peripherals.LEDC);

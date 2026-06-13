@@ -6,11 +6,11 @@ The system is split into two halves that communicate via sACN (E1.31) over a clo
 
 - **Pi controller** — a Raspberry Pi running a Rust program on Linux. It generates 8 channels of independent Perlin noise, maps them to IRGBW DMX slots for two fixtures, and unicasts an sACN frame to each fixture at 44 Hz. The Pi also acts as a WiFi access point for the fixtures and is reachable from a development laptop via its Ethernet port.
 
-- **Ponytail fixture** — a fibre-optic light fixture retrofitted with an ESP32-S3 (Seeed Studio XIAO). The MCU joins the Pi's WiFi as a station, subscribes to the configured sACN universe, and drives the LED array via LEDC PWM. A web config portal sets the DMX start address, universe, sACN port, and WiFi credentials. **The ponytail firmware is implemented.**
+- **Ponytail fixture** — a fibre-optic light fixture retrofitted with an ESP32-S3 (Seeed Studio XIAO). The MCU joins the Pi's WiFi as a station, subscribes to the configured sACN universe, and drives the LED array via LEDC PWM. The DMX start address, universe, sACN port, and WiFi credentials are compiled in, selected at boot from a table keyed by the board's WiFi station MAC (see `ponytail/src/config.rs`). **The ponytail firmware is implemented.**
 
 ```
     ┌── Laptop ───────────────────────────────────────┐
-    │  (SSH / cross-compile / web config browser)    │
+    │  (SSH / cross-compile)                          │
     └────────────────── Ethernet ─────────────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
@@ -175,7 +175,7 @@ drifting Perlin colour.
 #### Network setup
 
 - Pi runs in AP mode (hostapd + dnsmasq). Fixed SSID and channel per deployment.
-- Ponytail connects to the Pi's AP as a WiFi station (configured via the web config portal).
+- Ponytail connects to the Pi's AP as a WiFi station (credentials compiled in; see `ponytail/src/config.rs`).
 - Laptop connects via Ethernet to the Pi for SSH and cross-compilation. No internet needed
   on the rig network.
 - Static IPs for Pi and all fixtures; no DHCP surprises mid-show.
@@ -228,83 +228,9 @@ ceiling over ≈20 s. Build 3 overrides this with audio loudness.
 | `I_SILENCE_CEIL`   | 0.65          | Breathing maximum                               |
 | `I_SILENCE_PERIOD` | 20 s          | Breathing cycle length                          |
 
-#### Open tasks — ponytail firmware
-
-- [ ] **Bug:** `storage.write_dmx_config()` returns `FlashStorageError::OtherCoreRunning`
-      when the write is attempted while running under the probe-rs debugger, but succeeds
-      when attaching after boot. The ESP32-S3 flash driver refuses writes if Core 1 is
-      active during an erase/write. Fix: retry on `OtherCoreRunning` in `flush()` since
-      the condition is transient.
-- [ ] Redo start-up logging: log firmware version, all config values, and assigned IP.
-
 #### Open tasks — Pi sender
 
 - [ ] Pi AP mode: configure hostapd + dnsmasq; assign static IPs.
-- [ ] Evaluate `sacn` / `sacn-unofficial` crates for E1.31 encoding; implement inline
-      (see Appendix A) only if neither is suitable.
-- [ ] Implement Perlin noise engine (splitmix64 gradient hash, quintic fade, optional fBm).
-- [ ] Implement sACN sender (deadline-paced 44 Hz loop, unicast to fixture IPs).
-- [ ] Implement silence-breathing Intensity.
-- [ ] Implement per-channel output gain (W trim).
-
-#### Acceptance
-
-- Fixture shows smooth, independently drifting RGBW colour and slow intensity breathing.
-- No visible repeat across a multi-hour soak.
-- 44 Hz holds steady; pulling the ponytail's power does not affect the Pi loop.
-- Packets parse correctly on the ponytail (visible via config portal or RTT log).
-
----
-
-### Build 2 — Breadboard installation
-
-Validate the full two-fixture pipeline with simple RGB LEDs on breadboard MCUs representing
-the sculpture fixtures. The Pi runs the Build 1 Perlin sender unchanged (no audio). Two
-ESP32-S3 boards on breadboards each receive their assigned DMX address range and drive an
-RGB LED, giving a visible, low-stakes confirmation that both sACN channels are working and
-independent before dealing with the real fixture hardware.
-
-#### Firmware changes
-
-The current ponytail firmware drives a single DMX channel to a single LEDC output. This
-build extends it to drive three LEDC channels (R, G, B) from the three consecutive DMX slots
-at the configured start address:
-
-- Slot offset +1 → Red LED (LEDC channel 1)
-- Slot offset +2 → Green LED (LEDC channel 2)
-- Slot offset +3 → Blue LED (LEDC channel 3)
-
-Fixture A (start address 1) picks up R=slot 2, G=slot 3, B=slot 4.
-Fixture B (start address 6) picks up R=slot 7, G=slot 8, B=slot 9.
-
-The Intensity and White slots are not wired on the breadboard; they can be ignored until
-Build 4.
-
-#### Hardware BOM
-
-| # | Item | Qty | Notes |
-|---|------|----:|-------|
-| 1 | Seeed Studio XIAO ESP32-S3 | 2 | Same MCU as the ponytail |
-| 2 | Common-cathode RGB LED | 2 | One per board |
-| 3 | 100Ω resistor | 6 | Current-limit per LED colour |
-| 4 | Breadboard + jumper wires | 2 sets | |
-| 5 | USB power supply / bench PSU | 2 | Power for each board |
-
-#### Open tasks
-
-- [ ] Extend ponytail firmware to drive 3 LEDC PWM channels (R, G, B) from consecutive DMX
-      slots at the start address.
-- [ ] Wire two breadboard setups: RGB LED + resistors + ESP32-S3.
-- [ ] Configure Fixture A with start address 1, Fixture B with start address 6.
-- [ ] Configure both boards to connect to the Pi's AP.
-- [ ] Update Pi sender `FIXTURE_IPS` to list both board IPs.
-
-#### Acceptance
-
-- Both breadboard fixtures show smooth, independently drifting colour driven by their
-  respective Perlin seeds.
-- Fixture A and B drift independently — no visible synchronisation between them.
-- Pulling power from one board does not disturb the other or the Pi loop.
 
 ---
 
@@ -370,12 +296,6 @@ is unaware of the source state.
 
 #### Open tasks
 
-- [ ] Implement audio capture via `cpal` (ALSA, mono, 48 kHz).
-- [ ] Implement bass-band envelope follower with slow AGC.
-- [ ] Implement onset detection (spectral flux, adaptive threshold peak pick).
-- [ ] Implement loudness → Intensity mapping with slew limit.
-- [ ] Implement onset → speed accumulator (impulse and decay).
-- [ ] Implement silence detection and crossfade.
 - [ ] Verify: no strobe at any loudness level.
 
 #### Acceptance
