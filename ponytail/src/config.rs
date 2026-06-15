@@ -31,8 +31,8 @@ use rtt_target::rprintln;
 use crate::models::{DmxConfig, WifiConfig};
 
 // ── Global settings (identical for every board) ───────────────────────────────
-const SSID: &str = "radiowaves";
-const PASSWORD: &str = "IkWilInternetten!!";
+const SSID: &str = "closed claw DMX";
+const PASSWORD: &str = "close-that-claw";
 const UNIVERSE: u16 = 1;
 const SACN_PORT: u16 = 5568;
 
