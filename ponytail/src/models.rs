@@ -22,6 +22,13 @@ impl DmxValue {
     pub fn white(self) -> u8 { self.0[4] }
 }
 
+#[derive(Debug)]
+pub enum DmxConfigError {
+    Address,
+    Universe,
+    Port,
+}
+
 #[derive(Clone, Copy)]
 pub struct DmxConfig {
     address: u16,
@@ -30,16 +37,16 @@ pub struct DmxConfig {
 }
 
 impl DmxConfig {
-    pub fn new(address: u16, universe: u16, sacn_port: u16) -> Result<Self, ()> {
+    pub fn new(address: u16, universe: u16, sacn_port: u16) -> Result<Self, DmxConfigError> {
         if !(1..=512).contains(&address) {
-            return Err(());
+            return Err(DmxConfigError::Address);
         }
         // E1.31 §9.1.1: universe 0 and 64000–65535 are reserved; valid range is 1–63999.
         if !(1..=63999).contains(&universe) {
-            return Err(());
+            return Err(DmxConfigError::Universe);
         }
         if sacn_port == 0 {
-            return Err(());
+            return Err(DmxConfigError::Port);
         }
         Ok(Self { address, universe, sacn_port })
     }
@@ -53,6 +60,14 @@ impl DmxConfig {
     }
 }
 
+#[derive(Debug)]
+pub enum WifiConfigError {
+    SsidLength,
+    SsidNul,
+    PasswordLength,
+    PasswordNul,
+}
+
 #[derive(Clone)]
 pub struct WifiConfig {
     ssid: String,
@@ -60,19 +75,19 @@ pub struct WifiConfig {
 }
 
 impl WifiConfig {
-    pub fn new(ssid: String, password: String) -> Result<Self, ()> {
+    pub fn new(ssid: String, password: String) -> Result<Self, WifiConfigError> {
         if ssid.is_empty() || ssid.len() > 32 {
-            return Err(());
+            return Err(WifiConfigError::SsidLength);
         }
         if ssid.bytes().any(|b| b == 0) {
-            return Err(());
+            return Err(WifiConfigError::SsidNul);
         }
         // WPA2-PSK requires 8–63 ASCII characters; 64-byte form is a raw PMK hex string.
         if password.len() < 8 || password.len() > 64 {
-            return Err(());
+            return Err(WifiConfigError::PasswordLength);
         }
         if password.bytes().any(|b| b == 0) {
-            return Err(());
+            return Err(WifiConfigError::PasswordNul);
         }
         Ok(Self { ssid, password })
     }

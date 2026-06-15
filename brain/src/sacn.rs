@@ -55,10 +55,14 @@ pub fn encode(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16], slots: 
     p
 }
 
+/// The sACN multicast group address for the given universe.
+pub fn multicast_addr(universe: u16) -> Ipv4Addr {
+    Ipv4Addr::new(239, 255, (universe >> 8) as u8, universe as u8)
+}
+
 /// Sends a packet to the sACN multicast group for the given universe.
 pub fn send_multicast(socket: &UdpSocket, universe: u16, port: u16, packet: &[u8]) {
-    let addr = Ipv4Addr::new(239, 255, (universe >> 8) as u8, universe as u8);
-    let dest = SocketAddrV4::new(addr, port);
+    let dest = SocketAddrV4::new(multicast_addr(universe), port);
     if let Err(e) = socket.send_to(packet, dest) {
         eprintln!("sACN send error: {e}");
     }

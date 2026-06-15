@@ -87,13 +87,7 @@ async fn main(spawner: Spawner) {
         .set_multicast_ttl_v4(1)
         .expect("set multicast TTL failed");
     let cid = sacn::new_cid();
-    eprintln!(
-        "brain: universe {} → 239.255.{}.{}:{}  @ {} Hz",
-        UNIVERSE,
-        UNIVERSE >> 8,
-        UNIVERSE as u8,
-        SACN_PORT,
-        FRAME_RATE_HZ,
-    );
+    let group = sacn::multicast_addr(UNIVERSE);
+    eprintln!("brain: universe {UNIVERSE} → {group}:{SACN_PORT}  @ {FRAME_RATE_HZ} Hz");
     spawner.spawn(noise_task(socket, cid, reader).unwrap());
 }

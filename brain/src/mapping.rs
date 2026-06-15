@@ -42,6 +42,12 @@ pub struct Mapping {
     w_gain: Slew,
 }
 
+impl Default for Mapping {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mapping {
     pub fn new() -> Self {
         Self {
