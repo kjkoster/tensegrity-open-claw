@@ -31,8 +31,19 @@ cp ponytail/target/xtensa-esp32s3-none-elf/release/ponytail "$STAGE/ponytail"
 ls -l "$STAGE"
 
 # --- 3. Ship sources and binaries to the Pi --------------------------------
+step "sync clock on $PI (it has no NTP/RTC, so its clock drifts behind)"
+# cargo decides freshness by mtime: rsync stamps brain sources with the Mac's
+# (correct) mtimes, but the Pi builds artifacts with its own clock. If the Pi clock
+# lags the Mac, every source looks newer than every artifact and cargo rebuilds the
+# world. Push the Mac's UTC time to the Pi so both ends share one clock.
+ssh "$PI" "sudo date -u -s '$(date -u '+%Y-%m-%d %H:%M:%S')'" >/dev/null
+
 step "rsync brain source to $PI:brain"
-rsync -az --delete --exclude=target brain/ "$PI:brain/"
+# --checksum, not the default size+mtime check: git checkouts and editor saves bump
+# source mtimes without changing content, and a bumped mtime would land newer than
+# the Pi's build artifacts and trigger a spurious cargo rebuild. Content-based sync
+# leaves unchanged files (and their mtimes) untouched, so cargo stays incremental.
+rsync -az --checksum --delete --exclude=target brain/ "$PI:brain/"
 
 step "rsync binaries to $PI:$REMOTE_DIR"
 ssh "$PI" "mkdir -p '$REMOTE_DIR'"
