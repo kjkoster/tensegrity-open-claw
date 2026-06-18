@@ -7,6 +7,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+mod ble;
 mod config;
 mod led_fixture;
 mod models;
@@ -15,22 +16,24 @@ mod wifi;
 
 use embassy_executor::Spawner;
 use embassy_net::Stack;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
     efuse::{self, InterfaceMacAddress},
-    gpio::DriveMode,
     interrupt::software::SoftwareInterruptControl,
+    peripherals::BT,
+    rng::Rng,
+    timer::timg::TimerGroup,
+};
+use esp_hal::{
+    gpio::DriveMode,
     ledc::{
         LSGlobalClkSource, Ledc, LowSpeed,
         channel::{self, ChannelIFace, Number as ChannelNumber},
         timer::{self, TimerIFace},
     },
-    rng::Rng,
     time::Rate,
-    timer::timg::TimerGroup,
 };
-use models::{DmxConfig, DmxValue};
+use models::{DmxConfig, DmxReceiver, DmxWatch};
 use rtt_target::rprintln;
 
 extern crate alloc;
@@ -45,17 +48,26 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static DMX_VALUE: Signal<CriticalSectionRawMutex, DmxValue> = Signal::new();
+// The latest DMX value, fanned out to both consumer personalities. See
+// `models::DMX_CONSUMERS`.
+static DMX_VALUE: DmxWatch = DmxWatch::new();
 
 #[embassy_executor::task]
 async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
     loop {
         network_stack.wait_config_up().await;
-        let mut listener = sacn::Listener::new(network_stack, config, &DMX_VALUE);
+        let mut listener = sacn::Listener::new(network_stack, config, DMX_VALUE.sender());
         // run() returns on a universe timeout; drop the listener (leaving the
         // multicast group) and recreate it so it rejoins with a fresh socket.
         listener.run().await;
     }
+}
+
+/// BLE-bridge consumer, spawned as its own task so it runs in parallel with the PWM
+/// `led_fixture` (which `main` drives directly). Both observe `DMX_VALUE`.
+#[embassy_executor::task]
+async fn ble_bridge(dmx_value: DmxReceiver, bt: BT<'static>, target: [u8; 6]) -> ! {
+    ble::run(dmx_value, bt, target).await
 }
 
 #[allow(
@@ -68,7 +80,11 @@ async fn main(spawner: Spawner) -> ! {
     rtt_target::rtt_init_print!();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
+    // One plain heap region, sized for WiFi + BLE coexistence with headroom to spare.
+    // (We could pool an extra ~72 KB reclaimed from the ROM bootloader, but a single
+    // region is far easier to reason about and we have RAM to spare.) If this ever
+    // fails to link, regular DRAM is tighter than expected — drop to a smaller size.
+    esp_alloc::heap_allocator!(size: 128 * 1024);
 
     let peripherals = esp_hal::init(config);
     // GPIO27-37 are used internally by the XIAO ESP32-S3's octal PSRAM. Consuming
@@ -109,6 +125,22 @@ async fn main(spawner: Spawner) -> ! {
         mac_address[5]
     );
 
+    // The BLE controller's public address — what a sniffer sees as the ESP's InitA in
+    // its CONNECT_IND. Derived from the same efuse base MAC as the station MAC above.
+    let bt_mac: [u8; 6] = efuse::interface_mac_address(InterfaceMacAddress::Bluetooth)
+        .as_bytes()
+        .try_into()
+        .unwrap();
+    rprintln!(
+        "ble mac:        {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        bt_mac[0],
+        bt_mac[1],
+        bt_mac[2],
+        bt_mac[3],
+        bt_mac[4],
+        bt_mac[5]
+    );
+
     let dmx_config = config::dmx_config_for(mac_address);
     let wifi_config = config::wifi_config();
 
@@ -117,6 +149,34 @@ async fn main(spawner: Spawner) -> ! {
     let (network_stack, _) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
+
+    // ── Consumers ───────────────────────────────────────────────────────────────
+    // Both consumer personalities run at once, each observing DMX_VALUE through its
+    // own Watch receiver: the BLE bridge writes the fixture's original Telink
+    // controller over BLE, and the PWM led_fixture drives the RGBW array over LEDC.
+    // The BLE bridge is spawned as a task; the PWM personality is awaited directly at
+    // the end of main, so this function never returns.
+    let ble_value = DMX_VALUE.receiver().unwrap();
+    let pwm_value = DMX_VALUE.receiver().unwrap();
+
+    let target = config::ble_target_mac_for(mac_address)
+        .expect("no BLE target in config::BOARDS for this board");
+    rprintln!(
+        "ble address:    {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        target[0],
+        target[1],
+        target[2],
+        target[3],
+        target[4],
+        target[5]
+    );
+    // Heap state just before BLE coexistence allocates its controller-thread stack:
+    // the stack needs one contiguous block, so the largest free block matters as much
+    // as the total.
+    rprintln!("heap stats:\n{}", esp_alloc::HEAP.stats());
+    spawner.spawn(ble_bridge(ble_value, peripherals.BT, target).unwrap());
+
+    rprintln!("pwm fixture:    LEDC");
 
     // GPIO21 is the single user-controllable yellow LED on the XIAO ESP32-S3 (active low).
     let mut ledc = Ledc::new(peripherals.LEDC);
@@ -153,7 +213,7 @@ async fn main(spawner: Spawner) -> ! {
     white_channel.configure(ch_cfg).unwrap();
 
     led_fixture::run(
-        &DMX_VALUE,
+        pwm_value,
         &mut onboard_channel,
         &mut red_channel,
         &mut green_channel,

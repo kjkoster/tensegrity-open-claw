@@ -27,21 +27,27 @@ The system is split into two halves that communicate via sACN (E1.31) over a clo
 
 ### 1.1 DMX layout
 
-Each fixture is IRGBW: Intensity on base address +0, then R, G, B, W. Two fixtures occupy one
-universe, 10 slots. Fixture A is set to DMX start address 1, Fixture B to 6.
+Each fixture is IRGBW + Gobo rotation: Intensity on base address +0, then R, G, B, W, Gobo.
+Two fixtures occupy one universe, 12 slots. Fixture A is set to DMX start address 1, Fixture
+B to 7.
 
-| Slot | Fixture | Channel   | Driven by                 |
-|-----:|---------|-----------|---------------------------|
-| 1    | A       | Intensity | audio loudness            |
-| 2    | A       | Red       | Perlin (seed 0)           |
-| 3    | A       | Green     | Perlin (seed 1)           |
-| 4    | A       | Blue      | Perlin (seed 2)           |
-| 5    | A       | White     | Perlin (seed 3)           |
-| 6    | B       | Intensity | audio loudness            |
-| 7    | B       | Red       | Perlin (seed 4)           |
-| 8    | B       | Green     | Perlin (seed 5)           |
-| 9    | B       | Blue      | Perlin (seed 6)           |
-| 10   | B       | White     | Perlin (seed 7)           |
+| Slot | Fixture | Channel       | Driven by                 |
+|-----:|---------|---------------|---------------------------|
+| 1    | A       | Intensity     | audio loudness            |
+| 2    | A       | Red           | Perlin (seed 0)           |
+| 3    | A       | Green         | Perlin (seed 1)           |
+| 4    | A       | Blue          | Perlin (seed 2)           |
+| 5    | A       | White         | Perlin (seed 3)           |
+| 6    | A       | Gobo rotation | 0 (BLE personality only)  |
+| 7    | B       | Intensity     | audio loudness            |
+| 8    | B       | Red           | Perlin (seed 4)           |
+| 9    | B       | Green         | Perlin (seed 5)           |
+| 10   | B       | Blue          | Perlin (seed 6)           |
+| 11   | B       | White         | Perlin (seed 7)           |
+| 12   | B       | Gobo rotation | 0 (BLE personality only)  |
+
+The sixth channel, Gobo rotation, is consumed only by the BLE bridge personality (Build 9);
+the PWM fixtures ignore it and the brain currently holds it at 0.
 
 White rides Perlin like the other colour channels, but because W desaturates the mix it
 typically wants scaling down — a per-channel output gain handles this without changing the
@@ -198,6 +204,23 @@ replace them everywhere with the new network values, then force-push.
     IkWilInternetten!!==>close-that-claw
 
     git filter-repo --replace-text replacements.txt --force
+
+#### Open tasks — remove Parquet recording
+
+Remove the offline sound-profile recorder (the Arrow/Parquet capture from SOUND.md
+§14). It samples the `ControlState` snapshot at 10 Hz and writes rotating Parquet
+files to disk — useful during DSP tuning, but not wanted in the deployed piece, and
+its continuous SD-card writes work directly against the read-only-root goal in
+Build 7.
+
+- [ ] Delete `brain/src/recorder.rs`.
+- [ ] Remove `mod recorder;` and the `spawn_recorder` call (and its comment) from
+      `brain/src/main.rs`; `reader` then no longer needs the extra `.clone()`.
+- [ ] Remove the `RECORDER_*` constants from `brain/src/config.rs`.
+- [ ] Drop the now-unused `arrow`, `parquet`, and `chrono` dependencies from
+      `brain/Cargo.toml`.
+- [ ] Rebuild on the Pi and confirm the DMX loop is unaffected (the removal must not
+      touch the sACN send path).
 
 ---
 
@@ -557,51 +580,20 @@ than the current IRGBW fixtures. The channel re-spacing touches the brain and bo
 personalities; it is fully reversible via git, so we implement it and roll back if it
 misbehaves.
 
-#### De-risk first (blocking)
-
-- [ ] Spike **WiFi + BLE coexistence** on the XIAO ESP32-S3 (`esp-radio` + a `no_std` BLE
-      host, e.g. `trouble-host`): hold the WiFi/sACN link and a BLE central connection at the
-      same time, and measure RAM headroom against the current fixed heap (`73744` bytes).
-      Go/no-go gate for the rest of Build 9.
-- [ ] Capture from a live fixture: its BLE station **MAC** and the GATT **service + writable
-      characteristic UUID** behind ATT handle `0x0011` (the handle is discovery-order-dependent
-      and not portable to an embedded host; `trouble-host` discovers by UUID).
-
 #### Channel map & addressing (brain + ponytail)
 
-- [ ] Grow each fixture from 5 to 6 channels by appending **Gobo rotation** after White.
-- [ ] Move the fixtures up one slot in the brain config: Fixture A → base 1 (slots 1–6),
-      Fixture B → base **7** (slots 7–12, was 6); the brain now emits 12 slots.
-- [ ] Brain drives **IRGB only for now**: set White = 0 and Gobo rotation = 0 on every frame
-      (the audio-reactive W mapping fights the modal interlock; revisit later).
-- [ ] Extend ponytail's `DmxValue` to 6 slots and update `parse_e131_slots` / `DmxValue::LEN`
-      and the last-slot bounds check.
-- [ ] Update the existing PWM ponytail's compiled-in base address for the moved fixture.
-- [ ] Update the §1.1 DMX layout table to the 6-channel-per-fixture layout once implemented.
+- [ ] Park **White at 0** on the BLE-fixture frames in the brain (the audio-reactive W
+      mapping fights the modal interlock — White > 0 hard-cuts RGB). Gobo rotation is
+      already held at 0; revisit White per-fixture later.
 
 #### Ponytail BLE personality (firmware)
 
-- [ ] New personality module set (frame builders + DMX→BLE translation + BLE task), selectable
-      as a build alongside the PWM personality — not a fork.
 - [ ] Keep the PWM personality during bring-up — it is the known-good reference for confirming
       that sACN data arrives correctly (right slots, right values) while the BLE path is tested.
       **TODO: remove the PWM personality** once the BLE bridge is validated.
 - [ ] Simulate the modal white interlock in the PWM personality too, so it matches the BLE
       fixture's behaviour: when White > 0, force R = G = B = 0 (White overrides RGB). This keeps
       the reference path faithful to interlocked white rather than co-lighting RGB and W.
-- [ ] Port the six frame builders and the interlock/scaling (`build_frames`) from
-      `ble/DMX-BLE.md` into `no_std` + `heapless`, with defensive clamps (white 0–100, gobo
-      speed 1–10) and a single rounded 0–255 → 0–100 conversion (the doc scales twice and
-      truncates).
-- [ ] Reuse the existing sACN `Listener` + `Signal` as the producer (it already does
-      change-detection); the new BLE task replaces `led_fixture::run` as the consumer. Use
-      `CriticalSectionRawMutex` to match the existing `DMX_VALUE` signal.
-- [ ] BLE task owns the connection lifecycle: connect, **resync the full state on every
-      (re)connect**, 10 s heartbeat re-assert, 2 s pause + reconnect on any write/connect
-      failure.
-- [ ] Per-fixture **BLE target MAC** in the config struct, keyed by station MAC (like the
-      existing DMX-address table). **TODO (you): paste each fixture's sniffed BLE MAC into the
-      config struct** — leave a placeholder until captured.
 - [ ] Pace consecutive Write-Without-Response frames with a **20 ms** inter-frame gap.
       **TODO: test on hardware** whether 20 ms is sufficient (and necessary) — tune if frames
       drop or reorder.
@@ -619,8 +611,6 @@ misbehaves.
 
 #### Docs
 
-- [ ] Add an **"Interlocked white"** section to ponytail's `README.md` (text supplied in
-      `ble/DMX-BLE.md`), adapted to the README's style.
 - [ ] Document this BLE-bridge personality and the 6-channel map in §2.1 / §3.2.
 
 #### Validation
@@ -722,3 +712,88 @@ patch table, and moving a fixture between universes is **one field**.
 - [ ] Both 3-pin and 5-pin outputs work.
 - [ ] Re-patching a fixture to a new address or universe is a patch-table edit only.
 - [ ] End-to-end: engine → patch → both sinks, running unattended.
+
+---
+
+### Build 11 — Manual override from QLC+ (sACN priority)
+
+A way to take live manual control of the WiFi fixtures from **QLC+ on a laptop**
+without stopping or coordinating with the brain. The brain and QLC+ both send the
+same universe; the fixtures obey the **highest-priority live source** (E1.31's
+built-in source arbitration) and fall back automatically when the higher source
+goes quiet. The brain keeps running at its normal priority throughout — so the
+override works **even if the brain has hung or crashed**, which is exactly when
+manual control is most wanted. This is the property the brain-side alternatives
+(detect-and-back-off, or relaying a second universe) cannot offer, since they route
+the manual takeover through the very box you may be overriding.
+
+**How it works.** E1.31 carries a one-byte **priority** (0–200, default 100) in the
+framing layer (packet offset 108). The brain already stamps 100
+(`brain/src/sacn.rs:41`, `brain/src/main.rs:76`). QLC+ sends the same universe at a
+strictly higher priority (e.g. **200**). A receiver tracks the sources it hears per
+universe — keyed by the 16-byte **CID** (offset 22–37) — acts on the highest-priority
+one still alive, and drops a source after the E1.31 **network-data-loss timeout
+(2.5 s)**, or immediately if that source sets the **stream-terminated** flag (options
+byte offset 112, bit `0x40`) on a clean stop. Using distinct priorities (100 vs 200)
+sidesteps any equal-priority merge ambiguity.
+
+#### Brain (Rust) — essentially unchanged
+
+- [ ] No functional change: the brain already emits universe 1 at priority 100
+      (`brain/src/main.rs:76`).
+- [ ] Optional clarity: lift the literal `100` into a named `SACN_PRIORITY` constant
+      in `brain/src/config.rs`.
+
+#### Ponytail (firmware) — source arbitration in the shared decoder
+
+The work lands in `ponytail/src/sacn.rs` (`parse_e131_slots` + `Listener::run`),
+which bone and hoof reuse — so all WiFi fixtures gain the behaviour at once.
+
+- [ ] Parse the **priority** byte (offset 108) and the source **CID** (offset 22–37)
+      alongside the existing fields; add `PRIORITY_OFFSET`, `OPTIONS_OFFSET`,
+      `CID_OFFSET` next to the current offset constants.
+- [ ] Honour the **options** byte (offset 112): treat the stream-terminated bit
+      (`0x40`) as an immediate release of that source.
+- [ ] Keep a small per-CID **source table** (`heapless::Vec`, ~4 entries):
+      `{ cid, priority, last_seen: embassy_time::Instant }`.
+- [ ] Per packet: refresh/insert its source; **adopt slots only if it is the
+      highest-priority source still within the 2.5 s window**; expire stale sources.
+- [ ] Keep the existing change-detection (`last_value`) and the 5 s `UNIVERSE_TIMEOUT`
+      socket-rebind as the "nobody talking at all" safety net — orthogonal to source
+      arbitration.
+
+#### QLC+ (laptop) — configuration
+
+- [ ] E1.31 output plugin: map the workspace universe to **universe 1** on the
+      closed-claw network interface, UDP port **5568**.
+- [ ] Set the output **priority to 200** (QLC+ defaults to 100 — it must be raised
+      above the brain).
+- [ ] Operating note: a **blackout** in QLC+ still *owns* the fixtures (it keeps
+      sending 200 at zero). To **release** back to the brain, stop the plugin output /
+      quit QLC+ (sends the stream-terminated flag → instant revert), or drop off WiFi
+      (revert after the 2.5 s timeout).
+
+#### Optional — physical "manual" toggle (composes on top)
+
+- [ ] If a tactile, unambiguous "I am in manual" control is wanted, add a Pi GPIO
+      toggle that mutes the brain's send. It is **complementary** to priority
+      arbitration, not a replacement: priority does the automatic merge and provides
+      the survives-a-brain-crash property; the switch is just a human-facing kill for
+      the brain's stream.
+
+#### Docs
+
+- [ ] Note the priority-arbitration behaviour in §3.1 (Transport) so the override
+      path is discoverable from the design principles.
+
+#### Validation
+
+- [ ] QLC+ at 200 takes over within a frame; the brain (100) is ignored while QLC+
+      is live.
+- [ ] Stop QLC+ output → fixtures revert to the brain within ~2.5 s, or immediately
+      if QLC+ sent the stream-terminated flag.
+- [ ] Laptop drops off WiFi mid-control → fixtures revert to the brain after the
+      2.5 s timeout.
+- [ ] Kill the brain while QLC+ is controlling → no visible change (the override does
+      not depend on the brain).
+- [ ] With only the brain running (no QLC+), behaviour is identical to Build 1.

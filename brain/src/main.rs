@@ -25,7 +25,7 @@ use std::net::UdpSocket;
 #[embassy_executor::task]
 async fn noise_task(socket: UdpSocket, cid: [u8; 16], control: ControlReader) -> ! {
     let fixture_a = Fixture { start_address: 1 };
-    let fixture_b = Fixture { start_address: 6 };
+    let fixture_b = Fixture { start_address: 7 };
     let frame_period = Duration::from_micros(1_000_000 / FRAME_RATE_HZ);
     let mut ticker = Ticker::every(frame_period);
     let mut sequence: u8 = 0;
@@ -50,8 +50,8 @@ async fn noise_task(socket: UdpSocket, cid: [u8; 16], control: ControlReader) ->
         t += out.speed * dt;
         let intensity = (out.intensity * 255.0) as u8;
 
-        // 10 DMX slots for two IRGBW fixtures
-        let mut slots = [0u8; 10];
+        // 12 DMX slots for two 6-channel fixtures (IRGBW + Gobo rotation).
+        let mut slots = [0u8; 12];
 
         slots[fixture_a.slot(0)] = intensity;
         slots[fixture_a.slot(1)] = to_dmx(fbm2(t, SEEDS[0], out.octave2), CONTRAST, GAMMA, 1.0);
@@ -59,6 +59,11 @@ async fn noise_task(socket: UdpSocket, cid: [u8; 16], control: ControlReader) ->
         slots[fixture_a.slot(3)] = to_dmx(fbm2(t, SEEDS[2], out.octave2), CONTRAST, GAMMA, 1.0);
         slots[fixture_a.slot(4)] =
             to_dmx(fbm2(t, SEEDS[3], out.octave2), CONTRAST, GAMMA, out.w_gain);
+        // Gobo rotation (offset 5) is 0 (motor off). Only the BLE bridge personality
+        // drives the gobo; the PWM fixtures ignore this slot.
+        // TODO when a modal BLE fixture is patched in, also park its White to 0
+        // (White > 0 hard-cuts RGB on that fixture); decide per-fixture then.
+        slots[fixture_a.slot(5)] = 0;
 
         slots[fixture_b.slot(0)] = intensity;
         slots[fixture_b.slot(1)] = to_dmx(fbm2(t, SEEDS[4], out.octave2), CONTRAST, GAMMA, 1.0);
@@ -66,6 +71,7 @@ async fn noise_task(socket: UdpSocket, cid: [u8; 16], control: ControlReader) ->
         slots[fixture_b.slot(3)] = to_dmx(fbm2(t, SEEDS[6], out.octave2), CONTRAST, GAMMA, 1.0);
         slots[fixture_b.slot(4)] =
             to_dmx(fbm2(t, SEEDS[7], out.octave2), CONTRAST, GAMMA, out.w_gain);
+        slots[fixture_b.slot(5)] = 0;
 
         let packet = sacn::encode(UNIVERSE, sequence, 100, &cid, &slots);
         sacn::send_multicast(&socket, UNIVERSE, SACN_PORT, &packet);

@@ -1,15 +1,21 @@
 [package]
 edition      = "2024"
 name         = "ponytail"
-rust-version = "1.96"
+rust-version = "1.95"
 version      = "0.1.0"
 
 [dependencies]
 esp-hal             = { version = "~1.1.0", features = ["esp32s3", "unstable"] }
 esp-rtos            = { version = "0.3.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32s3"] }
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3"] }
-esp-radio           = { version = "0.18.0", features = ["esp-alloc", "esp32s3", "unstable", "wifi"] }
+esp-radio           = { version = "0.18.0", features = ["ble", "coex", "esp-alloc", "esp32s3", "unstable", "wifi"] }
 esp-alloc           = "0.10.0"
+
+# BLE host stack for the BLE-bridge personality (see src/ble.rs). esp-radio 0.18 pins
+# bt-hci 0.8, and trouble-host 0.6 is the release that builds against bt-hci 0.8 — so
+# both versions are locked to esp-radio's and must move together when esp-radio bumps.
+bt-hci        = { version = "0.8.0", default-features = false }
+trouble-host  = { version = "0.6.0", features = ["central", "scan", "gatt", "default-packet-pool"], default-features = false }
 
 embassy-executor = "0.10.0"
 embassy-sync     = "0.8.0"
@@ -22,9 +28,11 @@ embassy-net      = { version = "0.9.1", features = [
   "auto-icmp-echo-reply",
 ] }
 embassy-time     = "0.5.0"
+embassy-futures  = "0.1"
 
 critical-section = "1.2.0"
 embedded-hal     = "1"
+heapless         = "0.9"
 rtt-target       = "0.6.2"
 static_cell      = "2.1.1"
 

@@ -3,11 +3,10 @@ use embassy_net::{
     Stack,
     udp::{PacketMetadata, UdpSocket},
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, with_timeout};
 use rtt_target::rprintln;
 
-use crate::models::{DmxConfig, DmxValue};
+use crate::models::{DmxConfig, DmxSender, DmxValue};
 
 const UNIVERSE_TIMEOUT: u64 = 5; // seconds
 
@@ -53,14 +52,14 @@ pub(crate) struct Listener {
     socket: UdpSocket<'static>,
     config: DmxConfig,
     last_value: Option<DmxValue>,
-    dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
+    dmx_value: DmxSender,
 }
 
 impl Listener {
     pub(crate) fn new(
         network_stack: Stack<'static>,
         config: DmxConfig,
-        dmx_value: &'static Signal<CriticalSectionRawMutex, DmxValue>,
+        dmx_value: DmxSender,
     ) -> Self {
         let multicast = config.multicast_address();
         if let Err(e) = network_stack.join_multicast_group(multicast) {
@@ -120,7 +119,7 @@ impl Listener {
                     ) {
                         if Some(val) != self.last_value {
                             self.last_value = Some(val);
-                            self.dmx_value.signal(val);
+                            self.dmx_value.send(val);
                         }
                     }
                 }
@@ -145,11 +144,21 @@ impl Drop for Listener {
     }
 }
 
-/// Extracts five consecutive DMX slots (I, R, G, B, W) from an E1.31 data packet.
-/// `base_address` is the 1-indexed DMX address of the Intensity slot; Red through
-/// White follow at base_address+1 through base_address+4.
+/// Big-endian field readers. `parse_e131_slots` length-checks the packet up front, so
+/// every offset these are called with is in range and the slice is the exact width —
+/// `try_into` cannot fail.
+fn be_u16(pkt: &[u8], off: usize) -> u16 {
+    u16::from_be_bytes(pkt[off..off + 2].try_into().unwrap())
+}
+fn be_u32(pkt: &[u8], off: usize) -> u32 {
+    u32::from_be_bytes(pkt[off..off + 4].try_into().unwrap())
+}
+
+/// Extracts the fixture's six consecutive DMX slots (I, R, G, B, W, Gobo) from an
+/// E1.31 data packet. `base_address` is the 1-indexed DMX address of the Intensity
+/// slot; the other five channels follow through `base_address + 5`.
 /// Returns None if the packet is invalid, for a different universe, uses a
-/// non-zero start code, or does not contain all five slots.
+/// non-zero start code, or does not contain all six slots.
 fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxValue> {
     if pkt.len() < START_CODE_OFFSET + 1 {
         return None;
@@ -157,25 +166,13 @@ fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxV
     if &pkt[ACN_ID_OFFSET..ACN_ID_OFFSET + ACN_ID.len()] != ACN_ID {
         return None;
     }
-    if u32::from_be_bytes([
-        pkt[ROOT_VECTOR_OFFSET],
-        pkt[ROOT_VECTOR_OFFSET + 1],
-        pkt[ROOT_VECTOR_OFFSET + 2],
-        pkt[ROOT_VECTOR_OFFSET + 3],
-    ]) != ROOT_VECTOR
-    {
+    if be_u32(pkt, ROOT_VECTOR_OFFSET) != ROOT_VECTOR {
         return None;
     }
-    if u32::from_be_bytes([
-        pkt[FRAMING_VECTOR_OFFSET],
-        pkt[FRAMING_VECTOR_OFFSET + 1],
-        pkt[FRAMING_VECTOR_OFFSET + 2],
-        pkt[FRAMING_VECTOR_OFFSET + 3],
-    ]) != FRAMING_VECTOR
-    {
+    if be_u32(pkt, FRAMING_VECTOR_OFFSET) != FRAMING_VECTOR {
         return None;
     }
-    if u16::from_be_bytes([pkt[UNIVERSE_OFFSET], pkt[UNIVERSE_OFFSET + 1]]) != universe {
+    if be_u16(pkt, UNIVERSE_OFFSET) != universe {
         return None;
     }
     if pkt[DMP_VECTOR_OFFSET] != DMP_VECTOR {
@@ -185,7 +182,7 @@ fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxV
         return None;
     }
 
-    let prop_count = u16::from_be_bytes([pkt[PROP_COUNT_OFFSET], pkt[PROP_COUNT_OFFSET + 1]]);
+    let prop_count = be_u16(pkt, PROP_COUNT_OFFSET);
     let last_slot = base_address + DmxValue::LEN as u16 - 1;
     let base = START_CODE_OFFSET + base_address as usize;
     let last_offset = START_CODE_OFFSET + last_slot as usize;

@@ -2,14 +2,35 @@ extern crate alloc;
 
 use alloc::string::String;
 use embassy_net::Ipv4Address;
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    watch::{Receiver, Sender, Watch},
+};
 
 pub const DMX_MAXVALUE: u8 = 255;
 
+/// Independent consumers that observe the latest DMX value in parallel: the PWM
+/// `led_fixture` and the BLE bridge. Both personalities run at once, so the DMX
+/// value is fanned out over a `Watch` (one latest value, per-receiver "seen"
+/// tracking) rather than a `Signal` (single waker — a second waiter would starve).
+pub const DMX_CONSUMERS: usize = 2;
+
+/// The shared latest DMX value, written by the sACN listener and observed by each
+/// consumer personality. See [`DMX_CONSUMERS`].
+pub type DmxWatch = Watch<CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
+/// Producer handle into [`DmxWatch`] (held by the sACN listener).
+pub type DmxSender = Sender<'static, CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
+/// Per-consumer handle out of [`DmxWatch`] (one each for PWM and BLE).
+pub type DmxReceiver = Receiver<'static, CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
+
+/// One fixture's DMX slots. Six channels: Intensity, R, G, B, White, and
+/// Gobo rotation. The PWM personality ignores Gobo rotation; the BLE personality
+/// (`ble`) uses all six.
 #[derive(Clone, Copy, PartialEq)]
-pub struct DmxValue([u8; 5]);
+pub struct DmxValue([u8; 6]);
 
 impl DmxValue {
-    pub const LEN: usize = 5;
+    pub const LEN: usize = 6;
 
     pub fn new(slots: [u8; Self::LEN]) -> Self {
         Self(slots)
@@ -20,6 +41,7 @@ impl DmxValue {
     pub fn green(self) -> u8 { self.0[2] }
     pub fn blue(self) -> u8 { self.0[3] }
     pub fn white(self) -> u8 { self.0[4] }
+    pub fn gobo(self) -> u8 { self.0[5] }
 }
 
 #[derive(Debug)]
