@@ -32,9 +32,6 @@ const BLE_BRIGHTNESS_MAX: u8 = 0x64;
 /// speed frame.
 const BLE_GOBO_SPEED_MAX: u8 = 0x0a;
 
-/// Gap between consecutive write-without-response frames.
-const INTER_FRAME_GAP: Duration = Duration::from_millis(20);
-
 /// Re-assert the full state on this period even when nothing changes.
 const HEARTBEAT: Duration = Duration::from_secs(10);
 
@@ -238,7 +235,7 @@ mod transport {
     use rtt_target::rprintln;
     use trouble_host::prelude::*;
 
-    use super::{HEARTBEAT, INTER_FRAME_GAP, RECONNECT_PAUSE, build_frames};
+    use super::{HEARTBEAT, RECONNECT_PAUSE, build_frames};
     use crate::models::{DmxReceiver, DmxValue};
 
     // HCI command slots held on the controller side.
@@ -424,13 +421,11 @@ mod transport {
         write_char: &Characteristic<u8>,
         val: &DmxValue,
     ) -> Result<(), BleHostError<C::Error>> {
-        for (i, frame) in build_frames(val).iter().enumerate() {
-            if i > 0 {
-                Timer::after(INTER_FRAME_GAP).await;
-            }
+        for (_, frame) in build_frames(val).iter().enumerate() {
             client
-            .write_characteristic_without_response(write_char, frame)
-            .await?;
+                .write_characteristic_without_response(write_char, frame)
+                .await?;
+            crate::metrics::record_ble_packet();
         }
         Ok(())
     }

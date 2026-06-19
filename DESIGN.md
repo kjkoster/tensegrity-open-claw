@@ -6,29 +6,30 @@ The system is split into two halves that communicate via sACN (E1.31) over a clo
 
 - **Pi controller** — a Raspberry Pi running a Rust program on Linux. It generates 8 channels of independent Perlin noise, maps them to IRGBW DMX slots for two fixtures, and multicasts an sACN frame at 44 Hz. The Pi also acts as a WiFi access point for the fixtures and is reachable from a development laptop via its Ethernet port.
 
-- **Ponytail fixture** — a fibre-optic light fixture retrofitted with an ESP32-S3 (Seeed Studio XIAO). The MCU joins the Pi's WiFi as a station, subscribes to the configured sACN universe, and drives the LED array via LEDC PWM. The DMX start address, universe, sACN port, and WiFi credentials are compiled in, selected at boot from a table keyed by the board's WiFi station MAC (see `ponytail/src/config.rs`). **The ponytail firmware is implemented.**
+- **Ponytail fixture** — a fibre-optic light fixture retrofitted with an ESP32-S3 (Seeed Studio XIAO). The MCU joins the Pi's WiFi as a station, subscribes to the configured sACN universe, and drives the LED array via LEDC PWM and Bluetooth Low Energy (BLE). The DMX start address, universe, sACN port, and WiFi credentials are compiled in, selected at boot from a table keyed by the board's WiFi station MAC (see `ponytail/src/config.rs`).
 
 ```
     ┌── Laptop ───────────────────────────────────────┐
-    │  (SSH / cross-compile)                          │
+    │  (SSH / cross-compile Ponytail for xTensa)      │
     └────────────────── Ethernet ─────────────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
+    |  (compile for Brain/local audio)                |
     │  Perlin noise engine                            │
-    │  sACN sender (44 Hz) ────────── WiFi AP        │
+    │  sACN sender (44 Hz) ────────── WiFi AP         │
     └─────────────────────────────────────────────────┘
                                   │ WiFi (sACN multicast)
                           ┌───────┴────────┐
                      ┌────┴─────┐    ┌─────┴────┐
-                     │ Ponytail │    │ Fixture B│
+                     │ Ponytail │    │ Ponytail │
                      │ ESP32-S3 │    │ ESP32-S3 │
                      └──────────┘    └──────────┘
 ```
 
 ### 1.1 DMX layout
 
-Each fixture is IRGBW + Gobo rotation: Intensity on base address +0, then R, G, B, W, Gobo.
-Two fixtures occupy one universe, 12 slots. Fixture A is set to DMX start address 1, Fixture
+Each Ponytail fixture is IRGBW + Gobo rotation: Intensity on base address +0, then R, G, B, W, Gobo.
+Two Ponytail fixtures occupy one universe, 12 slots, as shown in the table below.
 B to 7.
 
 | Slot | Fixture | Channel       | Driven by                 |
@@ -58,12 +59,15 @@ loudness when music is present.
 
 ## 2. Hardware
 
-### 2.1 Ponytail fixture (fibre-optic, ESP32-S3)
+### 2.1 Ponytail fixture (fibre-optic, Seeed Studio XIAO-ESP32-S3)
 
 A cheap, generic Chinese fibre-optic light fixture. It consists of plastic optic fibres lit
 by an LED array, with a patterned metal plate rotated by a stepper motor in front of them.
-It runs from a 12V 2A supply. The original controller board has been bypassed; an ESP32-S3
-daughter board receives sACN over WiFi and drives one LED channel via PWM.
+It runs from a 12V 2A supply. In its current form, we send commands to the device using BLE,
+emulating the app that comes with this device.
+
+For testing we still drive a few GPIO pins using PWM, with the same colours as the LEDs in the
+fibre optic fixture.
 
 **Identified components**
 
@@ -78,8 +82,7 @@ daughter board receives sACN over WiFi and drives one LED channel via PWM.
 | LED daughterboard | LED array | 5 leads, cooled, decent current → likely RGBW/RGBA (4 + common) |
 
 The EP2T10, 5B7TP18, and the 8-pin GM13x are opaque Chinese OEM parts with no public
-datasheets. Functional tracing beats datasheet hunting: a logic analyser on the ULN2803A
-inputs reveals what signals control what, regardless of chip identity.
+datasheets.
 
 RF sniffing was attempted (nRF24L01+ in pseudo-promiscuous mode, sweeping all 126 channels
 at 250 k/1 M/2 Mbps) and produced no usable data. The remote's RF chip (PL1167-family)
@@ -121,11 +124,8 @@ with older rigs is not a requirement.
 
 ### 3.2 Fixture control paths
 
-Three paths exist into the fixture hardware:
+Two paths exist into the fixture hardware:
 
-- **Wireless sACN receiver (current, Build 1):** the original board remains in the fixture;
-  the ESP32-S3 receives sACN and drives a single LED channel via LEDC PWM through the
-  ULN2803A. **This is implemented.**
 - **Direct board replacement (Build 2):** replace the original board entirely and drive the
   RGBW LED array and 28BYJ-48 stepper directly from the ESP32-S3 for full per-channel
   control. Requires the hardware investigation in §2.1 first.
@@ -139,23 +139,22 @@ Three paths exist into the fixture hardware:
 (video-safe, flicker-free). Inline sACN E1.31 decoder in `sacn.rs`; the `sacn` and
 `sacn-unofficial` crates are `std`-only and not usable on bare metal. For wired DMX receive
 (Build 3), standard `esp-hal` UART traits treat the >88µs DMX Break as a framing error;
-interrupt-driven break detection via `pac` (`rxd_break` flag) will be needed.
+interrupt-driven break detection via `pac` (`rxd_break` flag) will be needed. BLE to control
+the board is implemented too.
 
-**Pi controller:** standard Rust on Linux, `std`. sACN E1.31 encoder writing to a UDP socket.
-Evaluate existing `sacn` / `sacn-unofficial` crates — both are `std`-only and would work
-here; implement inline (see Appendix A) only if neither is suitable. `cpal` via ALSA for
-audio capture.
+**Pi controller:** standard Rust on Trixie Raspbian Linux, `std`. sACN E1.31 encoder writing
+to a UDP socket. Clones the sACN library from the Ponytail. `cpal` via ALSA for audio capture.
 
 ### 3.4 Power and signal separation
 
 DMX cables are signal-only by convention; no competent engineer will patch an unknown cable
 carrying power into their desk. Therefore:
 
-- **At the desk interface:** standard 5-pin XLR (signal only) + a separate power feed
-  (mains into the ground station).
+- **At the hiuse console interface:** standard 5-pin XLR (signal only) + a separate power feed
+  (mains into the ground station), probaby 3-pin for flexibility.
 - **From ground station to the installation:** a custom hybrid cable carrying power alongside
   the DMX pair — acceptable because it is our cable between our boxes, never presented to
-  the desk.
+  the lighting console.
 
 ### 3.5 Isolation and protection
 
@@ -334,6 +333,10 @@ inverter; the GPIO13 drive is a logic-level placeholder.
 LED spotlights at the base of the sculpture. These are conventional DC LED loads; the work is
 to wire them into DMX so they are driven from the same sACN stream as the other fixtures.
 
+Alternatively, these are rental DMX lights, so we need wiring (5-pin and 3-pin) for an extra
+universe for these. Opto-isolation and proper standard wired DMX, no custom or non-standard
+work on this universe.
+
 #### Hardware
 
 - [ ] Determine spotlight electrical type (voltage, constant-current vs constant-voltage,
@@ -361,14 +364,10 @@ to the installation cable. Optoisolates the desk's signal ground from the instal
 
 #### Hardware BOM
 
-- [ ] Ground station enclosure
 - [ ] 5-pin XLR input socket (desk side, female)
 - [ ] 5-pin XLR output connector (ground station side, male → installation cable)
 - [ ] 5-pin XLR input connector (installation side, female ← installation cable)
-- [ ] RS-485 transceiver(s) for ground-station input/output re-drive
-- [ ] Optocouplers / isolated RS-485 transceiver (e.g. ADM2582E)
-- [ ] Locking mains power connector (e.g. Neutrik powerCON)
-- [ ] Power supply (wattage = LED array + motor + logic; sizing finalised in Build 8)
+- [ ] Optocouplers / isolated RS-485 transceiver
 
 #### Design
 
@@ -376,6 +375,7 @@ to the installation cable. Optoisolates the desk's signal ground from the instal
       transceiver (e.g. ADM2582E).
 - [ ] Schematic: XLR in → isolate → DMX + power onto installation cable.
 - [ ] Verify isolated ground preserves DMX signal integrity.
+- [ ] Install everything.
 
 #### Validation
 
@@ -395,12 +395,10 @@ Prices are indicative only and must be verified at purchase.
 
 | # | Item | Qty | Notes | Approx. unit |
 |---|------|----:|-------|--------------|
-| 1 | Raspberry Pi 4 (2 GB) | 1 | Pi 3B+ is a cooler-running alternative | $45 |
-| 2 | High-endurance / industrial microSD (32 GB) | 1 | Cheap cards corrupt under days of writes | $12 |
-| 3 | Pi heatsink / small fan | 1 | Thermal headroom inside a sealed box in sun | $8 |
+| 2 | backup microSD (32 GB) | 1 | Cheap cards corrupt under days of writes | $12 |
 | 4 | Pi power supply (official 5 V / 3 A or quality DC-DC) | 1 | Separate from fixture supply | $10 |
 | 5 | Fixture power supply | per spec | Sized to the IRGBW fixtures | per spec |
-| 6 | IP65 enclosure + cable glands | 1 set | Sized for Pi + audio interface + PSUs | $40 |
+| 6 | enclosure cable glands | 1 set | Sized for Pi + audio interface + PSUs | $40 |
 | 7 | Vent membrane / desiccant pack | 1 | Condensation management in sealed outdoor box | $8 |
 | 8 | Mains inlet (IEC), fuse/breaker, surge protector | 1 set | Mains entry, fusing, transient protection | $25 |
 | 9 | Ferrules, terminal blocks, DIN rail, drip-loop hardware | 1 set | Tidy, serviceable wiring | $20 |
@@ -412,16 +410,12 @@ enclosure.
 
 - [ ] Order the connectors.
 - [ ] Order the cable glands (wartels).
-- [ ] Source the back panel for the cabinet.
-- [ ] Source installation clips / mounting hardware for fitting items into the cabinet.
-- [ ] Find or buy the final Raspberry Pi.
-- [ ] Find a DIN-rail housing for the Pi.
 - [ ] Source DIN-rail clips/brackets to mount the power supply on the DIN rail.
 - [ ] Source DIN-rail clips/brackets to mount the Alesis ADC on the DIN rail.
-- [ ] Install the DIN rails.
+- [ ] Buy screws and install the DIN rails.
 - [ ] Add a connector panel.
 - [ ] Drill the holes (glands, connectors, mounts).
-- [ ] Plug the keyhole (seal the unused keyhole opening for weatherproofing).
+- [ ] Plug the keyhole and previous mounting holes (seal the unused keyhole opening for weatherproofing).
 - [ ] Design — and if needed add — drainage and ventilation holes (condensation management;
       see the vent membrane / desiccant in the BOM).
 - [ ] Mount the power supply.
@@ -439,7 +433,6 @@ enclosure.
 
 #### Software service
 
-- Systemd service, `Restart=always`, started on boot.
 - Enable watchdog (systemd + hardware) so a hang reboots rather than freezing the piece.
 - **Protect the SD card:** read-only root (overlayfs) or at minimum log to a RAM ring buffer.
   Days of writes to a writable root is a classic multi-day-install failure.
@@ -600,6 +593,8 @@ misbehaves.
 - [ ] Drive the gobo with **power + speed only** (no Gobo Preset `0x15`), per the doc.
       **TODO: test on hardware** that the gobo actually renders without a preset recall (add a
       one-shot preset on connect if it doesn't), and re-sweep the 1–10 speed range to confirm.
+- [ ] Optimise the change-to-ble-packet ratio.
+- [ ] Log the universe frequency coming in
 
 #### Review items (the doc is reference, not gospel)
 

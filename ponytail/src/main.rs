@@ -10,6 +10,7 @@
 mod ble;
 mod config;
 mod led_fixture;
+mod metrics;
 mod models;
 mod sacn;
 mod wifi;
@@ -149,6 +150,7 @@ async fn main(spawner: Spawner) -> ! {
     let (network_stack, _) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
+    spawner.spawn(metrics::report().unwrap());
 
     // ── Consumers ───────────────────────────────────────────────────────────────
     // Both consumer personalities run at once, each observing DMX_VALUE through its

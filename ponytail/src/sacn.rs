@@ -117,9 +117,11 @@ impl Listener {
                         self.config.universe(),
                         self.config.address(),
                     ) {
+                        crate::metrics::record_universe();
                         if Some(val) != self.last_value {
                             self.last_value = Some(val);
                             self.dmx_value.send(val);
+                            crate::metrics::record_change();
                         }
                     }
                 }
