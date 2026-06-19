@@ -15,9 +15,13 @@
 //!
 //! The RGB emitters and the white LED cannot light together, so White > 0 overrides
 //! RGB (interlocked white), and the master dimmer is applied in software (the native
-//! brightness command is dead in white mode). With no readback we always assert the
-//! *complete* desired state: every change, a 10 s heartbeat, and every reconnect all
-//! re-send the full frame set.
+//! brightness command is dead in white mode). With no readback we re-assert state
+//! defensively: a change sends only the frames whose bytes differ from the set we
+//! last sent, while the 10 s heartbeat and every reconnect re-send the *complete*
+//! frame set. The delta is self-completing across mode flips — an off→on change
+//! expands to the full set on its own (no lit frame equals the lone power-off frame)
+//! — so a look that goes idle has been fully asserted, and the heartbeat then guards
+//! it against a later dropped frame.
 
 use embassy_time::Duration;
 
@@ -229,7 +233,7 @@ pub use transport::run;
 mod transport {
     use bt_hci::controller::{Controller, ExternalController};
     use embassy_futures::select::{Either, Either3, select, select3};
-    use embassy_time::{Ticker, Timer};
+    use embassy_time::{Duration, Ticker, Timer, with_timeout};
     use esp_hal::peripherals::BT;
     use esp_radio::ble::controller::BleConnector;
     use rtt_target::rprintln;
@@ -245,6 +249,38 @@ mod transport {
     const L2CAP_CHANNELS_MAX: usize = 2;
     // Services cached during discovery.
     const GATT_MAX_SERVICES: usize = 4;
+
+    // Bound the GATT setup and discovery so a stalled handshake reconnects instead of
+    // hanging forever. After an ESP reset (e.g. a re-flash) the fixture can still be
+    // holding the pre-reset ACL link and never answers the new connection's GATT
+    // setup — the symptom is sitting past "ble: connected" until a power cycle. On
+    // timeout we drop the half-open connection and retry; dropping it frees the single
+    // connection slot, and the fixture's own supervision timeout eventually releases
+    // the stale link, so it now self-heals without the power cycle.
+    const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
+
+    // Bound the scan-and-connect too: with a filter-accept-list, `connect()` scans
+    // forever while the fixture is absent or the radio is wedged. A generous timeout
+    // recovers a stuck scan and keeps the loop visible, without thrashing when the
+    // fixture is simply powered off.
+    const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+    // Link supervision timeout we request. This is the connection-wide value both ends
+    // use to declare the link dead, so it also bounds how long the fixture keeps a
+    // ghost link alive after *we* vanish (e.g. an ESP reset). Shorter ⇒ the fixture
+    // frees the stale link — and accepts us again — sooner; too short risks dropping on
+    // brief interference. The fixture is close and strong here (RSSI ≈ -40), so 4 s is
+    // a safe trade. Tune if reconnects still lag a reset.
+    const SUPERVISION_TIMEOUT: Duration = Duration::from_secs(4);
+
+    // Connection interval we request from the fixture (#2). trouble-host's default is a
+    // slow, power-saving interval; a tight 7.5–15 ms window lets brain's frame stream
+    // actually reach the fixture instead of being resampled down to the link rate. The
+    // fixture negotiates the final value — watch the existing `ble/s` metric for the
+    // rate that was actually granted, since trouble-host 0.6 does not surface the
+    // negotiated interval through its safe API.
+    const CONN_INTERVAL_MIN: Duration = Duration::from_micros(7_500);
+    const CONN_INTERVAL_MAX: Duration = Duration::from_millis(15);
 
     // The fixture's GATT layout, captured from the live device (nRF Connect + sniffer):
     // a standard HM-10-style serial service 0xFFE0 whose characteristic 0xFFE1 is the
@@ -294,37 +330,87 @@ mod transport {
                     target[4],
                     target[5]
                 );
+                rprintln!(
+                    "ble: requesting conn interval {}-{} us, latency 0",
+                    CONN_INTERVAL_MIN.as_micros(),
+                    CONN_INTERVAL_MAX.as_micros(),
+                );
                 let config = ConnectConfig {
-                    connect_params: Default::default(),
+                    connect_params: RequestedConnParams {
+                        min_connection_interval: CONN_INTERVAL_MIN,
+                        max_connection_interval: CONN_INTERVAL_MAX,
+                        supervision_timeout: SUPERVISION_TIMEOUT,
+                        ..Default::default()
+                    },
                     scan_config: ScanConfig {
                         filter_accept_list: &[(peer.kind, &peer.addr)],
                         ..Default::default()
                     },
                 };
 
-                let conn = match central.connect(&config).await {
-                    Ok(conn) => conn,
-                    Err(e) => {
+                let conn = match with_timeout(CONNECT_TIMEOUT, central.connect(&config)).await {
+                    Ok(Ok(conn)) => conn,
+                    Ok(Err(e)) => {
                         rprintln!("ble: connect failed: {:?}", e);
                         rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
                         Timer::after(RECONNECT_PAUSE).await;
                         continue;
                     }
+                    Err(_) => {
+                        rprintln!(
+                            "ble: no connection within {} s — rescanning",
+                            CONNECT_TIMEOUT.as_secs()
+                        );
+                        continue;
+                    }
                 };
                 rprintln!("ble: connected");
 
-                let client =
-                    match GattClient::<_, DefaultPacketPool, GATT_MAX_SERVICES>::new(&stack, &conn)
-                        .await
-                    {
-                        Ok(client) => client,
-                        Err(e) => {
-                            rprintln!("ble: gatt setup failed: {:?}", e);
-                            rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
-                            Timer::after(RECONNECT_PAUSE).await;
-                            continue;
-                        }
-                    };
+                // The interval actually in force (#2), read straight from the link.
+                // The fixture accepts our request at connect time and never runs a
+                // later parameter-update procedure, so this is the only place it
+                // surfaces — the ConnectionParamsUpdated event below stays silent.
+                let p = conn.params();
+                let interval_us = p.conn_interval.as_micros();
+                // One connection event per interval bounds how often the fixture sees a
+                // new frame, so this is the ceiling on update rate the link permits.
+                let max_updates_hz = if interval_us > 0 {
+                    1_000_000u64 / interval_us
+                } else {
+                    0
+                };
+                rprintln!(
+                    "ble: conn params in force: interval {} us (~{} updates/s max), latency {}, supervision {} us",
+                    interval_us,
+                    max_updates_hz,
+                    p.peripheral_latency,
+                    p.supervision_timeout.as_micros(),
+                );
+
+                let client = match with_timeout(
+                    SETUP_TIMEOUT,
+                    GattClient::<_, DefaultPacketPool, GATT_MAX_SERVICES>::new(&stack, &conn),
+                )
+                .await
+                {
+                    Ok(Ok(client)) => client,
+                    Ok(Err(e)) => {
+                        rprintln!("ble: gatt setup failed: {:?}", e);
+                        conn.disconnect();
+                        rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
+                        Timer::after(RECONNECT_PAUSE).await;
+                        continue;
+                    }
+                    Err(_) => {
+                        rprintln!(
+                            "ble: gatt setup stalled past {} s — dropping link and reconnecting",
+                            SETUP_TIMEOUT.as_secs()
+                        );
+                        conn.disconnect();
+                        Timer::after(RECONNECT_PAUSE).await;
+                        continue;
+                    }
+                };
                 rprintln!("ble: gatt client ready");
 
                 // Watch three things at once:
@@ -337,8 +423,22 @@ mod transport {
                 //      never notices the link is gone and never reconnects.
                 let wait_disconnect = async {
                     loop {
-                        if let ConnectionEvent::Disconnected { reason } = conn.next().await {
-                            break reason;
+                        match conn.next().await {
+                            ConnectionEvent::Disconnected { reason } => break reason,
+                            // The negotiated link parameters (#2): the fixture usually
+                            // requests its own interval shortly after connecting, and
+                            // this is where the value actually in force shows up.
+                            ConnectionEvent::ConnectionParamsUpdated {
+                                conn_interval,
+                                peripheral_latency,
+                                supervision_timeout,
+                            } => rprintln!(
+                                "ble: conn params negotiated: interval {} us, latency {}, supervision {} us",
+                                conn_interval.as_micros(),
+                                peripheral_latency,
+                                supervision_timeout.as_micros(),
+                            ),
+                            _ => {}
                         }
                     }
                 };
@@ -354,6 +454,11 @@ mod transport {
                     Either3::Second(Ok(())) => rprintln!("ble: serve loop ended"),
                     Either3::Third(reason) => rprintln!("ble: disconnected: {:?}", reason),
                 }
+                // Tear the link down explicitly before retrying: frees the single
+                // connection slot and sends an LL terminate so a GATT-wedged-but-alive
+                // fixture drops now rather than waiting out its supervision timeout. A
+                // no-op when the link is already gone (the Disconnected arm).
+                conn.disconnect();
                 rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
                 Timer::after(RECONNECT_PAUSE).await;
             }
@@ -365,23 +470,42 @@ mod transport {
         }
     }
 
-    /// Discover the writable characteristic, resync, then re-assert the full state on
-    /// every change and on the heartbeat. Returns when the link drops or errors.
+    /// Discover the writable characteristic, resync the full state, then send a
+    /// per-change delta with a full re-assert on the heartbeat. Returns when the link
+    /// drops or errors.
     async fn serve<C: Controller>(
         client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
         dmx_value: &mut DmxReceiver,
     ) -> Result<(), BleHostError<C::Error>> {
         rprintln!("ble: discovering service 0x{:04X}", SERVICE_UUID);
-        let services = client
-            .services_by_uuid(&Uuid::new_short(SERVICE_UUID))
-            .await?;
+        let services = match with_timeout(
+            SETUP_TIMEOUT,
+            client.services_by_uuid(&Uuid::new_short(SERVICE_UUID)),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                rprintln!("ble: service discovery stalled — reconnecting");
+                return Ok(());
+            }
+        };
         let Some(service) = services.first().cloned() else {
             rprintln!("ble: write service not found");
             return Ok(());
         };
-        let write_char: Characteristic<u8> = client
-            .characteristic_by_uuid(&service, &Uuid::new_short(WRITE_CHAR_UUID))
-            .await?;
+        let write_char: Characteristic<u8> = match with_timeout(
+            SETUP_TIMEOUT,
+            client.characteristic_by_uuid(&service, &Uuid::new_short(WRITE_CHAR_UUID)),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                rprintln!("ble: characteristic discovery stalled — reconnecting");
+                return Ok(());
+            }
+        };
         rprintln!("ble: write characteristic 0x{:04X} found", WRITE_CHAR_UUID);
 
         // Resync to the latest known DMX value, not blackout: on a reconnect the
@@ -400,33 +524,61 @@ mod transport {
                 DmxValue::new([0; DmxValue::LEN])
             }
         };
-        send_state(client, &write_char, &current).await?;
+        let mut last_frames = build_frames(&current);
+        send_all(client, &write_char, &last_frames).await?;
         rprintln!("ble: resynced, serving");
 
         // Fresh ticker per connection so the heartbeat phase restarts on resync.
         let mut tick = Ticker::every(HEARTBEAT);
         loop {
             match select(dmx_value.changed(), tick.next()).await {
-                Either::First(value) => current = value, // changed -> adopt
-                Either::Second(()) => {}                 // heartbeat -> re-assert
+                Either::First(value) => {
+                    // A change asserts only the frames whose bytes differ from the set
+                    // we last sent. The delta is self-completing across mode flips:
+                    // off→on expands to the full set (no lit frame equals the lone
+                    // power-off frame), on→off collapses to just the power-off frame,
+                    // and an off→off change sends nothing.
+                    current = value;
+                    let frames = build_frames(&current);
+                    for frame in frames.iter().filter(|f| !last_frames.contains(*f)) {
+                        write_frame(client, &write_char, frame).await?;
+                    }
+                    last_frames = frames;
+                }
+                Either::Second(()) => {
+                    // Heartbeat: re-assert the whole state. With no readback this is the
+                    // only correction for a static look, where no later change is coming
+                    // to heal a dropped frame.
+                    last_frames = build_frames(&current);
+                    send_all(client, &write_char, &last_frames).await?;
+                }
             }
-            send_state(client, &write_char, &current).await?;
         }
     }
 
-    /// Send the complete frame set for `val`, pacing consecutive write-without-
-    /// response frames.
-    async fn send_state<C: Controller>(
+    /// Assert a complete frame set — every frame, in order. Used on resync and on the
+    /// heartbeat.
+    async fn send_all<C: Controller>(
         client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
         write_char: &Characteristic<u8>,
-        val: &DmxValue,
+        frames: &super::FrameSet,
     ) -> Result<(), BleHostError<C::Error>> {
-        for (_, frame) in build_frames(val).iter().enumerate() {
-            client
-                .write_characteristic_without_response(write_char, frame)
-                .await?;
-            crate::metrics::record_ble_packet();
+        for frame in frames {
+            write_frame(client, write_char, frame).await?;
         }
+        Ok(())
+    }
+
+    /// Write one 9-byte frame as a write-without-response and count it.
+    async fn write_frame<C: Controller>(
+        client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
+        write_char: &Characteristic<u8>,
+        frame: &super::Frame,
+    ) -> Result<(), BleHostError<C::Error>> {
+        client
+            .write_characteristic_without_response(write_char, frame)
+            .await?;
+        crate::metrics::record_ble_packet();
         Ok(())
     }
 }
