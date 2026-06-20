@@ -49,6 +49,7 @@ step "rsync binaries to $PI:$REMOTE_DIR"
 ssh "$PI" "mkdir -p '$REMOTE_DIR'"
 rsync -az "$STAGE"/ "$PI:$REMOTE_DIR/"
 rsync -az remote-deploy.sh "$PI:$REMOTE_DIR/remote-deploy.sh"
+rsync -az attach.sh "$PI:attach.sh"
 
 # --- 4. Deploy + flash on the Pi ------------------------------------------
 step "run remote deploy on $PI"
