@@ -23,11 +23,6 @@ pub const SEEDS: [u64; 8] = [
     0x6969_6969_9696_9696,
 ];
 
-// ── Intensity breathing (silence baseline) ───────────────────────────────────
-pub const I_SILENCE_FLOOR: f64 = 0.05;
-pub const I_SILENCE_CEIL: f64 = 0.95;
-pub const I_SILENCE_PERIOD_S: f64 = 3.5;
-
 // ── §3 Capture ───────────────────────────────────────────────────────────────
 pub const ALSA_DEVICE: &str = "plughw:CARD=io2,DEV=0"; // confirm with `arecord -L`
 pub const REQUESTED_RATE_HZ: u32 = 48_000; // always use the negotiated rate, never this
@@ -111,20 +106,43 @@ pub const FADE_UP_S: f32 = 1.5;
 pub const FADE_DOWN_S: f32 = 3.0;
 
 // ── §9 Mapping layer (DMX side) ──────────────────────────────────────────────
-pub const MUSIC_INTENSITY_FLOOR: f64 = 0.10; // lights never fully die mid-song
-pub const SHAPE_EXP: f64 = 0.7; // perceptual lift of mid levels
-pub const ACCENT_GAIN: f64 = 0.5;
-pub const ACCENT_DECAY_S: f64 = 0.08;
-pub const SPEED_MIN: f64 = 1.5; // the silence drift speed, cells per second
+pub const MUSIC_INTENSITY_FLOOR: f64 = 0.0; // steady field in music; 0 = black, glints are all the light
+pub const SPEED_MIN: f64 = 1.5; // music colour-drift speed band, cells per second
 pub const SPEED_MAX: f64 = 7.5;
-pub const OCTAVE2_MAX: f64 = 0.5; // second Perlin octave amplitude at full turbulence
-pub const W_GAIN_SILENCE: f64 = 0.6;
-pub const W_GAIN_MIN: f64 = 0.35; // dark/bassy → warm
-pub const W_GAIN_MAX: f64 = 0.85; // bright → airy
 pub const SLEW_INTENSITY_S: f64 = 0.03;
-pub const SLEW_SPEED_S: f64 = 0.5;
-pub const SLEW_OCTAVE2_S: f64 = 0.3;
-pub const SLEW_W_GAIN_S: f64 = 3.0; // color drifts, never snaps per-beat
+pub const SLEW_OCTAVE2_S: f64 = 0.3; // also the Ponytail RGB colour-channel slew
+
+// ── §Ponytail — silence breathing (SPARKLE.md §2) ────────────────────────────
+pub const PONYTAIL_BREATH_PERIOD_S: f64 = 18.0; // own slow breath, far longer than the PWM 3.5 s
+pub const PONYTAIL_BREATH_FLOOR: f64 = 0.08; // never fully dark in silence
+pub const PONYTAIL_BREATH_CEIL: f64 = 0.60; // gentle ceiling; calm, not bright
+pub const PONYTAIL_SILENCE_DRIFT: f64 = 0.30; // RGB Perlin drift speed, ≪ SPEED_MIN
+
+// ── §Ponytail — gobo (slow spatial reshuffle, NOT twinkle rate; SPARKLE.md §3.3) ─
+pub const GOBO_DRIFT_MUSIC_MIN: f64 = 0.30; // floor: strip always moving during music (~speed 4/10)
+pub const GOBO_DRIFT_MAX: f64 = 1.00; // ceiling: full motor speed (10/10) at the busiest
+pub const GOBO_SLEW_UP_S: f64 = 0.80;
+pub const GOBO_SLEW_DOWN_S: f64 = 4.00; // slower → pattern settles after music
+pub const GOBO_TEMPO_FACTOR: f64 = 0.30; // weight of bpm coupling (0 = disable)
+pub const GOBO_TEMPO_CONF_GATE: f64 = 0.50;
+
+// ── §Ponytail — glints (LED flashes; the sparkle; SPARKLE.md §3.1–§3.2) ───────
+pub const SPARKLE_FLASH_FRAMES: u32 = 1; // on-time floor in frames (sub-frame impossible)
+pub const SPARKLE_ACCENT_GAIN: f64 = 0.85; // glint brightness pop per onset
+pub const SPARKLE_AFTERGLOW_DECAY_S: f64 = 0.025; // ~25 ms tail (≈1 frame); lower → sharper on-off / square strobe
+
+// ── §Ponytail — colour (RGB; SPARKLE.md §3.4) ────────────────────────────────
+pub const PONYTAIL_HUE_WARM_CENTROID: f64 = 0.00; // centroid → warm end (red/amber)
+pub const PONYTAIL_HUE_COOL_CENTROID: f64 = 1.00; // centroid → cool end (blue/white-ish)
+pub const PONYTAIL_SHIMMER_OCT2_MAX: f64 = 0.50; // onset_density → second-octave turbulence
+
+// ── §Ponytail — white-sparkle mode (modal hard switch; SPARKLE.md §4) ─────────
+pub const WHITE_MODE_PERLIN_SEED: u64 = 0x5eed_dead_beef_cafe; // own seed; slow gate
+pub const WHITE_MODE_PERLIN_SPEED: f64 = 0.02; // very slow → sparse, aperiodic eligibility
+pub const WHITE_MODE_GATE: f64 = 0.35; // Perlin threshold for an eligible window
+pub const WHITE_MODE_COMMIT_DENSITY: f64 = 0.70; // musical event required to actually enter
+pub const WHITE_MODE_MIN_DWELL_S: f64 = 4.0;
+pub const WHITE_MODE_MAX_DWELL_S: f64 = 25.0; // exit on next dark frame after dwell
 
 // ── §10 Observability ────────────────────────────────────────────────────────
 pub const STATUS_INTERVAL_S: f32 = 5.0;

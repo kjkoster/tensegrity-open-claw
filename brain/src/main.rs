@@ -8,6 +8,7 @@ mod latest;
 mod orchestrator;
 mod perlin;
 mod recorder;
+mod sparkle;
 
 use audio_features::AudioFeatures;
 use config::{FRAME_RATE_HZ, SACN_PORT, UNIVERSE};

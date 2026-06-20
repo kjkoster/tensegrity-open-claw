@@ -34,9 +34,3 @@ pub fn noise1d(t: f64, seed: u64) -> f64 {
 pub fn fbm2(t: f64, seed: u64, octave2_amp: f64) -> f64 {
     noise1d(t, seed) + octave2_amp * noise1d(t * 2.0, seed ^ 0x9e37_79b9_7f4a_7c15)
 }
-
-/// Maps a noise value to a DMX byte via contrast gain, clamp, gamma, and per-channel gain.
-pub fn to_dmx(n: f64, contrast: f64, gamma: f64, gain: f64) -> u8 {
-    let v = (n * contrast + 0.5).clamp(0.0, 1.0).powf(1.0 / gamma) * gain;
-    (v * 255.0) as u8
-}
