@@ -1,3 +1,6 @@
+//! The dmx-sender stage (SPARKLE.md §0.3): E1.31 sACN packet encoding and
+//! multicast transmission. Formerly `sacn.rs`.
+
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,7 +18,7 @@ pub fn new_cid() -> [u8; 16] {
 }
 
 /// Encodes an E1.31 sACN data packet.
-/// Layout per DESIGN.md Appendix A; validated against the ponytail's parse_e131_slot().
+/// Layout per DESIGN.md Appendix A; validated against the ponytail's parse_e131_slots().
 pub fn encode(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16], slots: &[u8]) -> Vec<u8> {
     let n = slots.len();
     let total = 126 + n;

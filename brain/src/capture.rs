@@ -1,11 +1,11 @@
 //! Audio capture on a dedicated OS thread (SOUND.md §3, §8.2): blocking ALSA
-//! reads pace the fast path, which publishes a fresh ControlState per period.
+//! reads pace the fast path, which publishes a fresh AudioFeatures per period.
 //! The thread never dies — xruns recover in place, a lost device is reopened
 //! with backoff, and the sculpture keeps breathing on stale snapshots.
 
+use crate::audio_features::{AudioFeatures, FeaturePipeline};
 use crate::config as cfg;
-use crate::control::ControlPublisher;
-use crate::features::FeaturePipeline;
+use crate::latest::LatestTx;
 use alsa::pcm::{Access, Format, Frames, HwParams, PCM};
 use alsa::{Direction, ValueOr};
 use std::error::Error;
@@ -18,7 +18,7 @@ const USB_PRODUCT: u16 = 0x0008;
 
 /// Spawns the capture on its own thread and returns immediately, so the embassy
 /// executor / DMX loop keeps running. Detach the handle or join it as you like.
-pub fn spawn_capture(publisher: ControlPublisher) -> JoinHandle<()> {
+pub fn spawn_capture(publisher: LatestTx<AudioFeatures>) -> JoinHandle<()> {
     thread::Builder::new()
         .name("audio-capture".into())
         .spawn(move || {
@@ -103,7 +103,7 @@ fn probe_usb() {
 
 /// Opens the device and runs the capture/feature loop until an unrecoverable
 /// error. Only returns on error; the caller reopens with backoff.
-fn capture(publisher: &ControlPublisher) -> Result<(), Box<dyn Error>> {
+fn capture(publisher: &LatestTx<AudioFeatures>) -> Result<(), Box<dyn Error>> {
     eprintln!("audio: opening ALSA device \"{}\"…", cfg::ALSA_DEVICE);
     let pcm = PCM::new(cfg::ALSA_DEVICE, Direction::Capture, false)?;
 
@@ -138,7 +138,7 @@ fn capture(publisher: &ControlPublisher) -> Result<(), Box<dyn Error>> {
     let mut last_status = Instant::now();
 
     pcm.prepare()?;
-    eprintln!("audio: capture running — publishing ControlState at block rate");
+    eprintln!("audio: capture running — publishing AudioFeatures at block rate");
     loop {
         match io.readi(&mut buf) {
             Ok(frames) => {

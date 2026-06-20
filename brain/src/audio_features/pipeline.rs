@@ -2,10 +2,11 @@
 //! silence ↔ music state machine (§7). Runs on the audio capture thread,
 //! once per ALSA period. FFT-free; the slow path lives in spectral.rs.
 
+use super::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole};
+use super::spectral::SpectralProcessor;
+use super::AudioFeatures;
+use crate::clock::now_us;
 use crate::config as cfg;
-use crate::control::{now_us, ControlState};
-use crate::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole};
-use crate::spectral::SpectralProcessor;
 use std::collections::VecDeque;
 
 const EPS: f32 = 1e-6;
@@ -118,8 +119,8 @@ impl FeaturePipeline {
     }
 
     /// Process one ALSA period of interleaved stereo i16 samples and return
-    /// the fresh ControlState to publish.
-    pub fn process_block(&mut self, interleaved: &[i16]) -> ControlState {
+    /// the fresh AudioFeatures to publish.
+    pub fn process_block(&mut self, interleaved: &[i16]) -> AudioFeatures {
         let frames = interleaved.len() / cfg::CHANNELS;
         let dt = frames as f32 / self.rate;
         self.clock_s += dt as f64;
@@ -253,7 +254,7 @@ impl FeaturePipeline {
         self.music_amount += (target - self.music_amount).clamp(-slew, slew);
 
         self.seq += 1;
-        ControlState {
+        AudioFeatures {
             seq: self.seq,
             timestamp_us: now_us(),
             energy,

@@ -1,10 +1,11 @@
 //! Sound-profile recorder (SOUND.md §14): a dedicated OS thread samples the
-//! ControlState snapshot at 10 Hz and writes it to Arrow/Parquet files for
+//! AudioFeatures snapshot at 10 Hz and writes it to Arrow/Parquet files for
 //! off-line analysis. All blocking file I/O lives on this thread, so the DMX
 //! loop is never disturbed. Files rotate every 10 minutes.
 
+use crate::audio_features::AudioFeatures;
 use crate::config as cfg;
-use crate::control::{ControlReader, ControlState};
+use crate::latest::LatestRx;
 use arrow::array::{ArrayRef, Float32Array, Int64Array, UInt8Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -20,12 +21,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct Row {
     wall_ms: i64,
-    cs: ControlState,
+    cs: AudioFeatures,
 }
 
 /// Spawns the recorder on its own thread and returns immediately. The thread
 /// never dies: errors are logged and retried with a fresh file.
-pub fn spawn_recorder(reader: ControlReader) -> JoinHandle<()> {
+pub fn spawn_recorder(reader: LatestRx<AudioFeatures>) -> JoinHandle<()> {
     thread::Builder::new()
         .name("recorder".into())
         .spawn(move || {
@@ -43,7 +44,7 @@ pub fn spawn_recorder(reader: ControlReader) -> JoinHandle<()> {
 
 /// Samples at RECORDER_RATE_HZ into one Parquet file, flushing a row group
 /// every RECORDER_BATCH_ROWS rows, then closes it after RECORDER_ROTATE_S.
-fn record_one_file(reader: &ControlReader, schema: &Arc<Schema>) -> Result<(), Box<dyn Error>> {
+fn record_one_file(reader: &LatestRx<AudioFeatures>, schema: &Arc<Schema>) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(cfg::RECORDER_DIR)?;
     let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
     let path = format!("{}/memory.{stamp}.parquet", cfg::RECORDER_DIR);
@@ -96,7 +97,7 @@ fn record_one_file(reader: &ControlReader, schema: &Arc<Schema>) -> Result<(), B
 /// from the same list, so a new field can never desync the schema from the data.
 macro_rules! columns {
     ($($name:literal, $dtype:ident, $array:ty, $get:expr);+ $(;)?) => {
-        /// One column per ControlState field, preceded by the wall clock at sample time.
+        /// One column per AudioFeatures field, preceded by the wall clock at sample time.
         fn build_schema() -> Arc<Schema> {
             Arc::new(Schema::new(vec![
                 $( Field::new($name, DataType::$dtype, false), )+

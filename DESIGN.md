@@ -207,14 +207,14 @@ replace them everywhere with the new network values, then force-push.
 #### Open tasks — remove Parquet recording
 
 Remove the offline sound-profile recorder (the Arrow/Parquet capture from SOUND.md
-§14). It samples the `ControlState` snapshot at 10 Hz and writes rotating Parquet
+§14). It samples the `AudioFeatures` snapshot at 10 Hz and writes rotating Parquet
 files to disk — useful during DSP tuning, but not wanted in the deployed piece, and
 its continuous SD-card writes work directly against the read-only-root goal in
 Build 7.
 
 - [ ] Delete `brain/src/recorder.rs`.
 - [ ] Remove `mod recorder;` and the `spawn_recorder` call (and its comment) from
-      `brain/src/main.rs`; `reader` then no longer needs the extra `.clone()`.
+      `brain/src/main.rs`; `rx` then no longer needs the extra `.clone()`.
 - [ ] Remove the `RECORDER_*` constants from `brain/src/config.rs`.
 - [ ] Drop the now-unused `arrow`, `parquet`, and `chrono` dependencies from
       `brain/Cargo.toml`.
@@ -625,14 +625,14 @@ a code change.
 
 #### Software architecture — separate the engine from the routing
 
-Today `noise_task` (`brain/src/main.rs`) does everything in one loop: generate
-Perlin + intensity, hardcode fixtures A and B, pack 10 slots, send one universe.
+Today `noise_task` (`brain/src/orchestrator.rs`) does everything in one loop: generate
+Perlin + intensity, hardcode Ponytails A and B, pack 12 slots, send one universe.
 Build 10 splits that into four concerns, each replaceable on its own:
 
 1. **Engine (universe-agnostic, mostly exists).** Produces a per-frame bundle of
    abstract source signals: the shared intensity / breathing, plus a palette of
    independent Perlin colour streams. Knows nothing about fixtures, addresses, or
-   universes. This is `mapping.rs` plus the Perlin streams as they stand, lifted
+   universes. This is the mapping in `orchestrator.rs` plus the Perlin streams as they stand, lifted
    out of the fixture-specific slot packing.
 2. **Patch (new — the per-deployment config).** A table of fixtures, each carrying:
    target **universe**, **start address**, **profile** (channel layout), and a
@@ -679,13 +679,13 @@ patch table, and moving a fixture between universes is **one field**.
 - [ ] Replace the single `UNIVERSE` constant with a list of universe outputs, each
       bound to a sink.
 - [ ] Extract the engine bundle from `noise_task` so generation no longer references
-      fixtures A/B directly.
+      Ponytails A/B directly.
 - [ ] Add `patch.rs`: the fixture table (universe, address, profile, source binding)
       and the profile enum.
 - [ ] Add a renderer that produces one slot buffer per universe from engine + patch.
 - [ ] Add a `dmx_hat` sink that owns the serial port and clocks universe 2 out at
       44 Hz; keep the sACN sink for universe 1.
-- [ ] Move fixtures A/B into the patch table (universe 1) so the existing rig is just
+- [ ] Move Ponytails A/B into the patch table (universe 1) so the existing rig is just
       the first patch entry — no behavioural change for Build 1.
 
 #### Validation
@@ -713,7 +713,7 @@ the manual takeover through the very box you may be overriding.
 
 **How it works.** E1.31 carries a one-byte **priority** (0–200, default 100) in the
 framing layer (packet offset 108). The brain already stamps 100
-(`brain/src/sacn.rs:41`, `brain/src/main.rs:76`). QLC+ sends the same universe at a
+(`brain/src/dmx.rs:44`, `brain/src/orchestrator.rs:186`). QLC+ sends the same universe at a
 strictly higher priority (e.g. **200**). A receiver tracks the sources it hears per
 universe — keyed by the 16-byte **CID** (offset 22–37) — acts on the highest-priority
 one still alive, and drops a source after the E1.31 **network-data-loss timeout
@@ -724,7 +724,7 @@ sidesteps any equal-priority merge ambiguity.
 #### Brain (Rust) — essentially unchanged
 
 - [ ] No functional change: the brain already emits universe 1 at priority 100
-      (`brain/src/main.rs:76`).
+      (`brain/src/orchestrator.rs:186`).
 - [ ] Optional clarity: lift the literal `100` into a named `SACN_PRIORITY` constant
       in `brain/src/config.rs`.
 
