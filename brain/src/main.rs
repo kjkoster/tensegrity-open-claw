@@ -48,7 +48,11 @@ async fn noise_task(socket: UdpSocket, cid: [u8; 16], control: ControlReader) ->
 
         let out = mapping.frame(&snapshot, breathing, dt);
         t += out.speed * dt;
-        let intensity = (out.intensity * 255.0) as u8;
+        // Gamma-correct the dimmer like the colour channels: it lands on the fixture's
+        // linear ~100-level native brightness scale, so spending those few levels
+        // perceptually (rather than linearly, bunched at the dark end) is what keeps the
+        // breathing from banding. Round, not truncate, to match the fixture-side scaling.
+        let intensity = (out.intensity.powf(1.0 / GAMMA) * 255.0 + 0.5) as u8;
 
         // 12 DMX slots for two 6-channel fixtures (IRGBW + Gobo rotation).
         let mut slots = [0u8; 12];

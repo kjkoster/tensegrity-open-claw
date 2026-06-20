@@ -573,12 +573,6 @@ than the current IRGBW fixtures. The channel re-spacing touches the brain and bo
 personalities; it is fully reversible via git, so we implement it and roll back if it
 misbehaves.
 
-#### Channel map & addressing (brain + ponytail)
-
-- [ ] Park **White at 0** on the BLE-fixture frames in the brain (the audio-reactive W
-      mapping fights the modal interlock — White > 0 hard-cuts RGB). Gobo rotation is
-      already held at 0; revisit White per-fixture later.
-
 #### Ponytail BLE personality (firmware)
 
 - [ ] Keep the PWM personality during bring-up — it is the known-good reference for confirming
@@ -587,14 +581,9 @@ misbehaves.
 - [ ] Simulate the modal white interlock in the PWM personality too, so it matches the BLE
       fixture's behaviour: when White > 0, force R = G = B = 0 (White overrides RGB). This keeps
       the reference path faithful to interlocked white rather than co-lighting RGB and W.
-- [ ] Pace consecutive Write-Without-Response frames with a **20 ms** inter-frame gap.
-      **TODO: test on hardware** whether 20 ms is sufficient (and necessary) — tune if frames
-      drop or reorder.
 - [ ] Drive the gobo with **power + speed only** (no Gobo Preset `0x15`), per the doc.
       **TODO: test on hardware** that the gobo actually renders without a preset recall (add a
       one-shot preset on connect if it doesn't), and re-sweep the 1–10 speed range to confirm.
-- [ ] Optimise the change-to-ble-packet ratio.
-- [ ] Log the universe frequency coming in
 
 #### Review items (the doc is reference, not gospel)
 

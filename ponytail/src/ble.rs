@@ -14,8 +14,10 @@
 //! ## The fixture is modal and has no readback
 //!
 //! The RGB emitters and the white LED cannot light together, so White > 0 overrides
-//! RGB (interlocked white), and the master dimmer is applied in software (the native
-//! brightness command is dead in white mode). With no readback we re-assert state
+//! RGB (interlocked white). Dimming is hybrid: in RGB mode the native brightness
+//! command is the master dimmer (so RGB stays full-resolution), while in white mode
+//! that command is dead, so the dimmer is folded into the grayscale level in
+//! software. With no readback we re-assert state
 //! defensively: a change sends only the frames whose bytes differ from the set we
 //! last sent, while the 10 s heartbeat and every reconnect re-send the *complete*
 //! frame set. The delta is self-completing across mode flips — an off→on change
@@ -27,8 +29,9 @@ use embassy_time::Duration;
 
 use crate::models::DmxValue;
 
-/// Native LED brightness is pinned to this max (the device's 0x64 = 100) so software
-/// dimming is the only dimmer and behaves identically in RGB and white modes.
+/// Top of the fixture's native brightness scale (the device's 0x64 = 100). In RGB
+/// mode this command is the master dimmer; in white mode it is dead, so it is pinned
+/// here and the dimmer is folded into the grayscale level instead.
 const BLE_BRIGHTNESS_MAX: u8 = 0x64;
 
 /// Top of the fixture's gobo-speed scale (the device's 0x0a = 10). The minimum live
@@ -100,13 +103,14 @@ fn white(level: u8) -> Frame {
     [0x7e, 0xff, 0x05, 0x01, level, 0xff, 0xff, 0x08, 0xef]
 }
 
-/// Native LED brightness, action 0x01. Dead in white mode, so it is never our
-/// dimmer — we pin it to `BLE_BRIGHTNESS_MAX` and dim in software.
+/// Native LED brightness, action 0x01. Works in RGB mode (where it is our master
+/// dimmer) but is dead in white mode (where it is pinned to `BLE_BRIGHTNESS_MAX` and
+/// the dimmer is folded into the grayscale level instead).
 ///
 ///     0x7e        header
 ///     0xff        byte1: length, ignored
 ///     0x01        action: brightness
-///     level       brightness 0x01..=0x64 (1..=100); we only ever send the max
+///     level       brightness 0x01..=0x64 (1..=100)
 ///     0x00        data
 ///     0xff 0xff   data
 ///     0x00        LED selector: 0x00 = all LEDs
@@ -160,9 +164,14 @@ fn gobo_speed(speed: u8) -> Frame {
 
 // ── Scaling helpers ────────────────────────────────────────────────────────────
 
-/// Scale a raw 0..=255 channel by the 0..=255 software dimmer, rounded.
-fn apply_dimmer(v: u8, dimmer: u8) -> u8 {
-    ((v as u16 * dimmer as u16 + 127) / 255) as u8
+/// DMX dimmer (1..=255) mapped onto the fixture's native brightness scale
+/// (1..=`BLE_BRIGHTNESS_MAX` = 0x01..=0x64). In RGB mode this *is* the master dimmer,
+/// so the RGB bytes can be sent at full 8-bit resolution instead of being scaled down
+/// — the native command does the dimming, which avoids crushing colour into a handful
+/// of levels at low intensity. Only called while lit (`dimmer >= 1`).
+fn intensity_to_brightness(dimmer: u8) -> u8 {
+    let level = (dimmer as u32 * BLE_BRIGHTNESS_MAX as u32 + 127) / 255;
+    (level as u8).clamp(1, BLE_BRIGHTNESS_MAX)
 }
 
 /// DMX White (0..=255) folded with the dimmer into the fixture's 0..=100 grayscale
@@ -199,18 +208,18 @@ fn build_frames(val: &DmxValue) -> FrameSet {
     let _ = frames.push(led_power(led_on));
 
     if led_on {
-        // Pin internal brightness to max; we dim in software.
-        let _ = frames.push(brightness(BLE_BRIGHTNESS_MAX));
-
-        // One colour frame, chosen by the interlock.
+        // Modal, with the dimmer applied differently per mode (hybrid dimming):
+        //   RGB   — the native brightness command works, so use it as the master
+        //           dimmer and send RGB at full 8-bit. Colour keeps all its levels
+        //           even at low intensity, instead of collapsing into 0..dimmer.
+        //   white — the native brightness command is dead, so pin it to max and bake
+        //           the dimmer into the grayscale level in software.
         if white_ch > 0 {
+            let _ = frames.push(brightness(BLE_BRIGHTNESS_MAX));
             let _ = frames.push(white(white_level(white_ch, dimmer)));
         } else {
-            let _ = frames.push(rgb(
-                apply_dimmer(val.red(), dimmer),
-                apply_dimmer(val.green(), dimmer),
-                apply_dimmer(val.blue(), dimmer),
-            ));
+            let _ = frames.push(brightness(intensity_to_brightness(dimmer)));
+            let _ = frames.push(rgb(val.red(), val.green(), val.blue()));
         }
 
         // Gobo motor: on only while rotating (the LED is on here). Turning the LED
