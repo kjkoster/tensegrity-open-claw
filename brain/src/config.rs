@@ -6,6 +6,14 @@ pub const UNIVERSE: u16 = 1;
 pub const SACN_PORT: u16 = 5568;
 pub const FRAME_RATE_HZ: u64 = 44;
 
+// E1.31 source priority. The brain holds the default 100; a manual console (QLC+)
+// overrides by sending the same universe at a strictly higher value.
+pub const SACN_PRIORITY: u8 = 100;
+// Stream-terminated frames emitted on shutdown. UDP is lossy, so repeat: any one
+// arriving makes the fixtures drop the brain's source at once instead of waiting out
+// the 2.5 s data-loss timeout.
+pub const SACN_RELEASE_FRAMES: u8 = 3;
+
 // ── Noise engine ─────────────────────────────────────────────────────────────
 pub const CONTRAST: f64 = 1.6;
 pub const GAMMA: f64 = 2.2;
@@ -119,7 +127,8 @@ pub const PONYTAIL_BREATH_CEIL: f64 = 0.60; // gentle ceiling; calm, not bright
 pub const PONYTAIL_SILENCE_DRIFT: f64 = 0.30; // RGB Perlin drift speed, ≪ SPEED_MIN
 
 // ── §Ponytail — gobo (slow spatial reshuffle, NOT twinkle rate; SPARKLE.md §3.3) ─
-pub const GOBO_DRIFT_MUSIC_MIN: f64 = 0.30; // floor: strip always moving during music (~speed 4/10)
+pub const GOBO_DRIFT_SILENCE: f64 = 0.25; // gentle idle spin even in silence (~speed 3/10); 0 = parked
+pub const GOBO_DRIFT_MUSIC_MIN: f64 = 0.65; // floor during music (~speed 7/10)
 pub const GOBO_DRIFT_MAX: f64 = 1.00; // ceiling: full motor speed (10/10) at the busiest
 pub const GOBO_SLEW_UP_S: f64 = 0.80;
 pub const GOBO_SLEW_DOWN_S: f64 = 4.00; // slower → pattern settles after music

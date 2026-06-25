@@ -48,7 +48,7 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         fill(&mut slots, &ponytail_a, &a);
         fill(&mut slots, &ponytail_b, &b);
 
-        let packet = dmx::encode(cfg::UNIVERSE, sequence, 100, &cid, &slots);
+        let packet = dmx::encode(cfg::UNIVERSE, sequence, cfg::SACN_PRIORITY, 0, &cid, &slots);
         dmx::send_multicast(&socket, cfg::UNIVERSE, cfg::SACN_PORT, &packet);
         sequence = sequence.wrapping_add(1);
     }

@@ -11,7 +11,9 @@
    <BeatGenerator BeatType="Internal" BPM="120"/>
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
-    <Output Plugin="E1.31" UID="192.168.178.109" Line="2"/>
+    <Output Plugin="E1.31" UID="10.0.10.154" Line="0">
+     <PluginParameters mcastFullIP="239.255.0.1" multicast="1" priority="200" transmitMode="Full" universe="1"/>
+    </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
    <Universe Name="Universe 3" ID="2"/>

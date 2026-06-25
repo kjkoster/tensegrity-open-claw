@@ -1,9 +1,10 @@
 use core::cell::UnsafeCell;
+use core::cmp::Reverse;
 use embassy_net::{
-    Stack,
+    IpAddress, Stack,
     udp::{PacketMetadata, UdpSocket},
 };
-use embassy_time::{Duration, with_timeout};
+use embassy_time::{Duration, Instant, with_timeout};
 use rtt_target::rprintln;
 
 use crate::models::{DmxConfig, DmxSender, DmxValue};
@@ -25,6 +26,21 @@ const DMP_VECTOR: u8 = 0x02;
 const PROP_COUNT_OFFSET: usize = 123;
 const START_CODE_OFFSET: usize = 125;
 const DMX_NULL_START: u8 = 0x00;
+
+// Source-arbitration fields. The root-layer CID identifies the sender; the
+// framing-layer priority and options byte rank it and signal a clean stop.
+const CID_OFFSET: usize = 22;
+const CID_LEN: usize = 16;
+const PRIORITY_OFFSET: usize = 108;
+const OPTIONS_OFFSET: usize = 112;
+const STREAM_TERMINATED: u8 = 0x40; // options bit: this source is releasing the stream
+
+// A source is dropped this long after its last packet — the E1.31 network-data-loss
+// timeout — so a silent higher-priority source yields to a lower one automatically.
+const SOURCE_TIMEOUT: Duration = Duration::from_millis(2500);
+// Distinct senders we track at once. Normally just the brain plus one console; a few
+// more absorbs stray senders without unbounded storage.
+const MAX_SOURCES: usize = 4;
 
 // Maximum E1.31 UDP payload: 126-byte header + 512 DMX slots.
 const MAX_PACKET_LEN: usize = 638;
@@ -48,11 +64,98 @@ static BUFS: SacnBufs = SacnBufs {
     tx_data: UnsafeCell::new([0u8; 64]),
 };
 
+/// A parsed E1.31 data packet for our universe: who sent it, at what priority, whether
+/// it cleanly terminated the stream, and the fixture's slot values.
+struct E131Frame {
+    cid: [u8; CID_LEN],
+    priority: u8,
+    terminated: bool,
+    value: DmxValue,
+}
+
+/// One sACN source we have heard from, keyed by its 16-byte CID. The IP is kept only
+/// for logging — arbitration is by CID, which survives a source changing address.
+struct Source {
+    cid: [u8; CID_LEN],
+    ip: IpAddress,
+    priority: u8,
+    last_seen: Instant,
+}
+
+/// Per-universe source arbitration. Tracks the live senders and names the
+/// one the fixture should obey: highest priority wins, ties broken by CID so the choice
+/// is stable and never flaps between equal sources. Entries expire after
+/// `SOURCE_TIMEOUT` or are released at once on a stream-terminated packet. This is what
+/// lets a console (priority 200) override the brain (100) live, and the brain reclaim
+/// control the moment the console stops — independent of whether the brain is healthy.
+struct SourceTable {
+    sources: heapless::Vec<Source, MAX_SOURCES>,
+}
+
+impl SourceTable {
+    fn new() -> Self {
+        Self {
+            sources: heapless::Vec::new(),
+        }
+    }
+
+    /// Drop sources not heard from within `SOURCE_TIMEOUT`.
+    fn expire(&mut self, now: Instant) {
+        self.sources.retain(|s| {
+            let alive = now.duration_since(s.last_seen) < SOURCE_TIMEOUT;
+            if !alive {
+                rprintln!("sACN source timed out: {} priority {}", s.ip, s.priority);
+            }
+            alive
+        });
+    }
+
+    /// Record a packet from `cid` at `priority`: refresh an existing source or insert a
+    /// new one. A new source past `MAX_SOURCES` is dropped; an expiring entry frees a
+    /// slot within 2.5 s, and the table only fills if several rogue senders are live at
+    /// once — which a closed control network does not produce.
+    fn observe(&mut self, cid: [u8; CID_LEN], ip: IpAddress, priority: u8, now: Instant) {
+        if let Some(src) = self.sources.iter_mut().find(|s| s.cid == cid) {
+            src.ip = ip;
+            src.priority = priority;
+            src.last_seen = now;
+            return;
+        }
+        let source = Source {
+            cid,
+            ip,
+            priority,
+            last_seen: now,
+        };
+        if self.sources.push(source).is_ok() {
+            rprintln!("sACN source added: {} priority {}", ip, priority);
+        }
+    }
+
+    /// Forget `cid` — it sent a stream-terminated packet.
+    fn release(&mut self, cid: &[u8; CID_LEN]) {
+        if let Some(i) = self.sources.iter().position(|s| s.cid == *cid) {
+            let s = self.sources.swap_remove(i);
+            rprintln!("sACN source terminated: {} priority {}", s.ip, s.priority);
+        }
+    }
+
+    /// True if `cid` is the source the fixture should currently obey: the highest
+    /// priority among live sources, ties broken by the smaller CID.
+    fn is_winner(&self, cid: &[u8; CID_LEN]) -> bool {
+        self.sources
+            .iter()
+            .max_by_key(|s| (s.priority, Reverse(s.cid)))
+            .is_some_and(|w| &w.cid == cid)
+    }
+}
+
 pub(crate) struct Listener {
     socket: UdpSocket<'static>,
     config: DmxConfig,
     last_value: Option<DmxValue>,
     dmx_value: DmxSender,
+    sources: SourceTable,
 }
 
 impl Listener {
@@ -90,6 +193,7 @@ impl Listener {
             config,
             last_value: None,
             dmx_value,
+            sources: SourceTable::new(),
         }
     }
 
@@ -111,17 +215,33 @@ impl Listener {
             )
             .await
             {
-                Ok(Ok((n, _))) => {
-                    if let Some(val) = parse_e131_slots(
+                Ok(Ok((n, meta))) => {
+                    if let Some(frame) = parse_e131_slots(
                         &pkt_buf[..n],
                         self.config.universe(),
                         self.config.address(),
                     ) {
                         crate::metrics::record_universe();
-                        if Some(val) != self.last_value {
-                            self.last_value = Some(val);
-                            self.dmx_value.send(val);
-                            crate::metrics::record_change();
+                        let now = Instant::now();
+                        self.sources.expire(now);
+
+                        if frame.terminated {
+                            // A clean stop from this source: forget it now so a
+                            // lower-priority source (or the held value) takes over
+                            // without waiting out the 2.5 s timeout.
+                            self.sources.release(&frame.cid);
+                        } else {
+                            self.sources
+                                .observe(frame.cid, meta.endpoint.addr, frame.priority, now);
+                            // Obey only the highest-priority live source; a source
+                            // a higher one is overriding has its slots ignored.
+                            if self.sources.is_winner(&frame.cid)
+                                && Some(frame.value) != self.last_value
+                            {
+                                self.last_value = Some(frame.value);
+                                self.dmx_value.send(frame.value);
+                                crate::metrics::record_change();
+                            }
                         }
                     }
                 }
@@ -156,12 +276,13 @@ fn be_u32(pkt: &[u8], off: usize) -> u32 {
     u32::from_be_bytes(pkt[off..off + 4].try_into().unwrap())
 }
 
-/// Extracts the fixture's six consecutive DMX slots (I, R, G, B, W, Gobo) from an
-/// E1.31 data packet. `base_address` is the 1-indexed DMX address of the Intensity
-/// slot; the other five channels follow through `base_address + 5`.
-/// Returns None if the packet is invalid, for a different universe, uses a
-/// non-zero start code, or does not contain all six slots.
-fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxValue> {
+/// Parses an E1.31 data packet for our universe into an [`E131Frame`]: the source CID
+/// and priority, the stream-terminated flag, and the fixture's six consecutive DMX
+/// slots (I, R, G, B, W, Gobo). `base_address` is the 1-indexed DMX address of the
+/// Intensity slot; the other five channels follow through `base_address + 5`.
+/// Returns None if the packet is invalid, for a different universe, uses a non-zero
+/// start code, or does not contain all six slots.
+fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<E131Frame> {
     if pkt.len() < START_CODE_OFFSET + 1 {
         return None;
     }
@@ -193,5 +314,11 @@ fn parse_e131_slots(pkt: &[u8], universe: u16, base_address: u16) -> Option<DmxV
         return None;
     }
     let slots: [u8; DmxValue::LEN] = pkt[base..base + DmxValue::LEN].try_into().ok()?;
-    Some(DmxValue::new(slots))
+    let cid: [u8; CID_LEN] = pkt[CID_OFFSET..CID_OFFSET + CID_LEN].try_into().ok()?;
+    Some(E131Frame {
+        cid,
+        priority: pkt[PRIORITY_OFFSET],
+        terminated: pkt[OPTIONS_OFFSET] & STREAM_TERMINATED != 0,
+        value: DmxValue::new(slots),
+    })
 }

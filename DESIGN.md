@@ -29,11 +29,11 @@ The system is split into two halves that communicate via sACN (E1.31) over a clo
 ### 1.1 DMX layout
 
 Each Ponytail fixture is IRGBW + Gobo rotation: Intensity on base address +0, then R, G, B, W, Gobo.
-Two Ponytail fixtures occupy one universe, 12 slots, as shown in the table below.
-B to 7.
+Two Ponytail fixtures occupy one universe, 12 slots, as shown in the table below: ponytail A
+starts at slot 1, ponytail B at slot 7.
 
-| Slot | Fixture | Channel       | Driven by                 |
-|-----:|---------|---------------|---------------------------|
+| Slot | Ponytail | Channel       | Driven by                 |
+|-----:|----------|---------------|---------------------------|
 | 1    | A       | Intensity     | audio loudness            |
 | 2    | A       | Red           | Perlin (seed 0)           |
 | 3    | A       | Green         | Perlin (seed 1)           |
@@ -47,7 +47,7 @@ B to 7.
 | 11   | B       | White         | Perlin (seed 7)           |
 | 12   | B       | Gobo rotation | 0 (BLE personality only)  |
 
-The sixth channel, Gobo rotation, is consumed only by the BLE bridge personality (Build 9);
+The sixth channel, Gobo rotation, is consumed only by the BLE bridge personality (Build 8);
 the PWM fixtures ignore it and the brain currently holds it at 0.
 
 White rides Perlin like the other colour channels, but because W desaturates the mix it
@@ -114,7 +114,7 @@ Debian / Raspberry Pi OS. The Pi:
 ### 3.1 Transport: sACN over WiFi
 
 sACN (E1.31, ANSI E1.31) is the primary transport for this rig, and the only one between the
-Pi and the WiFi-attached fixtures. (Build 10 adds a second, *wired* DMX-512 universe out of
+Pi and the WiFi-attached fixtures. (Build 9 adds a second, *wired* DMX-512 universe out of
 the Pi for rental base lights — a local output stage in the cabinet, not a change to how the
 WiFi fixtures are driven.) It carries DMX-512 slots over UDP; the Pi sends each universe as
 multicast.
@@ -129,7 +129,7 @@ Two paths exist into the fixture hardware:
 - **Direct board replacement (Build 2):** replace the original board entirely and drive the
   RGBW LED array and 28BYJ-48 stepper directly from the ESP32-S3 for full per-channel
   control. Requires the hardware investigation in §2.1 first.
-- **BLE bridge to the original controller (Build 9):** keep the fixture's original Telink
+- **BLE bridge to the original controller (Build 8):** keep the fixture's original Telink
   BLE board and bridge sACN-DMX to its BLE write characteristic — the only path that reaches
   the gobo motor. A new ponytail personality, distinct from the PWM build.
 
@@ -159,15 +159,15 @@ carrying power into their desk. Therefore:
 ### 3.5 Isolation and protection
 
 Optoisolation between the desk's signal ground and the installation ground belongs in the
-ground station (Build 6), not the fixture. The exact topology — optocoupler + isolated
-DC-DC, or an integrated isolated RS-485 transceiver (e.g. ADM2582E) — is a Build 6
+ground station, not the fixture. The exact topology — optocoupler + isolated
+DC-DC, or an integrated isolated RS-485 transceiver (e.g. ADM2582E) — is a ground-station
 design decision.
 
 Because the hybrid cable runs power alongside DMX data lines, a fray or short could
 introduce supply voltage onto the ESP32's UART port. **TVS diodes must be added to the
 DMX data lines inside the ponytail (Build 3) to protect the MCU.**
 
-In the final multi-station chain (Build 8) there are several separately-powered nodes on a
+In the final multi-station chain (Build 7) there are several separately-powered nodes on a
 structure of uncertain earth; per-station isolation is detailed there.
 
 ---
@@ -210,7 +210,7 @@ Remove the offline sound-profile recorder (the Arrow/Parquet capture from SOUND.
 §14). It samples the `AudioFeatures` snapshot at 10 Hz and writes rotating Parquet
 files to disk — useful during DSP tuning, but not wanted in the deployed piece, and
 its continuous SD-card writes work directly against the read-only-root goal in
-Build 7.
+Build 6.
 
 - [ ] Delete `brain/src/recorder.rs`.
 - [ ] Remove `mod recorder;` and the `spawn_recorder` call (and its comment) from
@@ -357,34 +357,7 @@ work on this universe.
 
 ---
 
-### Build 6 — Ground station
-
-A purpose-built box that takes a 5-pin XLR input from a desk and re-drives DMX + power out
-to the installation cable. Optoisolates the desk's signal ground from the installation ground.
-
-#### Hardware BOM
-
-- [ ] 5-pin XLR input socket (desk side, female)
-- [ ] 5-pin XLR output connector (ground station side, male → installation cable)
-- [ ] 5-pin XLR input connector (installation side, female ← installation cable)
-- [ ] Optocouplers / isolated RS-485 transceiver
-
-#### Design
-
-- [ ] Decide isolation topology: optocoupler + isolated DC-DC, or integrated isolated
-      transceiver (e.g. ADM2582E).
-- [ ] Schematic: XLR in → isolate → DMX + power onto installation cable.
-- [ ] Verify isolated ground preserves DMX signal integrity.
-- [ ] Install everything.
-
-#### Validation
-
-- [ ] Engineer can patch a standard 5-pin XLR, sees no power on the signal cable.
-- [ ] Full chain: desk → ground station → installation cable → fixture.
-
----
-
-### Build 7 — Installation hardware
+### Build 6 — Installation hardware
 
 Encloses the Pi and all support hardware for a weatherproof, unattended outdoor deployment
 lasting up to 7 days.
@@ -393,43 +366,22 @@ lasting up to 7 days.
 
 Prices are indicative only and must be verified at purchase.
 
-| # | Item | Qty | Notes | Approx. unit |
-|---|------|----:|-------|--------------|
-| 2 | backup microSD (32 GB) | 1 | Cheap cards corrupt under days of writes | $12 |
-| 4 | Pi power supply (official 5 V / 3 A or quality DC-DC) | 1 | Separate from fixture supply | $10 |
-| 5 | Fixture power supply | per spec | Sized to the IRGBW fixtures | per spec |
-| 6 | enclosure cable glands | 1 set | Sized for Pi + audio interface + PSUs | $40 |
-| 7 | Vent membrane / desiccant pack | 1 | Condensation management in sealed outdoor box | $8 |
-| 8 | Mains inlet (IEC), fuse/breaker, surge protector | 1 set | Mains entry, fusing, transient protection | $25 |
-| 9 | Ferrules, terminal blocks, DIN rail, drip-loop hardware | 1 set | Tidy, serviceable wiring | $20 |
-
-The USB audio interface and ground-loop isolator for audio capture are also housed in this
-enclosure.
+| # | Item | Qty | Notes |
+|---|------|----:|-------|
+| 1 | backup microSD (32 GB) | 1 | Cheap cards corrupt under days of writes |
+| 2 | Pi power supply (official 5 V / 3 A or quality DC-DC) | 1 | Separate from fixture supply |
+| 3 | Vent membrane / desiccant pack | 1 | Condensation management in sealed outdoor box |
+| 4 | chunky power lead | 1 | leading into the powerCon |
+| 5 | 3-way connector| 1 | for the various 220V connectoers internally |
 
 #### Cabinet assembly
 
-- [ ] Order the connectors.
-- [ ] Order the cable glands (wartels).
-- [ ] Source DIN-rail clips/brackets to mount the power supply on the DIN rail.
-- [ ] Source DIN-rail clips/brackets to mount the Alesis ADC on the DIN rail.
-- [ ] Buy screws and install the DIN rails.
-- [ ] Add a connector panel.
-- [ ] Drill the holes (glands, connectors, mounts).
 - [ ] Plug the keyhole and previous mounting holes (seal the unused keyhole opening for weatherproofing).
 - [ ] Design — and if needed add — drainage and ventilation holes (condensation management;
       see the vent membrane / desiccant in the BOM).
-- [ ] Mount the power supply.
-- [ ] Mount the 230 V mains connector (the big blue round CEE / "camping" inlet).
-- [ ] Install the Alesis ADC (io|2 USB audio interface).
-
-#### Power
-
-- **Separate supplies.** Pi and fixtures on separate supplies. Never power fixtures from the Pi.
-- **Mains entry.** Single IEC inlet, fused/breakered, with surge/transient protector.
-- **Inrush and sizing.** Size fixture PSU with margin for inrush and full-white draw.
-  Budget the Pi at ~5 V/3 A peak including USB interface.
-- **Brown-out.** Under-voltage causes SD corruption and audio xruns; a quality supply and
-  short, adequate-gauge DC runs matter.
+- [ ] Mount the 230 V mains connector (Neutrik PowerCON).
+- [ ] All internal cabling.
+- [ ] Design and implement mounting to the Tensegrity sculpture.
 
 #### Software service
 
@@ -438,6 +390,7 @@ enclosure.
   Days of writes to a writable root is a classic multi-day-install failure.
 - Verify enclosure thermals in direct sun; throttling surfaces first as audio xruns.
 - Condensation: sealed boxes sweat; the vent membrane and desiccant prevent internal dew.
+- Temperature checking.
 
 #### Commissioning checklist
 
@@ -458,7 +411,7 @@ enclosure.
 
 ---
 
-### Build 8 — Robust, isolated power architecture
+### Build 7 — Robust, isolated power architecture
 
 Target topology: **ground station → high station 1 (ESP + fixtures) → high station 2
 → high station 3 → DMX terminate.** Lead lengths up to 25 m from base to station 3.
@@ -552,7 +505,7 @@ logic.
 
 ---
 
-### Build 9 — Ponytail BLE bridge (Telink gobo fixture)
+### Build 8 — Ponytail BLE bridge (Telink gobo fixture)
 
 A completely new ponytail personality. Instead of driving the LED array via PWM (Build 1) or
 replacing the board (Build 2), this keeps the fixture's **original Telink BLE controller** and
@@ -609,14 +562,14 @@ misbehaves.
 
 ---
 
-### Build 10 — Outgoing DMX universe 2 (wired, Pi DMX HAT)
+### Build 9 — Outgoing DMX universe 0 (wired, Pi DMX HAT)
 
 The Pi gains a **second DMX universe**, emitted as **wired DMX-512** through a Pi
-HAT, alongside the existing WiFi sACN universe 1. Universe 2 drives the **base
+HAT, alongside the existing WiFi sACN universe 1. Universe 0 drives the **base
 lights** — conventional rental fixtures that differ from deployment to deployment.
 
 The split between the two universes is **only routing and cable management**:
-universe 1 is the WiFi-attached ESP32 fixtures (ponytail / bone / hoof), universe 2
+universe 1 is the WiFi-attached ESP32 fixtures (ponytail / bone / hoof), universe 0
 is whatever wired fixtures we rent for the base. The generative engine stays
 **universe-agnostic** — it does not know or care where a value goes. A new **patch
 layer** is the single place that maps generated signals onto real fixtures at real
@@ -627,7 +580,7 @@ a code change.
 
 Today `noise_task` (`brain/src/orchestrator.rs`) does everything in one loop: generate
 Perlin + intensity, hardcode Ponytails A and B, pack 12 slots, send one universe.
-Build 10 splits that into four concerns, each replaceable on its own:
+Build 9 splits that into four concerns, each replaceable on its own:
 
 1. **Engine (universe-agnostic, mostly exists).** Produces a per-frame bundle of
    abstract source signals: the shared intensity / breathing, plus a palette of
@@ -642,7 +595,7 @@ Build 10 splits that into four concerns, each replaceable on its own:
 3. **Renderer (new — mechanical).** Walks the patch, reads the engine bundle, and
    fills one slot buffer **per universe**. No creative decisions live here.
 4. **Sinks (new — an abstraction over the existing send).** One output per universe:
-   universe 1 → the existing sACN-over-WiFi path; universe 2 → the DMX HAT serial
+   universe 1 → the existing sACN-over-WiFi path; universe 0 → the DMX HAT serial
    path. A sink takes a finished slot buffer and ships it; the renderer does not
    know which transport a universe uses.
 
@@ -653,10 +606,7 @@ patch table, and moving a fixture between universes is **one field**.
 
 #### DMX HAT and wired output
 
-- [ ] Choose a Pi DMX HAT with an **isolated RS-485** output — it leaves the cabinet
-      on a long cable, so the same isolation argument as Builds 6/8 applies (prefer an
-      ADM2582E / ADM2587E-class isolated transceiver over a bare MAX485).
-- [ ] Drive it from the Pi UART at DMX-512 timing: **250 kbaud, 8N2**, break ≥ 92 µs,
+- [ ] Drive DMX/RS-485 HAT from the Pi UART at DMX-512 timing: **250 kbaud, 8N2**, break ≥ 92 µs,
       mark-after-break ≥ 12 µs, refresh at the engine's frame rate (44 Hz).
 - [ ] Decide the break-generation method on the Pi UART (the hard part): `tcsendbreak`
       / baud-toggle on the Linux serial device, or bit-bang via `rppal`. Spike this
@@ -664,15 +614,11 @@ patch table, and moving a fixture between universes is **one field**.
 
 #### Cabinet hardware
 
-- [ ] Pi DMX HAT mounted to the Pi inside the IP65 enclosure (Build 7).
 - [ ] Panel-mount **3-pin and 5-pin XLR** DMX outputs, wired in parallel (pins
       1 = gnd, 2 = data−, 3 = data+; 5-pin leaves 4/5 unused) so either connector
       standard can be patched.
 - [ ] Internal routing from the HAT to the connector panel; keep the DMX pair twisted
       and away from mains and the fixture PSU.
-- [ ] **DMX cable gland in the cabinet floor** (separate from the existing glands) so
-      the universe-2 cable exits downward without compromising the IP65 seal.
-- [ ] Add the HAT, the 3/5-pin XLR connectors, and the extra gland to the Build 7 BOM.
 
 #### Brain (Rust) tasks
 
@@ -683,101 +629,16 @@ patch table, and moving a fixture between universes is **one field**.
 - [ ] Add `patch.rs`: the fixture table (universe, address, profile, source binding)
       and the profile enum.
 - [ ] Add a renderer that produces one slot buffer per universe from engine + patch.
-- [ ] Add a `dmx_hat` sink that owns the serial port and clocks universe 2 out at
+- [ ] Add a `dmx_hat` sink that owns the serial port and clocks universe 0 out at
       44 Hz; keep the sACN sink for universe 1.
 - [ ] Move Ponytails A/B into the patch table (universe 1) so the existing rig is just
       the first patch entry — no behavioural change for Build 1.
 
 #### Validation
 
-- [ ] Universe 1 (WiFi sACN) is byte-for-byte unchanged vs Build 1 after the refactor.
-- [ ] Universe 2 drives a known wired fixture (rented or bench par) at the right
+- [ ] Universe 0 drives a known wired fixture (rented or bench par) at the right
       address; a DMX tester / QLC+ shows correct, flicker-free 44 Hz output.
+- [ ] Universe 1 (WiFi sACN) is byte-for-byte unchanged vs Build 1 after the refactor.
 - [ ] Both 3-pin and 5-pin outputs work.
 - [ ] Re-patching a fixture to a new address or universe is a patch-table edit only.
 - [ ] End-to-end: engine → patch → both sinks, running unattended.
-
----
-
-### Build 11 — Manual override from QLC+ (sACN priority)
-
-A way to take live manual control of the WiFi fixtures from **QLC+ on a laptop**
-without stopping or coordinating with the brain. The brain and QLC+ both send the
-same universe; the fixtures obey the **highest-priority live source** (E1.31's
-built-in source arbitration) and fall back automatically when the higher source
-goes quiet. The brain keeps running at its normal priority throughout — so the
-override works **even if the brain has hung or crashed**, which is exactly when
-manual control is most wanted. This is the property the brain-side alternatives
-(detect-and-back-off, or relaying a second universe) cannot offer, since they route
-the manual takeover through the very box you may be overriding.
-
-**How it works.** E1.31 carries a one-byte **priority** (0–200, default 100) in the
-framing layer (packet offset 108). The brain already stamps 100
-(`brain/src/dmx.rs:44`, `brain/src/orchestrator.rs:186`). QLC+ sends the same universe at a
-strictly higher priority (e.g. **200**). A receiver tracks the sources it hears per
-universe — keyed by the 16-byte **CID** (offset 22–37) — acts on the highest-priority
-one still alive, and drops a source after the E1.31 **network-data-loss timeout
-(2.5 s)**, or immediately if that source sets the **stream-terminated** flag (options
-byte offset 112, bit `0x40`) on a clean stop. Using distinct priorities (100 vs 200)
-sidesteps any equal-priority merge ambiguity.
-
-#### Brain (Rust) — essentially unchanged
-
-- [ ] No functional change: the brain already emits universe 1 at priority 100
-      (`brain/src/orchestrator.rs:186`).
-- [ ] Optional clarity: lift the literal `100` into a named `SACN_PRIORITY` constant
-      in `brain/src/config.rs`.
-
-#### Ponytail (firmware) — source arbitration in the shared decoder
-
-The work lands in `ponytail/src/sacn.rs` (`parse_e131_slots` + `Listener::run`),
-which bone and hoof reuse — so all WiFi fixtures gain the behaviour at once.
-
-- [ ] Parse the **priority** byte (offset 108) and the source **CID** (offset 22–37)
-      alongside the existing fields; add `PRIORITY_OFFSET`, `OPTIONS_OFFSET`,
-      `CID_OFFSET` next to the current offset constants.
-- [ ] Honour the **options** byte (offset 112): treat the stream-terminated bit
-      (`0x40`) as an immediate release of that source.
-- [ ] Keep a small per-CID **source table** (`heapless::Vec`, ~4 entries):
-      `{ cid, priority, last_seen: embassy_time::Instant }`.
-- [ ] Per packet: refresh/insert its source; **adopt slots only if it is the
-      highest-priority source still within the 2.5 s window**; expire stale sources.
-- [ ] Keep the existing change-detection (`last_value`) and the 5 s `UNIVERSE_TIMEOUT`
-      socket-rebind as the "nobody talking at all" safety net — orthogonal to source
-      arbitration.
-
-#### QLC+ (laptop) — configuration
-
-- [ ] E1.31 output plugin: map the workspace universe to **universe 1** on the
-      closed-claw network interface, UDP port **5568**.
-- [ ] Set the output **priority to 200** (QLC+ defaults to 100 — it must be raised
-      above the brain).
-- [ ] Operating note: a **blackout** in QLC+ still *owns* the fixtures (it keeps
-      sending 200 at zero). To **release** back to the brain, stop the plugin output /
-      quit QLC+ (sends the stream-terminated flag → instant revert), or drop off WiFi
-      (revert after the 2.5 s timeout).
-
-#### Optional — physical "manual" toggle (composes on top)
-
-- [ ] If a tactile, unambiguous "I am in manual" control is wanted, add a Pi GPIO
-      toggle that mutes the brain's send. It is **complementary** to priority
-      arbitration, not a replacement: priority does the automatic merge and provides
-      the survives-a-brain-crash property; the switch is just a human-facing kill for
-      the brain's stream.
-
-#### Docs
-
-- [ ] Note the priority-arbitration behaviour in §3.1 (Transport) so the override
-      path is discoverable from the design principles.
-
-#### Validation
-
-- [ ] QLC+ at 200 takes over within a frame; the brain (100) is ignored while QLC+
-      is live.
-- [ ] Stop QLC+ output → fixtures revert to the brain within ~2.5 s, or immediately
-      if QLC+ sent the stream-terminated flag.
-- [ ] Laptop drops off WiFi mid-control → fixtures revert to the brain after the
-      2.5 s timeout.
-- [ ] Kill the brain while QLC+ is controlling → no visible change (the override does
-      not depend on the brain).
-- [ ] With only the brain running (no QLC+), behaviour is identical to Build 1.

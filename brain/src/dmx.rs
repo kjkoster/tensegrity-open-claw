@@ -4,6 +4,11 @@
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// E1.31 framing options bit (offset 112) that marks a stream as terminated. A
+/// receiver honouring it drops this source immediately rather than waiting out the
+/// 2.5 s network-data-loss timeout.
+pub const STREAM_TERMINATED: u8 = 0x40;
+
 /// Generates a CID that is stable for the lifetime of the process.
 pub fn new_cid() -> [u8; 16] {
     let nanos = SystemTime::now()
@@ -17,9 +22,17 @@ pub fn new_cid() -> [u8; 16] {
     cid
 }
 
-/// Encodes an E1.31 sACN data packet.
+/// Encodes an E1.31 sACN data packet. `options` is the framing options byte (offset
+/// 112): 0 for a normal data frame, `STREAM_TERMINATED` for a clean stop.
 /// Layout per DESIGN.md Appendix A; validated against the ponytail's parse_e131_slots().
-pub fn encode(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16], slots: &[u8]) -> Vec<u8> {
+pub fn encode(
+    universe: u16,
+    sequence: u8,
+    priority: u8,
+    options: u8,
+    cid: &[u8; 16],
+    slots: &[u8],
+) -> Vec<u8> {
     let n = slots.len();
     let total = 126 + n;
     let mut p = vec![0u8; total];
@@ -43,6 +56,7 @@ pub fn encode(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16], slots: 
     p[44..49].copy_from_slice(b"brain");
     p[108] = priority;
     p[111] = sequence;
+    p[112] = options;
     p[113..115].copy_from_slice(&universe.to_be_bytes());
 
     // DMP layer: flags/len, vector, addr/data type, first prop addr, increment, property count, start code, slots
@@ -56,6 +70,14 @@ pub fn encode(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16], slots: 
     p[126..126 + n].copy_from_slice(slots);
 
     p
+}
+
+/// Encodes a stream-terminated frame for `universe`: a normal data packet carrying
+/// zeroed slots with the `STREAM_TERMINATED` options bit set. Sent on shutdown so the
+/// fixtures release the brain's source at once. The slot width matches the live stream
+/// (two 6-channel Ponytails); receivers release on the flag regardless of contents.
+pub fn encode_release(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16]) -> Vec<u8> {
+    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; 12])
 }
 
 /// The sACN multicast group address for the given universe.

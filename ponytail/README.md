@@ -30,3 +30,24 @@ underlying command, so ponytail exposes them as an **interlocked RGBW**:
 - The **gobo** axis is a single rotation channel (0 = motor off, 1–255 → speed). The fixture
   ignores gobo *selection*, so there is no select channel. Powering the LED off also stops
   the gobo motor.
+
+### Manual override from QLC+ (sACN priority)
+
+The sACN decoder (`sacn.rs`) does E1.31 source arbitration, so a lighting console such as
+QLC+ can take live manual control of the fixture without stopping or coordinating with the
+brain. The brain and the console send the same universe; the fixture obeys the
+**highest-priority live source** and falls back automatically when it goes quiet.
+
+- The brain sends at the default **priority 100**. Configure QLC+ to send the same universe
+  at a **higher priority (e.g. 200)** and it takes over within a frame; the brain is ignored
+  while the console is live. The project ships a preconfigured QLC+ workspace,
+  [`open-claw.qxw`](../open-claw.qxw), with the universe, output, and priority already set up.
+- Sources are tracked per **CID** (the sender's 16-byte ID). A source is dropped after the
+  E1.31 **2.5 s network-data-loss timeout**, or immediately if it sets the **stream-terminated**
+  flag on a clean stop — so control reverts to the brain when the console stops sending or
+  drops off WiFi.
+- Because the arbitration runs in the fixture, the override works **even if the brain has hung
+  or crashed** — which is exactly when manual control is most wanted.
+
+This is independent of the existing 5 s socket-rebind timeout, which is the "nobody is talking
+at all" safety net.
