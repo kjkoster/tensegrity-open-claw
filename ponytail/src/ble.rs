@@ -282,6 +282,15 @@ mod transport {
     // a safe trade. Tune if reconnects still lag a reset.
     const SUPERVISION_TIMEOUT: Duration = Duration::from_secs(4);
 
+    // Bound each write-without-response. This is the one steady-state await with no
+    // timeout: if the controller's tx buffers drain because the peer has gone silent at
+    // the link layer without a Disconnected yet surfacing, the await blocks forever, the
+    // serve loop emits nothing, and the link is never torn down (ble/s flatlines at 0 with
+    // no log). A timeout converts that wedge into a return from serve() that the reconnect
+    // flow already handles. Kept above SUPERVISION_TIMEOUT (4 s) so a real link drop is
+    // caught by supervision first and a merely busy link is not torn down prematurely.
+    const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
     // Connection interval we request from the fixture (#2). trouble-host's default is a
     // slow, power-saving interval; a tight 7.5–15 ms window lets brain's frame stream
     // actually reach the fixture instead of being resampled down to the link rate. The
@@ -300,21 +309,18 @@ mod transport {
 
     /// BLE consumer — the counterpart to `led_fixture::run`. Brings up the host, then
     /// forever: connect to `target`, discover the writable characteristic, resync the
-    /// full state, and re-assert it on every change and on the heartbeat until the
-    /// link drops — then reconnect. Never returns.
-    pub async fn run(mut dmx_value: DmxReceiver, bt: BT<'static>, target: [u8; 6]) -> ! {
-        let connector = BleConnector::new(bt, Default::default()).unwrap();
-        let controller: ExternalController<_, HCI_SLOTS> = ExternalController::new(connector);
-
-        let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
-            HostResources::new();
-        let stack = trouble_host::new(controller, &mut resources);
-        let Host {
-            mut central,
-            mut runner,
-            ..
-        } = stack.build();
-
+    /// full state, and re-assert it on every change and on the heartbeat until the link
+    /// drops — then rebuild the controller and reconnect. Never returns.
+    ///
+    /// The controller and host stack are rebuilt from scratch on **every** session, not
+    /// reused across reconnects. A wedged link keeps exchanging empty LL PDUs, so neither
+    /// side's supervision timeout ever fires and the fixture never re-advertises; a
+    /// reconnect on the same controller can therefore never find it again (the
+    /// `ble/s`-flatlines-at-0 failure). Dropping the connector/controller/stack at the end
+    /// of each session releases the radio entirely — we go silent on the air, the
+    /// fixture's supervision finally fires, and it re-advertises in time for the fresh
+    /// controller's next connect.
+    pub async fn run(mut dmx_value: DmxReceiver, mut bt: BT<'static>, target: [u8; 6]) -> ! {
         // Address kind is Public, confirmed by an ADV_IND sniff (PDU TxAdd: Public).
         // bt-hci's BdAddr is written straight into the HCI command, and HCI carries
         // BD_ADDR little-endian (LSB first) — the reverse of the human-readable order
@@ -327,9 +333,29 @@ mod transport {
             addr: BdAddr::new(addr),
         };
 
-        // The host runner must be polled continuously while we use the central role.
-        let app = async {
-            loop {
+        loop {
+            // Fresh controller + host per session (see the fn doc). `reborrow` hands the
+            // BT peripheral to this session's connector; dropping it at the bottom of the
+            // loop returns the radio so the next session starts from a clean controller.
+            let connector = BleConnector::new(bt.reborrow(), Default::default()).unwrap();
+            let controller: ExternalController<_, HCI_SLOTS> = ExternalController::new(connector);
+
+            let mut resources: HostResources<
+                DefaultPacketPool,
+                CONNECTIONS_MAX,
+                L2CAP_CHANNELS_MAX,
+            > = HostResources::new();
+            let stack = trouble_host::new(controller, &mut resources);
+            let Host {
+                mut central,
+                mut runner,
+                ..
+            } = stack.build();
+
+            // One connection attempt and serve session. Returns (ending the session) on
+            // any teardown — connect/gatt failure, a disconnect, or a write that stalls
+            // past WRITE_TIMEOUT — so the outer loop drops the controller and rebuilds.
+            let session = async {
                 rprintln!(
                     "ble connecting: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
                     target[0],
@@ -361,16 +387,11 @@ mod transport {
                     Ok(Ok(conn)) => conn,
                     Ok(Err(e)) => {
                         rprintln!("ble: connect failed: {:?}", e);
-                        rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
-                        Timer::after(RECONNECT_PAUSE).await;
-                        continue;
+                        return;
                     }
                     Err(_) => {
-                        rprintln!(
-                            "ble: no connection within {} s — rescanning",
-                            CONNECT_TIMEOUT.as_secs()
-                        );
-                        continue;
+                        rprintln!("ble: no connection within {} s", CONNECT_TIMEOUT.as_secs());
+                        return;
                     }
                 };
                 rprintln!("ble: connected");
@@ -406,30 +427,32 @@ mod transport {
                     Ok(Err(e)) => {
                         rprintln!("ble: gatt setup failed: {:?}", e);
                         conn.disconnect();
-                        rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
-                        Timer::after(RECONNECT_PAUSE).await;
-                        continue;
+                        return;
                     }
                     Err(_) => {
                         rprintln!(
-                            "ble: gatt setup stalled past {} s — dropping link and reconnecting",
+                            "ble: gatt setup stalled past {} s",
                             SETUP_TIMEOUT.as_secs()
                         );
                         conn.disconnect();
-                        Timer::after(RECONNECT_PAUSE).await;
-                        continue;
+                        return;
                     }
                 };
                 rprintln!("ble: gatt client ready");
 
                 // Watch three things at once:
                 //   1. the GATT client background task (must be polled while we write),
-                //   2. serve() — our writes; returns on a write/discovery error,
-                //   3. the connection itself. A supervision-timeout drop (the fixture
-                //      loses power or goes out of range) surfaces ONLY as a Disconnected
-                //      event — not as a write error (writes are fire-and-forget) and not
-                //      necessarily as the gatt task ending. Without this arm the loop
-                //      never notices the link is gone and never reconnects.
+                //   2. serve() — our writes and discovery; returns on a write/discovery
+                //      error, and now also on a write that stalls past WRITE_TIMEOUT,
+                //   3. the connection itself. A clean supervision-timeout drop (the
+                //      fixture loses power or goes out of range) surfaces as a
+                //      Disconnected event — not as a write error, since writes are
+                //      fire-and-forget. But not every failure surfaces that way: a
+                //      GATT/buffer wedge can leave the ACL link nominally up with no
+                //      Disconnected while writes silently stop completing (observed as
+                //      ble/s flatlining at 0 with no log). That case is caught by the
+                //      WRITE_TIMEOUT on serve()'s write path (arm #2), not here; this
+                //      arm covers the clean drops where a Disconnected does arrive.
                 let wait_disconnect = async {
                     loop {
                         match conn.next().await {
@@ -447,7 +470,7 @@ mod transport {
                                 peripheral_latency,
                                 supervision_timeout.as_micros(),
                             ),
-                            _ => {}
+                            other => rprintln!("ble: unhandled connection event: {:?}", other),
                         }
                     }
                 };
@@ -463,19 +486,22 @@ mod transport {
                     Either3::Second(Ok(())) => rprintln!("ble: serve loop ended"),
                     Either3::Third(reason) => rprintln!("ble: disconnected: {:?}", reason),
                 }
-                // Tear the link down explicitly before retrying: frees the single
-                // connection slot and sends an LL terminate so a GATT-wedged-but-alive
-                // fixture drops now rather than waiting out its supervision timeout. A
-                // no-op when the link is already gone (the Disconnected arm).
+                // Best-effort clean terminate; on a wedged link this may not land, which
+                // is exactly why the outer loop rebuilds the controller regardless.
                 conn.disconnect();
-                rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
-                Timer::after(RECONNECT_PAUSE).await;
-            }
-        };
+            };
 
-        match select(runner.run(), app).await {
-            Either::First(_) => panic!("ble: host runner exited"),
-            Either::Second(_) => unreachable!("ble: app loop never returns"),
+            // The host runner must be polled continuously while we use the central role.
+            // If it exits we still fall through and rebuild rather than panicking.
+            match select(runner.run(), session).await {
+                Either::First(e) => rprintln!("ble: host runner exited: {:?} — rebuilding", e),
+                Either::Second(()) => {}
+            }
+
+            // Dropping connector/controller/stack here releases the radio; the pause then
+            // lets the fixture's supervision free the stale link and re-advertise.
+            rprintln!("ble: reconnecting in {} s", RECONNECT_PAUSE.as_secs());
+            Timer::after(RECONNECT_PAUSE).await;
         }
     }
 
@@ -534,7 +560,10 @@ mod transport {
             }
         };
         let mut last_frames = build_frames(&current);
-        send_all(client, &write_char, &last_frames).await?;
+        if !send_all(client, &write_char, &last_frames).await? {
+            rprintln!("ble: write stalled during resync — reconnecting");
+            return Ok(());
+        }
         rprintln!("ble: resynced, serving");
 
         // Fresh ticker per connection so the heartbeat phase restarts on resync.
@@ -550,7 +579,10 @@ mod transport {
                     current = value;
                     let frames = build_frames(&current);
                     for frame in frames.iter().filter(|f| !last_frames.contains(*f)) {
-                        write_frame(client, &write_char, frame).await?;
+                        if !write_frame(client, &write_char, frame).await? {
+                            rprintln!("ble: write stalled — reconnecting");
+                            return Ok(());
+                        }
                     }
                     last_frames = frames;
                 }
@@ -559,35 +591,51 @@ mod transport {
                     // only correction for a static look, where no later change is coming
                     // to heal a dropped frame.
                     last_frames = build_frames(&current);
-                    send_all(client, &write_char, &last_frames).await?;
+                    if !send_all(client, &write_char, &last_frames).await? {
+                        rprintln!("ble: write stalled on heartbeat — reconnecting");
+                        return Ok(());
+                    }
                 }
             }
         }
     }
 
     /// Assert a complete frame set — every frame, in order. Used on resync and on the
-    /// heartbeat.
+    /// heartbeat. Returns Ok(false) if a write stalled (caller reconnects).
     async fn send_all<C: Controller>(
         client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
         write_char: &Characteristic<u8>,
         frames: &super::FrameSet,
-    ) -> Result<(), BleHostError<C::Error>> {
+    ) -> Result<bool, BleHostError<C::Error>> {
         for frame in frames {
-            write_frame(client, write_char, frame).await?;
+            if !write_frame(client, write_char, frame).await? {
+                return Ok(false);
+            }
         }
-        Ok(())
+        Ok(true)
     }
 
-    /// Write one 9-byte frame as a write-without-response and count it.
+    /// Write one 9-byte frame as a write-without-response and count it. The await is
+    /// bounded by WRITE_TIMEOUT. Returns Ok(true) on a counted write, Ok(false) if the
+    /// write stalled past the timeout (the caller should return from serve to
+    /// reconnect), and Err for a real link/controller error.
     async fn write_frame<C: Controller>(
         client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
         write_char: &Characteristic<u8>,
         frame: &super::Frame,
-    ) -> Result<(), BleHostError<C::Error>> {
-        client
-            .write_characteristic_without_response(write_char, frame)
-            .await?;
-        crate::metrics::record_ble_packet();
-        Ok(())
+    ) -> Result<bool, BleHostError<C::Error>> {
+        match with_timeout(
+            WRITE_TIMEOUT,
+            client.write_characteristic_without_response(write_char, frame),
+        )
+        .await
+        {
+            Ok(result) => {
+                result?;
+                crate::metrics::record_ble_packet();
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
     }
 }

@@ -194,8 +194,8 @@ impl PonytailMapping {
         let b = self.b.step(mix(silence_rgb[2], music_rgb[2], m), dt);
 
         // Gobo (§3.3): slow reshuffle inside a slow band, nudged by energy_slow blended
-        // with onset_density (optional tempo scaling, gated on confidence), eased into
-        // motion by music, then asym-slewed. Onsets never touch this channel.
+        // with onset_density (optional tempo scaling, gated on confidence), rising from a
+        // gentle silence idle into the music band, then asym-slewed. Onsets never touch it.
         let busy = 0.5 * (af.energy_slow as f64).clamp(0.0, 1.0)
             + 0.5 * (af.onset_density as f64).clamp(0.0, 1.0);
         let mut drift =
@@ -206,7 +206,7 @@ impl PonytailMapping {
                 .clamp(0.0, 1.0);
             drift += cfg::GOBO_TEMPO_FACTOR * tempo_norm * (cfg::GOBO_DRIFT_MAX - drift);
         }
-        let gobo = self.gobo.step(mix(0.0, drift, m), dt);
+        let gobo = self.gobo.step(mix(cfg::GOBO_DRIFT_SILENCE, drift, m), dt);
 
         // White-sparkle mode (§4): a slow Perlin gate makes a window eligible; a
         // sustained-density musical event commits the entry; both the entry and the
