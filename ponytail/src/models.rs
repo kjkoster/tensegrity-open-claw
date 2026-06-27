@@ -23,6 +23,39 @@ pub type DmxSender = Sender<'static, CriticalSectionRawMutex, DmxValue, DMX_CONS
 /// Per-consumer handle out of [`DmxWatch`] (one each for PWM and BLE).
 pub type DmxReceiver = Receiver<'static, CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
 
+/// Which 7E/EF BLE fixture a board bridges to. Both speak the same colour/white/
+/// brightness frames — the two-star bench test proved byte1 is don't-care — so only
+/// the GATT layout, the power-frame bytes, and whether a gobo motor exists diverge.
+/// This enum is just the identity; the per-dialect bytes and UUIDs live in `ble`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Dialect {
+    /// LEDBLE / HM-10 fixture (advertises `LEDBLE-NN-XXXX`, e.g. `LEDBLE-02-91E3`):
+    /// service 0xFFE0 / char 0xFFE1, has a gobo motor.
+    Ledble,
+    /// ELK-BLEDOM fixture (advertises `ELK-BLEDOM` / `ELK-BLEDWM`, e.g.
+    /// `ELK-BLEDWM 45`): service 0xFFF0 / char 0xFFF3, no gobo.
+    Elk,
+}
+
+/// A bridged fixture's BLE identity: its MAC and the dialect its controller speaks.
+/// MAC and dialect are meaningless apart, so they travel together as one value
+/// through config, `main`, and into `ble::run`.
+#[derive(Clone, Copy)]
+pub struct BleTarget {
+    mac: [u8; 6],
+    dialect: Dialect,
+}
+
+impl BleTarget {
+    /// `const` so board rows can be built in the `config::BOARDS` constant.
+    pub const fn new(mac: [u8; 6], dialect: Dialect) -> Self {
+        Self { mac, dialect }
+    }
+
+    pub fn mac(self) -> [u8; 6] { self.mac }
+    pub fn dialect(self) -> Dialect { self.dialect }
+}
+
 /// One fixture's DMX slots. Six channels: Intensity, R, G, B, White, and
 /// Gobo rotation. The PWM personality ignores Gobo rotation; the BLE personality
 /// (`ble`) uses all six.

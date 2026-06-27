@@ -380,7 +380,9 @@ Prices are indicative only and must be verified at purchase.
 - [ ] Design — and if needed add — drainage and ventilation holes (condensation management;
       see the vent membrane / desiccant in the BOM).
 - [ ] Mount the 230 V mains connector (Neutrik PowerCON).
-- [ ] All internal cabling.
+- [ ] Wire the 220 V mains side internally (low-power and signal wiring are done).
+- [ ] Design the 48 V circuit.
+- [ ] Tidy up the internal cable bundles.
 - [ ] Design and implement mounting to the Tensegrity sculpture.
 
 #### Software service
@@ -606,19 +608,57 @@ patch table, and moving a fixture between universes is **one field**.
 
 #### DMX HAT and wired output
 
-- [ ] Drive DMX/RS-485 HAT from the Pi UART at DMX-512 timing: **250 kbaud, 8N2**, break ≥ 92 µs,
-      mark-after-break ≥ 12 µs, refresh at the engine's frame rate (44 Hz).
-- [ ] Decide the break-generation method on the Pi UART (the hard part): `tcsendbreak`
-      / baud-toggle on the Linux serial device, or bit-bang via `rppal`. Spike this
-      early — clean DMX breaks from a Pi UART are the main technical risk of the build.
+The HAT is a **Zihatec RS422/RS485 HAT** (`hwhardsoft.de`), already fitted to the Pi. It is
+**galvanically isolated**, which also satisfies the isolated-output requirement — no separate
+isolation stage is needed on this universe. It connects to the Pi's hardware UART through an
+RS-485 transceiver whose direction (DE/RE) is configurable. **Which GPIO pins it uses is set by
+the board's jumper and DIP switches, not fixed** — determine them from the datasheet's *Used
+Raspberry Pi Pins* table together with the physical jumper/DIP positions, don't assume (the HAT
+has no ID EEPROM, so the device tree won't tell you either):
 
-#### Cabinet hardware
+- **UART pins** — chosen by jumper K3 (older revisions: solder jumpers). Default is **UART0 =
+  GPIO14 TX (header pin 8) / GPIO15 RX (pin 10)**, the only option on our Pi 3B (the alternate
+  UART3/4/5 mappings exist only on Pi 4/5). Open the OS alias **`/dev/serial0`** — it resolves to
+  this UART once Bluetooth is off and is immune to the `ttyACM*` probes renumbering things; never
+  hardcode a `ttyAMA*`/`ttyS*`.
+- **Direction (TX_EN) pin** — governed by DIP switch **S1**: `S1:3` = *automatic* DE/RE (the
+  transceiver toggles itself from UART activity, no GPIO needed), or `S1:4` = *manual* via GPIO.
+  The manual pin is **GPIO18 (header pin 12)** by default, or GPIO6 (pin 31) if the jumper selects
+  it; **HIGH = transmit, LOW = receive**. Check the physical jumper to confirm which.
 
-- [ ] Panel-mount **3-pin and 5-pin XLR** DMX outputs, wired in parallel (pins
-      1 = gnd, 2 = data−, 3 = data+; 5-pin leaves 4/5 unused) so either connector
-      standard can be patched.
-- [ ] Internal routing from the HAT to the connector panel; keep the DMX pair twisted
-      and away from mains and the fixture PSU.
+Because our sink generates the DMX break itself (not via OLA), prefer **manual control (S1:4),
+holding GPIO18 HIGH for the whole frame including the break** — deterministic, where an automatic
+switch can tri-state on the edge-less break and corrupt it. Automatic mode (S1:3) is the
+vendor/OLA default and a fine fallback if we end up driving the HAT through OLA.
+
+- **DIP switches** (manual-GPIO18, from the datasheet's RS485 example): SW1 = OFF·ON·OFF·ON,
+  SW2 = OFF·OFF·ON·ON (Y→A, Z→B internally for half-duplex), SW3 = ON·OFF·ON·ON — SW3.1
+  termination ON only if the HAT is the last device on the bus (else OFF); SW3.3/3.4 are the 4k7
+  bias pull-down/pull-up that hold the idle line defined. (A prior project on the identical HAT
+  used SW1 = OFF·ON·ON·OFF — that is S1:3 *automatic* mode, which also works for sending.)
+- **Terminal block** (5-pin K2): `A` = data+ (K2.1, XLR pin 3), `B` = data− (K2.2, XLR pin 2),
+  `Shield` = gnd (K2.5, XLR pin 1) — confirmed against the prior project's wiring.
+- **Pi config** (`/boot/firmware/config.txt`; deployed unit is a Pi 3B): the mini-UART (`ttyS0`)
+  is unfit for DMX — its baud tracks the core clock — so move the PL011 onto the header. The Pi
+  currently has `enable_uart=1` only; still required: add `dtoverlay=disable-bt` and
+  `init_uart_clock=16000000`; free the port with `raspi-config` → Serial Port (login shell *No*,
+  hardware *Yes*, which drops `console=serial0,115200` from `cmdline.txt`) and
+  `sudo systemctl disable serial-getty@ttyAMA0.service hciuart`. Reboot, then confirm
+  `ls -l /dev/serial0` → `ttyAMA0`.
+
+Because this universe is send-only, hold **GPIO18 in the transmit state for the whole frame,
+break included** — no per-byte direction flipping.
+
+- [ ] Drive the PL011 UART at DMX-512 timing: **250 kbaud, 8N2**, break ≥ 92 µs,
+      mark-after-break ≥ 12 µs, refresh at the engine's frame rate (44 Hz); hold GPIO18 in
+      transmit throughout.
+- [ ] Decide the break-generation method on the PL011 (the hard part): `tcsendbreak` /
+      baud-toggle on `/dev/serial0`, or bit-bang via `rppal`. Spike this early — clean DMX
+      breaks from a Pi UART are the main technical risk of the build. OLA's UART native DMX
+      plugin (output-only) and the raspberrypi-dmx.org baremetal Art-Net→DMX-Out both drive
+      this exact HAT and are working references; the prior project's test sender used the
+      `Ray-electrotechie/Serial-dmx-with-python3` library (Pi serial DMX-send) — a concrete
+      break-generation precedent to port from.
 
 #### Brain (Rust) tasks
 
@@ -631,6 +671,15 @@ patch table, and moving a fixture between universes is **one field**.
 - [ ] Add a renderer that produces one slot buffer per universe from engine + patch.
 - [ ] Add a `dmx_hat` sink that owns the serial port and clocks universe 0 out at
       44 Hz; keep the sACN sink for universe 1.
+- [ ] Preflight check at sink startup — verify the *runtime effect*, not `config.txt` (the
+      file is only the request; a failed overlay or wrong boot path would parse fine yet still
+      be broken). Two `std`-only reads, panic with a remediation message on failure:
+      `fs::read_link("/dev/serial0")` must resolve to `ttyAMA0` (else mini-UART / UART not
+      enabled → "add `dtoverlay=disable-bt`, reboot"); `/proc/cmdline` must **not** contain
+      `console=serial0`/`console=ttyAMA0` (a login getty would corrupt the stream → "raspi-config
+      Serial Port: login shell off"). Do *not* try to assert `init_uart_clock` (not exposed on a
+      stable path, and 250000 divides cleanly from the default clock anyway) or the S1 DIP / K3
+      jumper (hardware, unreadable from software).
 - [ ] Move Ponytails A/B into the patch table (universe 1) so the existing rig is just
       the first patch entry — no behavioural change for Build 1.
 

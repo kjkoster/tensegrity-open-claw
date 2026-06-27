@@ -1,15 +1,25 @@
-//! BLE bridge personality — Telink 7E/EF gobo fixture.
+//! BLE bridge personality — 7E/EF RGBW fixture, two dialects.
 //!
 //! Turns a 6-channel DMX value (Intensity, R, G, B, White, Gobo rotation) into the
 //! fixture's 9-byte BLE write frames and owns the BLE connection lifecycle. It is
 //! the BLE counterpart to `led_fixture::run`: a second consumer of the same
 //! `DMX_VALUE`, running concurrently with the PWM personality.
 //!
+//! ## Two dialects (`models::Dialect`)
+//!
+//! Two fixture families share this 7E/EF protocol and are driven by the same code,
+//! selected per board in config:
+//!   * **LEDBLE** — HM-10 GATT (service 0xFFE0 / char 0xFFE1), has a gobo motor.
+//!   * **ELK** (ELK-BLEDOM/-BLEDWM) — service 0xFFF0 / char 0xFFF3, no gobo.
+//! A two-fixture bench test (`ble-star/two-stars-1.py`) proved the colour, white and
+//! brightness frames are byte-identical across both (byte1 is don't-care), so only
+//! three things branch on the dialect: the GATT UUIDs discovered, the power-frame
+//! bytes (`led_power`), and whether the gobo frames are emitted at all (`has_gobo`).
+//!
 //! The transport (the `transport` submodule) is a `trouble-host` GATT central over
 //! `esp-radio`'s BLE controller, sharing the radio that `esp-rtos` starts for WiFi
-//! (coexistence via esp-radio's `coex` feature). The writable endpoint is the
-//! characteristic 0xFFE1 of service 0xFFE0 (the value behind ATT handle 0x0011); the
-//! handle is discovery-order dependent, so we discover by UUID.
+//! (coexistence via esp-radio's `coex` feature). The writable endpoint is discovered
+//! by UUID (per dialect), since its ATT handle is discovery-order dependent.
 //!
 //! ## The fixture is modal and has no readback
 //!
@@ -27,7 +37,7 @@
 
 use embassy_time::Duration;
 
-use crate::models::DmxValue;
+use crate::models::{Dialect, DmxValue};
 
 /// Top of the fixture's native brightness scale (the device's 0x64 = 100). In RGB
 /// mode this command is the master dimmer; in white mode it is dead, so it is pinned
@@ -119,8 +129,12 @@ fn brightness(level: u8) -> Frame {
     [0x7e, 0xff, 0x01, level, 0x00, 0xff, 0xff, 0x00, 0xef]
 }
 
-/// LED power, action 0x04 with target 0x00 = LED. Powering the LED off also stops
-/// the gobo motor (a hardware coupling).
+/// LED power, action 0x04. The one frame whose bytes genuinely differ between the
+/// dialects (the bench test proved colour/white/brightness do not), so it is the
+/// only builder that takes the dialect.
+///
+/// LEDBLE — target 0x00 = LED, on/off in the value byte. Powering the LED off also
+/// stops the gobo motor (a hardware coupling).
 ///
 ///     0x7e        header
 ///     0xff        byte1: length, ignored
@@ -130,8 +144,18 @@ fn brightness(level: u8) -> Frame {
 ///     0x00 0x00   data
 ///     0x00        LED selector: 0x00 = all LEDs
 ///     0xef        footer
-fn led_power(on: bool) -> Frame {
-    [0x7e, 0xff, 0x04, on as u8, 0x00, 0x00, 0x00, 0x00, 0xef]
+///
+/// ELK — captured as two fixed frames; the on frame carries 0xF0/0x01/0xFF rather
+/// than a plain on/off value byte, so it cannot share LEDBLE's `on as u8` form.
+///
+///     on    0x7e 0x00 0x04 0xf0 0x00 0x01 0xff 0x00 0xef
+///     off   0x7e 0x00 0x04 0x00 0x00 0x00 0xff 0x00 0xef
+fn led_power(on: bool, dialect: Dialect) -> Frame {
+    match (dialect, on) {
+        (Dialect::Ledble, on) => [0x7e, 0xff, 0x04, on as u8, 0x00, 0x00, 0x00, 0x00, 0xef],
+        (Dialect::Elk, true) => [0x7e, 0x00, 0x04, 0xf0, 0x00, 0x01, 0xff, 0x00, 0xef],
+        (Dialect::Elk, false) => [0x7e, 0x00, 0x04, 0x00, 0x00, 0x00, 0xff, 0x00, 0xef],
+    }
 }
 
 /// Gobo motor power, action 0x04 with target 0x02 = gobo motor.
@@ -160,6 +184,28 @@ fn gobo_power(on: bool) -> Frame {
 ///     0xef             footer
 fn gobo_speed(speed: u8) -> Frame {
     [0x7e, 0x00, 0x16, speed, 0x00, 0x00, 0x00, 0x00, 0xef]
+}
+
+// ── Dialect properties ───────────────────────────────────────────────────────────
+//
+// The three points where the two fixture families diverge (the bench test proved
+// colour/white/brightness do not): the power-frame bytes live in `led_power` above;
+// gobo presence and GATT layout are here.
+
+/// Whether the dialect's fixture has a gobo motor. ELK fixtures have none, so their
+/// gobo frames are suppressed entirely (the gobo DMX channel is ignored for them).
+fn has_gobo(dialect: Dialect) -> bool {
+    matches!(dialect, Dialect::Ledble)
+}
+
+/// The dialect's GATT layout: `(service_uuid, write_char_uuid)`, both 16-bit SIG
+/// short UUIDs discovered by value. LEDBLE is the HM-10 serial service; ELK is the
+/// ELK-BLEDOM 0xFFF0 service.
+fn dialect_uuids(dialect: Dialect) -> (u16, u16) {
+    match dialect {
+        Dialect::Ledble => (0xFFE0, 0xFFE1),
+        Dialect::Elk => (0xFFF0, 0xFFF3),
+    }
 }
 
 // ── Scaling helpers ────────────────────────────────────────────────────────────
@@ -197,7 +243,7 @@ fn rotation_to_speed(rotation: u8) -> u8 {
 /// Build the full set of frames asserting `val` on the fixture. Modal: exactly one
 /// colour frame, white interlocked over RGB. Send the frames in order, each as a
 /// write-without-response.
-fn build_frames(val: &DmxValue) -> FrameSet {
+fn build_frames(val: &DmxValue, dialect: Dialect) -> FrameSet {
     let dimmer = val.intensity();
     let white_ch = val.white();
     let grot = val.gobo();
@@ -205,7 +251,7 @@ fn build_frames(val: &DmxValue) -> FrameSet {
     let mut frames = FrameSet::new();
 
     let led_on = dimmer > 0;
-    let _ = frames.push(led_power(led_on));
+    let _ = frames.push(led_power(led_on, dialect));
 
     if led_on {
         // Modal, with the dimmer applied differently per mode (hybrid dimming):
@@ -222,13 +268,16 @@ fn build_frames(val: &DmxValue) -> FrameSet {
             let _ = frames.push(rgb(val.red(), val.green(), val.blue()));
         }
 
-        // Gobo motor: on only while rotating (the LED is on here). Turning the LED
-        // off also stops the motor, so the dimmer==0 path needs no gobo-off frame.
-        if grot > 0 {
-            let _ = frames.push(gobo_power(true));
-            let _ = frames.push(gobo_speed(rotation_to_speed(grot)));
-        } else {
-            let _ = frames.push(gobo_power(false));
+        // Gobo motor (only fixtures that have one — ELK has none). On only while
+        // rotating; the LED is on here. Turning the LED off also stops the motor, so
+        // the dimmer==0 path needs no gobo-off frame.
+        if has_gobo(dialect) {
+            if grot > 0 {
+                let _ = frames.push(gobo_power(true));
+                let _ = frames.push(gobo_speed(rotation_to_speed(grot)));
+            } else {
+                let _ = frames.push(gobo_power(false));
+            }
         }
     }
 
@@ -248,8 +297,8 @@ mod transport {
     use rtt_target::rprintln;
     use trouble_host::prelude::*;
 
-    use super::{HEARTBEAT, RECONNECT_PAUSE, build_frames};
-    use crate::models::{DmxReceiver, DmxValue};
+    use super::{HEARTBEAT, RECONNECT_PAUSE, build_frames, dialect_uuids};
+    use crate::models::{BleTarget, Dialect, DmxReceiver, DmxValue};
 
     // HCI command slots held on the controller side.
     const HCI_SLOTS: usize = 20;
@@ -300,12 +349,10 @@ mod transport {
     const CONN_INTERVAL_MIN: Duration = Duration::from_micros(7_500);
     const CONN_INTERVAL_MAX: Duration = Duration::from_millis(15);
 
-    // The fixture's GATT layout, captured from the live device (nRF Connect + sniffer):
-    // a standard HM-10-style serial service 0xFFE0 whose characteristic 0xFFE1 is the
-    // writable endpoint — its value handle is the 0x0011 seen in the 7E/EF write
-    // captures. Both are 16-bit (Bluetooth SIG short) UUIDs, so use `Uuid::new_short`.
-    const SERVICE_UUID: u16 = 0xFFE0;
-    const WRITE_CHAR_UUID: u16 = 0xFFE1;
+    // The fixture's GATT layout is dialect-specific and lives in `super::dialect_uuids`
+    // (LEDBLE's HM-10 0xFFE0/0xFFE1 — its value handle is the 0x0011 seen in the 7E/EF
+    // write captures — vs ELK's 0xFFF0/0xFFF3). Both are 16-bit (Bluetooth SIG short)
+    // UUIDs, so discovery uses `Uuid::new_short`.
 
     /// BLE consumer — the counterpart to `led_fixture::run`. Brings up the host, then
     /// forever: connect to `target`, discover the writable characteristic, resync the
@@ -320,13 +367,15 @@ mod transport {
     /// of each session releases the radio entirely — we go silent on the air, the
     /// fixture's supervision finally fires, and it re-advertises in time for the fresh
     /// controller's next connect.
-    pub async fn run(mut dmx_value: DmxReceiver, mut bt: BT<'static>, target: [u8; 6]) -> ! {
+    pub async fn run(mut dmx_value: DmxReceiver, mut bt: BT<'static>, target: BleTarget) -> ! {
+        let mac = target.mac();
+        let dialect = target.dialect();
         // Address kind is Public, confirmed by an ADV_IND sniff (PDU TxAdd: Public).
         // bt-hci's BdAddr is written straight into the HCI command, and HCI carries
         // BD_ADDR little-endian (LSB first) — the reverse of the human-readable order
         // held in config. Reverse here, or the filter-accept-list entry never matches
         // the advertiser and connect() scans forever.
-        let mut addr = target;
+        let mut addr = mac;
         addr.reverse();
         let peer = Address {
             kind: AddrKind::PUBLIC,
@@ -358,12 +407,12 @@ mod transport {
             let session = async {
                 rprintln!(
                     "ble connecting: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                    target[0],
-                    target[1],
-                    target[2],
-                    target[3],
-                    target[4],
-                    target[5]
+                    mac[0],
+                    mac[1],
+                    mac[2],
+                    mac[3],
+                    mac[4],
+                    mac[5]
                 );
                 rprintln!(
                     "ble: requesting conn interval {}-{} us, latency 0",
@@ -476,7 +525,7 @@ mod transport {
                 };
                 match select3(
                     client.task(),
-                    serve(&client, &mut dmx_value),
+                    serve(&client, &mut dmx_value, dialect),
                     wait_disconnect,
                 )
                 .await
@@ -511,11 +560,13 @@ mod transport {
     async fn serve<C: Controller>(
         client: &GattClient<'_, C, DefaultPacketPool, GATT_MAX_SERVICES>,
         dmx_value: &mut DmxReceiver,
+        dialect: Dialect,
     ) -> Result<(), BleHostError<C::Error>> {
-        rprintln!("ble: discovering service 0x{:04X}", SERVICE_UUID);
+        let (service_uuid, write_char_uuid) = dialect_uuids(dialect);
+        rprintln!("ble: discovering service 0x{:04X}", service_uuid);
         let services = match with_timeout(
             SETUP_TIMEOUT,
-            client.services_by_uuid(&Uuid::new_short(SERVICE_UUID)),
+            client.services_by_uuid(&Uuid::new_short(service_uuid)),
         )
         .await
         {
@@ -531,7 +582,7 @@ mod transport {
         };
         let write_char: Characteristic<u8> = match with_timeout(
             SETUP_TIMEOUT,
-            client.characteristic_by_uuid(&service, &Uuid::new_short(WRITE_CHAR_UUID)),
+            client.characteristic_by_uuid(&service, &Uuid::new_short(write_char_uuid)),
         )
         .await
         {
@@ -541,7 +592,7 @@ mod transport {
                 return Ok(());
             }
         };
-        rprintln!("ble: write characteristic 0x{:04X} found", WRITE_CHAR_UUID);
+        rprintln!("ble: write characteristic 0x{:04X} found", write_char_uuid);
 
         // Resync to the latest known DMX value, not blackout: on a reconnect the
         // fixture should snap straight back to the current look instead of flashing
@@ -559,7 +610,7 @@ mod transport {
                 DmxValue::new([0; DmxValue::LEN])
             }
         };
-        let mut last_frames = build_frames(&current);
+        let mut last_frames = build_frames(&current, dialect);
         if !send_all(client, &write_char, &last_frames).await? {
             rprintln!("ble: write stalled during resync — reconnecting");
             return Ok(());
@@ -577,7 +628,7 @@ mod transport {
                     // power-off frame), on→off collapses to just the power-off frame,
                     // and an off→off change sends nothing.
                     current = value;
-                    let frames = build_frames(&current);
+                    let frames = build_frames(&current, dialect);
                     for frame in frames.iter().filter(|f| !last_frames.contains(*f)) {
                         if !write_frame(client, &write_char, frame).await? {
                             rprintln!("ble: write stalled — reconnecting");
@@ -590,7 +641,7 @@ mod transport {
                     // Heartbeat: re-assert the whole state. With no readback this is the
                     // only correction for a static look, where no later change is coming
                     // to heal a dropped frame.
-                    last_frames = build_frames(&current);
+                    last_frames = build_frames(&current, dialect);
                     if !send_all(client, &write_char, &last_frames).await? {
                         rprintln!("ble: write stalled on heartbeat — reconnecting");
                         return Ok(());

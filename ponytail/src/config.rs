@@ -28,7 +28,7 @@
 
 use rtt_target::rprintln;
 
-use crate::models::{DmxConfig, WifiConfig};
+use crate::models::{BleTarget, Dialect, DmxConfig, WifiConfig};
 
 // ── Global settings (identical for every board) ───────────────────────────────
 const SSID: &str = "closed claw DMX";
@@ -42,27 +42,31 @@ const SACN_PORT: u16 = 5568;
 //
 // TODO: replace these placeholder station MACs with the real ones read from the RTT
 // `mac=` line of each board (see module docs). For a board running the BLE bridge,
-// also sniff its fixture's BLE MAC — and writable characteristic UUID (see `ble`) —
-// and set `ble_target`. Until a board's true station MAC is listed here, it panics
-// at boot.
+// also sniff its fixture's BLE MAC — and which dialect it speaks (LEDBLE vs ELK; see
+// `models::Dialect` and `ble`) — and set `ble_target`. Until a board's true station
+// MAC is listed here, it panics at boot.
 struct Board {
     /// WiFi station MAC, read from efuse at boot — the board's stable identity.
     mac: [u8; 6],
     /// DMX base address (the Intensity slot); the other five channels follow.
     dmx_address: u16,
-    /// The bridged Telink fixture's BLE MAC, or `None` if this board drives its LEDs
-    /// over PWM rather than bridging to an original controller.
-    ble_target: Option<[u8; 6]>,
+    /// The bridged fixture (its BLE MAC and which dialect it speaks; see
+    /// [`BleTarget`]), or `None` if this board drives its LEDs over PWM rather than
+    /// bridging to an original controller.
+    ble_target: Option<BleTarget>,
 }
 
 const BOARDS: &[Board] = &[
-    Board { mac: [0xAC, 0xA7, 0x04, 0x2C, 0x4F, 0xD8], dmx_address: 1, ble_target: Some([0xA4, 0xC1, 0x38, 0x40, 0x91, 0xE3]) },
-    Board { mac: [0xDC, 0xB4, 0xD9, 0x3B, 0xB1, 0xA4], dmx_address: 7, ble_target: Some([0xA4, 0xC1, 0x38, 0x40, 0x91, 0xE4]) }, // TODO completely made up
+    Board { mac: [0xAC, 0xA7, 0x04, 0x2C, 0x4F, 0xD8], dmx_address: 1, ble_target: Some(BleTarget::new([0xA4, 0xC1, 0x38, 0x40, 0x91, 0xE3], Dialect::Ledble)) },
+    // The board bridging to the ELK/Punytail fixture (`ELK-BLEDWM 45`): station MAC
+    // confirmed from its RTT `mac=` line, fixture BLE MAC BE:68:46:D2:07:00 sniffed on
+    // claw-pi.
+    Board { mac: [0xDC, 0xB4, 0xD9, 0x3B, 0xB1, 0xA4], dmx_address: 7, ble_target: Some(BleTarget::new([0xBE, 0x68, 0x46, 0xD2, 0x07, 0x00], Dialect::Elk)) },
 ];
 
-/// Returns the BLE target MAC for the board with the given station MAC, or `None`
-/// if the board is unknown or drives its LEDs over PWM.
-pub fn ble_target_mac_for(mac: [u8; 6]) -> Option<[u8; 6]> {
+/// Returns the bridged fixture (BLE MAC + dialect) for the board with the given
+/// station MAC, or `None` if the board is unknown or drives its LEDs over PWM.
+pub fn ble_target_for(mac: [u8; 6]) -> Option<BleTarget> {
     BOARDS
         .iter()
         .find(|board| board.mac == mac)

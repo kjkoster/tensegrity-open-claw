@@ -34,7 +34,7 @@ use esp_hal::{
     },
     time::Rate,
 };
-use models::{DmxConfig, DmxReceiver, DmxWatch};
+use models::{BleTarget, DmxConfig, DmxReceiver, DmxWatch};
 use rtt_target::rprintln;
 
 extern crate alloc;
@@ -67,8 +67,23 @@ async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
 /// BLE-bridge consumer, spawned as its own task so it runs in parallel with the PWM
 /// `led_fixture` (which `main` drives directly). Both observe `DMX_VALUE`.
 #[embassy_executor::task]
-async fn ble_bridge(dmx_value: DmxReceiver, bt: BT<'static>, target: [u8; 6]) -> ! {
+async fn ble_bridge(dmx_value: DmxReceiver, bt: BT<'static>, target: BleTarget) -> ! {
     ble::run(dmx_value, bt, target).await
+}
+
+/// Log a MAC under a left-aligned label, so the boot MAC lines (station, BLE
+/// controller, fixture) stay column-aligned from one place.
+fn log_mac(label: &str, mac: [u8; 6]) {
+    rprintln!(
+        "{:<16}{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        label,
+        mac[0],
+        mac[1],
+        mac[2],
+        mac[3],
+        mac[4],
+        mac[5]
+    );
 }
 
 #[allow(
@@ -116,15 +131,7 @@ async fn main(spawner: Spawner) -> ! {
         .as_bytes()
         .try_into()
         .unwrap();
-    rprintln!(
-        "mac address:    {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        mac_address[0],
-        mac_address[1],
-        mac_address[2],
-        mac_address[3],
-        mac_address[4],
-        mac_address[5]
-    );
+    log_mac("mac address:", mac_address);
 
     // The BLE controller's public address — what a sniffer sees as the ESP's InitA in
     // its CONNECT_IND. Derived from the same efuse base MAC as the station MAC above.
@@ -132,15 +139,7 @@ async fn main(spawner: Spawner) -> ! {
         .as_bytes()
         .try_into()
         .unwrap();
-    rprintln!(
-        "ble mac:        {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        bt_mac[0],
-        bt_mac[1],
-        bt_mac[2],
-        bt_mac[3],
-        bt_mac[4],
-        bt_mac[5]
-    );
+    log_mac("ble mac:", bt_mac);
 
     let dmx_config = config::dmx_config_for(mac_address);
     let wifi_config = config::wifi_config();
@@ -161,22 +160,15 @@ async fn main(spawner: Spawner) -> ! {
     let ble_value = DMX_VALUE.receiver().unwrap();
     let pwm_value = DMX_VALUE.receiver().unwrap();
 
-    let target = config::ble_target_mac_for(mac_address)
+    let ble_target = config::ble_target_for(mac_address)
         .expect("no BLE target in config::BOARDS for this board");
-    rprintln!(
-        "ble address:    {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-        target[0],
-        target[1],
-        target[2],
-        target[3],
-        target[4],
-        target[5]
-    );
+    log_mac("ble address:", ble_target.mac());
+    rprintln!("ble dialect:    {:?}", ble_target.dialect());
     // Heap state just before BLE coexistence allocates its controller-thread stack:
     // the stack needs one contiguous block, so the largest free block matters as much
     // as the total.
     rprintln!("heap stats:\n{}", esp_alloc::HEAP.stats());
-    spawner.spawn(ble_bridge(ble_value, peripherals.BT, target).unwrap());
+    spawner.spawn(ble_bridge(ble_value, peripherals.BT, ble_target).unwrap());
 
     rprintln!("pwm fixture:    LEDC");
 
