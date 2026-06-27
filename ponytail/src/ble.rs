@@ -241,8 +241,8 @@ fn rotation_to_speed(rotation: u8) -> u8 {
 // ── Translation ────────────────────────────────────────────────────────────────
 
 /// Build the full set of frames asserting `val` on the fixture. Modal: exactly one
-/// colour frame, white interlocked over RGB. Send the frames in order, each as a
-/// write-without-response.
+/// colour frame, white interlocked over RGB. Send the frames in order, each as an
+/// acknowledged write.
 fn build_frames(val: &DmxValue, dialect: Dialect) -> FrameSet {
     let dimmer = val.intensity();
     let white_ch = val.white();
@@ -291,7 +291,7 @@ pub use transport::run;
 mod transport {
     use bt_hci::controller::{Controller, ExternalController};
     use embassy_futures::select::{Either, Either3, select, select3};
-    use embassy_time::{Duration, Ticker, Timer, with_timeout};
+    use embassy_time::{Duration, Instant, Ticker, Timer, with_timeout};
     use esp_hal::peripherals::BT;
     use esp_radio::ble::controller::BleConnector;
     use rtt_target::rprintln;
@@ -331,13 +331,13 @@ mod transport {
     // a safe trade. Tune if reconnects still lag a reset.
     const SUPERVISION_TIMEOUT: Duration = Duration::from_secs(4);
 
-    // Bound each write-without-response. This is the one steady-state await with no
-    // timeout: if the controller's tx buffers drain because the peer has gone silent at
-    // the link layer without a Disconnected yet surfacing, the await blocks forever, the
-    // serve loop emits nothing, and the link is never torn down (ble/s flatlines at 0 with
-    // no log). A timeout converts that wedge into a return from serve() that the reconnect
-    // flow already handles. Kept above SUPERVISION_TIMEOUT (4 s) so a real link drop is
-    // caught by supervision first and a merely busy link is not torn down prematurely.
+    // Bound each acknowledged write. The await completes on the fixture's ATT Write
+    // Response, so if the peer goes silent — link nominally up, no Disconnected, but no
+    // response coming — the await would block forever, the serve loop emits nothing, and
+    // the link is never torn down (ble/s flatlines at 0 with no log). A timeout converts
+    // that wedge into a return from serve() that the reconnect flow already handles. Kept
+    // above SUPERVISION_TIMEOUT (4 s) so a clean link drop is caught by supervision first
+    // and a merely slow fixture is not torn down prematurely.
     const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
     // Connection interval we request from the fixture (#2). trouble-host's default is a
@@ -495,13 +495,13 @@ mod transport {
                 //      error, and now also on a write that stalls past WRITE_TIMEOUT,
                 //   3. the connection itself. A clean supervision-timeout drop (the
                 //      fixture loses power or goes out of range) surfaces as a
-                //      Disconnected event — not as a write error, since writes are
-                //      fire-and-forget. But not every failure surfaces that way: a
-                //      GATT/buffer wedge can leave the ACL link nominally up with no
-                //      Disconnected while writes silently stop completing (observed as
-                //      ble/s flatlining at 0 with no log). That case is caught by the
-                //      WRITE_TIMEOUT on serve()'s write path (arm #2), not here; this
-                //      arm covers the clean drops where a Disconnected does arrive.
+                //      Disconnected event. With acknowledged writes an in-flight write to
+                //      a dropped link also errors out of serve() (arm #2), so a drop can
+                //      surface either way and select3 takes whichever fires first. But not
+                //      every failure surfaces as a Disconnected: a GATT/buffer wedge can
+                //      leave the ACL link nominally up while the fixture stops responding
+                //      (observed as ble/s flatlining at 0 with no log). That case is caught
+                //      by the WRITE_TIMEOUT on serve()'s write path (arm #2), not here.
                 let wait_disconnect = async {
                     loop {
                         match conn.next().await {
@@ -666,7 +666,12 @@ mod transport {
         Ok(true)
     }
 
-    /// Write one 9-byte frame as a write-without-response and count it. The await is
+    /// Write one 9-byte frame as an acknowledged write and record it with its latency.
+    /// The await completes only when the fixture returns the ATT Write Response, so its
+    /// duration is the fixture's true per-command service time — link round-trip plus
+    /// however long its MCU takes to digest the frame. Timing it is how we measure the
+    /// real throughput of an otherwise-opaque controller, and the ack also paces the
+    /// serve loop to exactly what the fixture can absorb (no overrun). The await is
     /// bounded by WRITE_TIMEOUT. Returns Ok(true) on a counted write, Ok(false) if the
     /// write stalled past the timeout (the caller should return from serve to
     /// reconnect), and Err for a real link/controller error.
@@ -675,15 +680,11 @@ mod transport {
         write_char: &Characteristic<u8>,
         frame: &super::Frame,
     ) -> Result<bool, BleHostError<C::Error>> {
-        match with_timeout(
-            WRITE_TIMEOUT,
-            client.write_characteristic_without_response(write_char, frame),
-        )
-        .await
-        {
+        let started = Instant::now();
+        match with_timeout(WRITE_TIMEOUT, client.write_characteristic(write_char, frame)).await {
             Ok(result) => {
                 result?;
-                crate::metrics::record_ble_packet();
+                crate::metrics::record_ble_packet(started.elapsed().as_micros() as u32);
                 Ok(true)
             }
             Err(_) => Ok(false),

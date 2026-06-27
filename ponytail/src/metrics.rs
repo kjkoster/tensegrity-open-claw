@@ -17,6 +17,11 @@ use rtt_target::rprintln;
 static UNIVERSES: AtomicU32 = AtomicU32::new(0);
 static CHANGES: AtomicU32 = AtomicU32::new(0);
 static BLE_PACKETS: AtomicU32 = AtomicU32::new(0);
+// Sum of acknowledged-write latencies (µs) since the last tick. Divided by BLE_PACKETS
+// in the report task to get the mean per-write service time. A second's worth (~16
+// writes × ~64 ms) is well within u32; only completed writes contribute, so it cannot
+// be inflated by a stalled one.
+static ACK_MICROS: AtomicU32 = AtomicU32::new(0);
 
 /// A valid sACN packet for our universe arrived (counts delivery, before the
 /// change filter — this is the WiFi-reliability signal).
@@ -30,9 +35,12 @@ pub fn record_change() {
     CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 
-/// One BLE write-without-response frame went out to the fixture.
-pub fn record_ble_packet() {
+/// One acknowledged BLE write completed, with the round-trip latency (µs) the fixture
+/// took to ack it. The latency is the fixture's true per-command service time — the
+/// report task averages it into the real-throughput figure.
+pub fn record_ble_packet(latency_us: u32) {
     BLE_PACKETS.fetch_add(1, Ordering::Relaxed);
+    ACK_MICROS.fetch_add(latency_us, Ordering::Relaxed);
 }
 
 // Per-second EWMA smoothing factor. With one update per second, alpha = 1/30 gives
@@ -53,12 +61,19 @@ pub async fn report() -> ! {
     let mut avg_ble = 0.0f32;
     let mut seeded = false;
 
+    // The acked-write latency average seeds on the first second that actually has writes,
+    // which is later than the first sample (BLE connects after WiFi), so it carries its
+    // own seed flag.
+    let mut avg_ack_ms = 0.0f32;
+    let mut seeded_ack = false;
+
     loop {
         ticker.next().await;
 
         let universes = UNIVERSES.swap(0, Ordering::Relaxed);
         let changes = CHANGES.swap(0, Ordering::Relaxed);
         let ble = BLE_PACKETS.swap(0, Ordering::Relaxed);
+        let ack_micros = ACK_MICROS.swap(0, Ordering::Relaxed);
 
         if seeded {
             avg_universes += ALPHA * (universes as f32 - avg_universes);
@@ -85,9 +100,29 @@ pub async fn report() -> ! {
             0.0
         };
 
+        // Mean acked-write latency this second = total / count. Undefined with no writes,
+        // so hold the average across an idle second rather than dragging it to zero.
+        let ack_ms = if ble > 0 {
+            ack_micros as f32 / ble as f32 / 1000.0
+        } else {
+            0.0
+        };
+        if ble > 0 {
+            if seeded_ack {
+                avg_ack_ms += ALPHA * (ack_ms - avg_ack_ms);
+            } else {
+                avg_ack_ms = ack_ms;
+                seeded_ack = true;
+            }
+        }
+        // The real rate the fixture can sustain, implied by that latency: it services one
+        // acked command at a time, so capacity ≈ 1000 / mean-ms. This is the number to set
+        // brain's change rate just under.
+        let ack_rate = if avg_ack_ms > 0.0 { 1000.0 / avg_ack_ms } else { 0.0 };
+
         rprintln!(
-            "metrics: universes {}/s (avg {:.1}) | changes {}/s (avg {:.1}) | ble {}/s (avg {:.1}) | ble/change {:.2} (avg {:.2})",
-            universes, avg_universes, changes, avg_changes, ble, avg_ble, ratio, avg_ratio
+            "metrics: universes {}/s (avg {:.1}) | changes {}/s (avg {:.1}) | ble {}/s (avg {:.1}) | ble/change {:.2} (avg {:.2}) | ack {:.0}ms (avg {:.0}ms, ~{:.0}/s)",
+            universes, avg_universes, changes, avg_changes, ble, avg_ble, ratio, avg_ratio, ack_ms, avg_ack_ms, ack_rate
         );
     }
 }
