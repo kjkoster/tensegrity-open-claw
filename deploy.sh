@@ -56,3 +56,5 @@ step "run remote deploy on $PI"
 ssh "$PI" "bash '$REMOTE_DIR/remote-deploy.sh'"
 
 step "deploy complete"
+say "The installation of the Open Claw has completed. Go check it out"
+
