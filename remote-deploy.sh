@@ -21,6 +21,8 @@ step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
 declare -A DEVICE_MAP=(
   ["usb-Espressif_USB_JTAG_serial_debug_unit_AC:A7:04:2C:4F:D8-if00"]="ponytail"
   ["usb-Espressif_USB_JTAG_serial_debug_unit_DC:B4:D9:3B:B1:A4-if00"]="ponytail"
+  ["usb-Espressif_USB_JTAG_serial_debug_unit_AC:A7:04:2C:50:FC-if00"]="ponytail"
+  ["usb-Espressif_USB_JTAG_serial_debug_unit_1C:DB:D4:75:AB:7C-if00"]="ponytail"
 )
 # ─────────────────────────────────────────────────────────────────────────────
 

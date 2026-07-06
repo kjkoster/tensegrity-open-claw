@@ -15,10 +15,12 @@ use std::net::UdpSocket;
 pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<AudioFeatures>) -> ! {
     let ponytail_a = Fixture { start_address: 1 };
     let ponytail_b = Fixture { start_address: 7 };
+    let ponytail_c = Fixture { start_address: 13 };
+    let ponytail_d = Fixture { start_address: 19 };
 
     // Independent instances: own breath clock, colour seeds, and white-mode gate per
-    // fixture, so the two Ponytails sparkle and flip to white independently rather
-    // than in lock-step (SPARKLE.md §6). B's white gate is seeded distinctly from A's.
+    // fixture, so the Ponytails sparkle and flip to white independently rather than in
+    // lock-step (SPARKLE.md §6). Each fixture's white gate is seeded distinctly.
     let mut map_a = PonytailMapping::new(
         cfg::SEEDS[0],
         cfg::SEEDS[1],
@@ -31,6 +33,18 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         cfg::SEEDS[6],
         cfg::WHITE_MODE_PERLIN_SEED ^ cfg::SEEDS[3],
     );
+    let mut map_c = PonytailMapping::new(
+        cfg::SEEDS[8],
+        cfg::SEEDS[9],
+        cfg::SEEDS[10],
+        cfg::WHITE_MODE_PERLIN_SEED ^ cfg::SEEDS[11],
+    );
+    let mut map_d = PonytailMapping::new(
+        cfg::SEEDS[12],
+        cfg::SEEDS[13],
+        cfg::SEEDS[14],
+        cfg::WHITE_MODE_PERLIN_SEED ^ cfg::SEEDS[15],
+    );
 
     let frame_period = Duration::from_micros(1_000_000 / cfg::FRAME_RATE_HZ);
     let mut ticker = Ticker::every(frame_period);
@@ -42,11 +56,16 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         let snapshot = features.snapshot();
         let a = map_a.frame(&snapshot, dt);
         let b = map_b.frame(&snapshot, dt);
+        let c = map_c.frame(&snapshot, dt);
+        let d = map_d.frame(&snapshot, dt);
 
-        // 12 DMX slots for two 6-channel Ponytail fixtures (IRGBW + Gobo rotation).
-        let mut slots = [0u8; 12];
+        // One universe spanning all four fixtures: A@1, B@7, C@13, D@19. Width derives
+        // from the fixture count.
+        let mut slots = [0u8; cfg::DMX_SLOTS];
         fill(&mut slots, &ponytail_a, &a);
         fill(&mut slots, &ponytail_b, &b);
+        fill(&mut slots, &ponytail_c, &c);
+        fill(&mut slots, &ponytail_d, &d);
 
         let packet = dmx::encode(cfg::UNIVERSE, sequence, cfg::SACN_PRIORITY, 0, &cid, &slots);
         dmx::send_multicast(&socket, cfg::UNIVERSE, cfg::SACN_PORT, &packet);
@@ -58,7 +77,7 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
 /// linear ~100-level native brightness scale — spending those few levels perceptually
 /// (rather than bunched at the dark end) is what keeps the breathing from banding. The
 /// colour, white, and gobo channels are already perceptual 0..1 and scale linearly.
-fn fill(slots: &mut [u8; 12], fixture: &Fixture, out: &PonytailOut) {
+fn fill(slots: &mut [u8], fixture: &Fixture, out: &PonytailOut) {
     slots[fixture.slot(0)] = unit_to_byte(out.intensity.powf(1.0 / cfg::GAMMA));
     slots[fixture.slot(1)] = unit_to_byte(out.r);
     slots[fixture.slot(2)] = unit_to_byte(out.g);

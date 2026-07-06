@@ -20,13 +20,20 @@ pub const SACN_PRIORITY: u8 = 100;
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
+// Each Ponytail is a contiguous block of channels: Intensity, R, G, B, White, Gobo.
+pub const CHANNELS_PER_FIXTURE: usize = 6;
+// Fixture blocks lie end to end from slot 1 (A@1, B@7, C@13, D@19), so the universe is
+// just (fixtures × channels) wide. Bump this when a fixture block is added.
+pub const FIXTURE_COUNT: usize = 4;
+pub const DMX_SLOTS: usize = FIXTURE_COUNT * CHANNELS_PER_FIXTURE;
+
 // ── Noise engine ─────────────────────────────────────────────────────────────
 pub const CONTRAST: f64 = 1.6;
 pub const GAMMA: f64 = 2.2;
 
 // Distinct 64-bit seeds give independent noise fields sharing one drift speed.
-// Order: Fixture A [R, G, B, W], Fixture B [R, G, B, W]
-pub const SEEDS: [u64; 8] = [
+// Order: Fixture A [R, G, B, W], B [R, G, B, W], C [R, G, B, W], D [R, G, B, W].
+pub const SEEDS: [u64; 16] = [
     0xcafe_babe_dead_beef,
     0x1234_5678_9abc_def0,
     0xfedc_ba98_7654_3210,
@@ -35,6 +42,14 @@ pub const SEEDS: [u64; 8] = [
     0x5555_aaaa_5555_aaaa,
     0x3c3c_3c3c_c3c3_c3c3,
     0x6969_6969_9696_9696,
+    0x0123_4567_89ab_cdef,
+    0xf0e1_d2c3_b4a5_9687,
+    0xbada_5555_c0ff_ee00,
+    0x8ebc_6af0_9c88_c6e3,
+    0x2718_2818_2845_9045,
+    0x3141_5926_5358_9793,
+    0x9e37_79b9_7f4a_7c15,
+    0xc2b2_ae3d_27d4_eb4f,
 ];
 
 // ── §3 Capture ───────────────────────────────────────────────────────────────

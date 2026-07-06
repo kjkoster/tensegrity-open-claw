@@ -62,6 +62,13 @@ const BOARDS: &[Board] = &[
     // confirmed from its RTT `mac=` line, fixture BLE MAC BE:68:46:D2:07:00 sniffed on
     // claw-pi.
     Board { mac: [0xDC, 0xB4, 0xD9, 0x3B, 0xB1, 0xA4], dmx_address: 7, ble_target: Some(BleTarget::new([0xBE, 0x68, 0x46, 0xD2, 0x07, 0x00], Dialect::Elk)) },
+    // Fixture C, board AC:A7:04:2C:50:FC at DMX 13. Fixture BLE MAC (`ELK-BLEDWM 2A`)
+    // sniffed on claw-pi.
+    Board { mac: [0xAC, 0xA7, 0x04, 0x2C, 0x50, 0xFC], dmx_address: 13, ble_target: Some(BleTarget::new([0xBE, 0x68, 0x52, 0x4F, 0x63, 0x00], Dialect::Elk)) },
+    // Fixture D, the new board (station MAC from its RTT `mac=` line). DMX 19 follows the
+    // 6-channel cadence (A@1, B@7, C@13 reserved, D@19). Fixture BLE MAC (`ELK-BLEDWM 40`)
+    // sniffed on claw-pi.
+    Board { mac: [0x1C, 0xDB, 0xD4, 0x75, 0xAB, 0x7C], dmx_address: 19, ble_target: Some(BleTarget::new([0xBE, 0x68, 0x47, 0xD2, 0x01, 0x00], Dialect::Elk)) },
 ];
 
 /// Returns the bridged fixture (BLE MAC + dialect) for the board with the given

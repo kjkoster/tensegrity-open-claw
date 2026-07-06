@@ -74,10 +74,11 @@ pub fn encode(
 
 /// Encodes a stream-terminated frame for `universe`: a normal data packet carrying
 /// zeroed slots with the `STREAM_TERMINATED` options bit set. Sent on shutdown so the
-/// fixtures release the brain's source at once. The slot width matches the live stream
-/// (two 6-channel Ponytails); receivers release on the flag regardless of contents.
+/// fixtures release the brain's source at once. The slot width matches the live stream so
+/// every fixture — including the highest-addressed — finds its slots and honours the flag;
+/// only the flag matters, not the contents.
 pub fn encode_release(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16]) -> Vec<u8> {
-    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; 12])
+    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; crate::config::DMX_SLOTS])
 }
 
 /// The sACN multicast group address for the given universe.
