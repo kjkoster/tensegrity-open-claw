@@ -9,6 +9,7 @@
 
 mod ble;
 mod config;
+mod filter;
 mod led_fixture;
 mod metrics;
 mod models;
@@ -49,9 +50,14 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// The latest DMX value, fanned out to both consumer personalities. See
-// `models::DMX_CONSUMERS`.
+// The latest DMX value off the wire, fanned out to the PWM personality and the filter
+// stage. See `models::DMX_CONSUMERS`.
 static DMX_VALUE: DmxWatch = DmxWatch::new();
+
+// The filter stage's output: the wire resampled to `config::BLE_UPDATE_RATE_HZ`, read
+// only by the BLE bridge. Reusing `DmxWatch` keeps the BLE receiver type identical, so
+// `ble::run` is unchanged — it just observes this watch instead of `DMX_VALUE`.
+static FILTERED_DMX: DmxWatch = DmxWatch::new();
 
 #[embassy_executor::task]
 async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
@@ -152,13 +158,17 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(metrics::report().unwrap());
 
     // ── Consumers ───────────────────────────────────────────────────────────────
-    // Both consumer personalities run at once, each observing DMX_VALUE through its
-    // own Watch receiver: the BLE bridge writes the fixture's original Telink
-    // controller over BLE, and the PWM led_fixture drives the RGBW array over LEDC.
-    // The BLE bridge is spawned as a task; the PWM personality is awaited directly at
-    // the end of main, so this function never returns.
-    let ble_value = DMX_VALUE.receiver().unwrap();
+    // Both consumer personalities run at once: the PWM led_fixture drives the RGBW array
+    // over LEDC directly off the wire, while the BLE bridge writes the fixture's original
+    // Telink controller over BLE. The BLE controller cannot keep up with the full wire
+    // rate, so the filter stage sits between the wire and the bridge, resampling
+    // DMX_VALUE down to config::BLE_UPDATE_RATE_HZ onto FILTERED_DMX; the PWM personality
+    // stays full-rate. The filter and BLE bridge are spawned as tasks; the PWM
+    // personality is awaited directly at the end of main, so this function never returns.
+    let filter_in = DMX_VALUE.receiver().unwrap();
     let pwm_value = DMX_VALUE.receiver().unwrap();
+    let ble_value = FILTERED_DMX.receiver().unwrap();
+    spawner.spawn(filter::run(filter_in, FILTERED_DMX.sender()).unwrap());
 
     let ble_target = config::ble_target_for(mac_address)
         .expect("no BLE target in config::BOARDS for this board");

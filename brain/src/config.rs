@@ -4,13 +4,11 @@
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
 pub const UNIVERSE: u16 = 1;
 pub const SACN_PORT: u16 = 5568;
-// Throttled to sit under the slowest consumer: the BLE-bridged ELK fixture acks only
-// ~18 writes/s, so anything generated faster is dropped at the bridge — including beats.
-// Holding every frame ~71 ms keeps each change within that ceiling, so pulses survive
-// instead of falling between the fixture's samples. dt scales with this, so the visuals
-// run at the same wall-clock speed, just sampled coarser. Temporary global cap; the
-// per-fixture-sink decimation (Build 9) will let the fast fixtures run full-rate again.
-pub const FRAME_RATE_HZ: u64 = 14;
+// Full wire rate. The BLE-bridged fixtures cannot absorb this many changes/s, but that
+// is now handled where the constraint lives: each ponytail's filter stage resamples the
+// wire down to its own BLE update rate for the bridge alone, so the wire and every
+// fast consumer run full-rate here.
+pub const FRAME_RATE_HZ: u64 = 44;
 
 // E1.31 source priority. The brain holds the default 100; a manual console (QLC+)
 // overrides by sending the same universe at a strictly higher value.

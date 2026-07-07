@@ -36,6 +36,13 @@ const PASSWORD: &str = "close-that-claw";
 const UNIVERSE: u16 = 1;
 const SACN_PORT: u16 = 5568;
 
+// The BLE fixtures' original controllers absorb only ~40 DMX changes/s before the link
+// saturates and wedges (ISSUE.md); the sACN wire and the PWM personality run far faster.
+// The `filter` stage resamples the wire down to this rate for the BLE consumer alone, so
+// the bridge stays inside the controller's throughput while every other consumer keeps
+// full rate. Kept well under the ~40/s ceiling for headroom.
+pub const BLE_UPDATE_RATE_HZ: u64 = 14;
+
 // ── Per-board settings, keyed by station MAC ───────────────────────────────────
 // One row per board. Six channels per fixture: Fixture A → DMX start address 1
 // (slots 1–6), Fixture B → 7 (slots 7–12). Matches brain's fixture layout.

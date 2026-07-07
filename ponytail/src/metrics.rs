@@ -2,9 +2,11 @@
 //!
 //! Two questions drive this: (a) is WiFi delivering sACN reliably, and (b) how many
 //! BLE frames are we burning per actual DMX change (the link is the bottleneck, so
-//! every redundant frame matters). The producers — the sACN listener and the BLE
-//! bridge — just bump lock-free counters on their hot paths; this task owns all the
-//! arithmetic and the RTT output so it costs the producers nothing but an atomic add.
+//! every redundant frame matters). Three tiers make the throttle visible: `universes`
+//! (delivery), `changes` (distinct wire frames), and `filtered` (the resampled rate the
+//! BLE bridge actually sees). The producers — the sACN listener, the filter stage, and
+//! the BLE bridge — just bump lock-free counters on their hot paths; this task owns all
+//! the arithmetic and the RTT output so it costs the producers nothing but an atomic add.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -16,6 +18,7 @@ use rtt_target::rprintln;
 // reader (the report task) swaps each to zero once a second.
 static UNIVERSES: AtomicU32 = AtomicU32::new(0);
 static CHANGES: AtomicU32 = AtomicU32::new(0);
+static FILTERED: AtomicU32 = AtomicU32::new(0);
 static BLE_PACKETS: AtomicU32 = AtomicU32::new(0);
 // Sum of acknowledged-write latencies (µs) since the last tick. Divided by BLE_PACKETS
 // in the report task to get the mean per-write service time. A second's worth (~16
@@ -33,6 +36,12 @@ pub fn record_universe() {
 /// the consumers must act on.
 pub fn record_change() {
     CHANGES.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The filter stage published a new resampled value to the BLE bridge — the rate the
+/// bridge is actually asked to track, held under the controller's throughput ceiling.
+pub fn record_filtered() {
+    FILTERED.fetch_add(1, Ordering::Relaxed);
 }
 
 /// One acknowledged BLE write completed, with the round-trip latency (µs) the fixture
@@ -58,6 +67,7 @@ pub async fn report() -> ! {
     // of zero, so the smoothed column is meaningful from the first line.
     let mut avg_universes = 0.0f32;
     let mut avg_changes = 0.0f32;
+    let mut avg_filtered = 0.0f32;
     let mut avg_ble = 0.0f32;
     let mut seeded = false;
 
@@ -72,16 +82,19 @@ pub async fn report() -> ! {
 
         let universes = UNIVERSES.swap(0, Ordering::Relaxed);
         let changes = CHANGES.swap(0, Ordering::Relaxed);
+        let filtered = FILTERED.swap(0, Ordering::Relaxed);
         let ble = BLE_PACKETS.swap(0, Ordering::Relaxed);
         let ack_micros = ACK_MICROS.swap(0, Ordering::Relaxed);
 
         if seeded {
             avg_universes += ALPHA * (universes as f32 - avg_universes);
             avg_changes += ALPHA * (changes as f32 - avg_changes);
+            avg_filtered += ALPHA * (filtered as f32 - avg_filtered);
             avg_ble += ALPHA * (ble as f32 - avg_ble);
         } else {
             avg_universes = universes as f32;
             avg_changes = changes as f32;
+            avg_filtered = filtered as f32;
             avg_ble = ble as f32;
             seeded = true;
         }
@@ -121,8 +134,8 @@ pub async fn report() -> ! {
         let ack_rate = if avg_ack_ms > 0.0 { 1000.0 / avg_ack_ms } else { 0.0 };
 
         rprintln!(
-            "metrics: universes {}/s (avg {:.1}) | changes {}/s (avg {:.1}) | ble {}/s (avg {:.1}) | ble/change {:.2} (avg {:.2}) | ack {:.0}ms (avg {:.0}ms, ~{:.0}/s)",
-            universes, avg_universes, changes, avg_changes, ble, avg_ble, ratio, avg_ratio, ack_ms, avg_ack_ms, ack_rate
+            "metrics: universes {}/s (avg {:.1}) | changes {}/s (avg {:.1}) | filtered {}/s (avg {:.1}) | ble {}/s (avg {:.1}) | ble/change {:.2} (avg {:.2}) | ack {:.0}ms (avg {:.0}ms, ~{:.0}/s)",
+            universes, avg_universes, changes, avg_changes, filtered, avg_filtered, ble, avg_ble, ratio, avg_ratio, ack_ms, avg_ack_ms, ack_rate
         );
     }
 }
