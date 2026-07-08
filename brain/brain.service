@@ -6,6 +6,12 @@ After=network.target
 ExecStart=/usr/local/bin/brain
 Restart=always
 RestartSec=5
+# Real-time scheduling so the kernel can't preempt the DMX loop mid-frame and split the
+# back-to-back slot stream (the classic Pi-UART→DMX corruption). The kernel's RT throttle
+# (sched_rt_runtime_us, 95% by default) still guarantees non-RT tasks make progress, so a
+# busy-spin in the break code can't lock the box.
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
 
 [Install]
 WantedBy=multi-user.target

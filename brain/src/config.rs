@@ -20,10 +20,49 @@ pub const SACN_RELEASE_FRAMES: u8 = 3;
 
 // Each Ponytail is a contiguous block of channels: Intensity, R, G, B, White, Gobo.
 pub const CHANNELS_PER_FIXTURE: usize = 6;
-// Fixture blocks lie end to end from slot 1 (A@1, B@7, C@13, D@19), so the universe is
-// just (fixtures × channels) wide. Bump this when a fixture block is added.
+// Fixture blocks lie end to end from slot 1 (A@1, B@7, C@13, D@19), then the wired laser's
+// block. Bump the relevant constant when a fixture is added.
 pub const FIXTURE_COUNT: usize = 4;
-pub const DMX_SLOTS: usize = FIXTURE_COUNT * CHANNELS_PER_FIXTURE;
+pub const DMX_SLOTS: usize = FIXTURE_COUNT * CHANNELS_PER_FIXTURE + LASER_CHANNELS;
+
+// ── JB Systems Space-4 laser (wired; LASER.md) ───────────────────────────────
+// Patched into the same universe after the Ponytail block: 8-channel mode at address 25,
+// so it fills slots 25–32. CH1 must be ≥192 to unlock DMX control of CH2–CH8; below that
+// the laser ignores them and free-runs its internal auto/sound show. The diagonal is drawn
+// purely by sweeping CH7/CH8 (absolute X/Y position) in lockstep — no pattern rotation.
+pub const LASER_ADDRESS: u16 = 25;
+pub const LASER_CHANNELS: usize = 8;
+// Sibling JB lasers misdocument their DMX map (Beglec confirmed the Lounge Laser manual was
+// wrong and channels must stay in a "5–127" active band), so distrust the printed thresholds:
+// drive CH1 to the very top of the documented DMX-mode band, and keep every other channel out
+// of the 0–4 dead zone the firmware appears to ignore.
+#[allow(dead_code)] // TEMP: CH1 is swept by the mode-sweep diagnostic in laser.rs
+pub const LASER_DMX_MODE: u8 = 255; // CH1: top of the 192–255 DMX-mode band
+pub const LASER_PATTERN: u8 = 250; // CH2: selects the 246–255 pattern; only picks what CH7/CH8 move
+pub const LASER_ZOOM: u8 = 5; // CH3: low end of 0–127 (≈full size), held in the active band
+pub const LASER_SWEEP_PERIOD_S: f64 = 4.0; // one up-and-back diagonal traversal
+pub const LASER_MODE_SWEEP_PERIOD_S: f64 = 30.0; // TEMP diagnostic: sweep CH1 across 0..255 in ~30 s
+// TEMP experiment: MIN == MAX freezes CH7/CH8 at one position, to test whether the laser
+// honours DMX position at all (beam sits still ⇒ honoured; keeps animating ⇒ its own show).
+// Restore 5 / 122 afterward.
+pub const LASER_POS_MIN: u8 = 60;
+pub const LASER_POS_MAX: u8 = 60;
+
+// ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
+// The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe
+// mirrors the wireless one — one universe, two transports. Always open the /dev/serial0
+// alias, never a bare ttyAMA*/ttyS0: it stays stable while USB serial adapters renumber
+// around it, and resolves to the PL011 once Bluetooth is disabled.
+pub const SERIAL_DEVICE: &str = "/dev/serial0";
+// DMX frame delimiters: BREAK holds the line low, MAB (mark-after-break) high, then the
+// 0x00 start code and slots follow. These are spec minimums — slightly long is harmless,
+// so busy-spin jitter is tolerable.
+pub const DMX_BREAK_US: u64 = 92;
+pub const DMX_MAB_US: u64 = 12;
+// Pad the wired frame to a full DMX-512 universe. Our live data is only ~32 slots, but some
+// fixtures mis-decode an unusually short frame, so we clock the standard 512 (zeros past the
+// live slots). Wired-only — the sACN frame stays at DMX_SLOTS.
+pub const WIRED_FRAME_SLOTS: usize = 512;
 
 // ── Noise engine ─────────────────────────────────────────────────────────────
 pub const CONTRAST: f64 = 1.6;

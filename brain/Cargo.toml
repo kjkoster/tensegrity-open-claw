@@ -12,6 +12,7 @@ chrono = "0.4"
 signal-hook = "0.3"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.0",  features = ["std"] }
+libc = "0.2"
 parquet = "56"
 rusb = "0.9.4"
 rustfft = "6.2"

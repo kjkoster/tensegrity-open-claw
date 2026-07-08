@@ -5,7 +5,9 @@
 use crate::audio_features::AudioFeatures;
 use crate::config as cfg;
 use crate::dmx;
+use crate::dmx_hat::DmxHat;
 use crate::fixture::Fixture;
+use crate::laser::{LaserMapping, LaserOut};
 use crate::latest::LatestRx;
 use crate::sparkle::{PonytailMapping, PonytailOut};
 use embassy_time::{Duration, Ticker};
@@ -17,6 +19,8 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
     let ponytail_b = Fixture { start_address: 7 };
     let ponytail_c = Fixture { start_address: 13 };
     let ponytail_d = Fixture { start_address: 19 };
+    let laser = Fixture { start_address: cfg::LASER_ADDRESS };
+    let mut laser_map = LaserMapping::default();
 
     // Independent instances: own breath clock, colour seeds, and white-mode gate per
     // fixture, so the Ponytails sparkle and flip to white independently rather than in
@@ -46,6 +50,9 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         cfg::WHITE_MODE_PERLIN_SEED ^ cfg::SEEDS[15],
     );
 
+    // The wired HAT mirrors the same slot buffer as the sACN send (HARDWARE-DMX.md).
+    let hat = DmxHat::open();
+
     let frame_period = Duration::from_micros(1_000_000 / cfg::FRAME_RATE_HZ);
     let mut ticker = Ticker::every(frame_period);
     let mut sequence: u8 = 0;
@@ -59,16 +66,17 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         let c = map_c.frame(&snapshot, dt);
         let d = map_d.frame(&snapshot, dt);
 
-        // One universe spanning all four fixtures: A@1, B@7, C@13, D@19. Width derives
-        // from the fixture count.
+        // One universe: the four Ponytails (A@1, B@7, C@13, D@19) then the laser (@25).
         let mut slots = [0u8; cfg::DMX_SLOTS];
         fill(&mut slots, &ponytail_a, &a);
         fill(&mut slots, &ponytail_b, &b);
         fill(&mut slots, &ponytail_c, &c);
         fill(&mut slots, &ponytail_d, &d);
+        fill_laser(&mut slots, &laser, &laser_map.frame(dt));
 
         let packet = dmx::encode(cfg::UNIVERSE, sequence, cfg::SACN_PRIORITY, 0, &cid, &slots);
         dmx::send_multicast(&socket, cfg::UNIVERSE, cfg::SACN_PORT, &packet);
+        hat.send(&slots);
         sequence = sequence.wrapping_add(1);
     }
 }
@@ -90,4 +98,11 @@ fn fill(slots: &mut [u8], fixture: &Fixture, out: &PonytailOut) {
 /// scaling.
 fn unit_to_byte(x: f64) -> u8 {
     (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+}
+
+/// Fill the laser's eight DMX slots from its CH1..CH8 values, starting at its address.
+fn fill_laser(slots: &mut [u8], laser: &Fixture, out: &LaserOut) {
+    for (offset, &value) in out.channels.iter().enumerate() {
+        slots[laser.slot(offset as u16)] = value;
+    }
 }
