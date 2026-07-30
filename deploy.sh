@@ -14,12 +14,10 @@ PI="claw-pi"               # ssh alias (key-based)
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 # --- 1. Ship sources to the Pi --------------------------------------------
-step "sync clock on $PI (it has no NTP/RTC, so its clock drifts behind)"
-# cargo decides freshness by mtime: rsync stamps brain sources with the Mac's
-# (correct) mtimes, but the Pi builds artifacts with its own clock. If the Pi clock
-# lags the Mac, every source looks newer than every artifact and cargo rebuilds the
-# world. Push the Mac's UTC time to the Pi so both ends share one clock.
-ssh "$PI" "sudo date -u -s '$(date -u '+%Y-%m-%d %H:%M:%S')'" >/dev/null
+# The Pi's clock used to be pushed from here, because cargo decides freshness by mtime and
+# a lagging Pi clock makes every rsynced source look newer than every build artifact. It
+# now runs systemd-timesyncd against the Debian pool (`timedatectl timesync-status`), so
+# both ends already agree and the push was only fighting timesyncd for the clock.
 
 step "rsync brain source to $PI:brain"
 # --checksum, not the default size+mtime check: git checkouts and editor saves bump
