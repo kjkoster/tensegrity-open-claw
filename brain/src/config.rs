@@ -52,7 +52,7 @@ pub const CONTRAST: f64 = 1.6;
 pub const GAMMA: f64 = 2.2;
 
 // Distinct 64-bit seeds give independent noise fields sharing one drift speed.
-// Order: Fixture A [R, G, B, W], B [R, G, B, W], C [R, G, B, W], D [R, G, B, W].
+// Consumed three at a time (R, G, B) per sparkle instance, plus a distinct white gate.
 pub const SEEDS: [u64; 16] = [
     0xcafe_babe_dead_beef,
     0x1234_5678_9abc_def0,
@@ -159,15 +159,15 @@ pub const MUSIC_INTENSITY_FLOOR: f64 = 0.0; // steady field in music; 0 = black,
 pub const SPEED_MIN: f64 = 1.5; // music colour-drift speed band, cells per second
 pub const SPEED_MAX: f64 = 7.5;
 pub const SLEW_INTENSITY_S: f64 = 0.03;
-pub const SLEW_OCTAVE2_S: f64 = 0.3; // also the Ponytail RGB colour-channel slew
+pub const SLEW_OCTAVE2_S: f64 = 0.3; // also the sparkle RGB colour-channel slew
 
-// ── §Ponytail — silence breathing (SPARKLE.md §2) ────────────────────────────
-pub const PONYTAIL_BREATH_PERIOD_S: f64 = 18.0; // own slow breath, far longer than the PWM 3.5 s
-pub const PONYTAIL_BREATH_FLOOR: f64 = 0.08; // never fully dark in silence
-pub const PONYTAIL_BREATH_CEIL: f64 = 0.60; // gentle ceiling; calm, not bright
-pub const PONYTAIL_SILENCE_DRIFT: f64 = 0.30; // RGB Perlin drift speed, ≪ SPEED_MIN
+// ── §Sparkle — silence breathing (SPARKLE.md §2) ────────────────────────────
+pub const SPARKLE_BREATH_PERIOD_S: f64 = 18.0; // own slow breath, far longer than the PWM 3.5 s
+pub const SPARKLE_BREATH_FLOOR: f64 = 0.08; // never fully dark in silence
+pub const SPARKLE_BREATH_CEIL: f64 = 0.60; // gentle ceiling; calm, not bright
+pub const SPARKLE_SILENCE_DRIFT: f64 = 0.30; // RGB Perlin drift speed, ≪ SPEED_MIN
 
-// ── §Ponytail — gobo (slow spatial reshuffle, NOT twinkle rate; SPARKLE.md §3.3) ─
+// ── §Sparkle — gobo (slow spatial reshuffle, NOT twinkle rate; SPARKLE.md §3.3) ─
 pub const GOBO_DRIFT_SILENCE: f64 = 0.25; // gentle idle spin even in silence (~speed 3/10); 0 = parked
 pub const GOBO_DRIFT_MUSIC_MIN: f64 = 0.65; // floor during music (~speed 7/10)
 pub const GOBO_DRIFT_MAX: f64 = 1.00; // ceiling: full motor speed (10/10) at the busiest
@@ -176,17 +176,17 @@ pub const GOBO_SLEW_DOWN_S: f64 = 4.00; // slower → pattern settles after musi
 pub const GOBO_TEMPO_FACTOR: f64 = 0.30; // weight of bpm coupling (0 = disable)
 pub const GOBO_TEMPO_CONF_GATE: f64 = 0.50;
 
-// ── §Ponytail — glints (LED flashes; the sparkle; SPARKLE.md §3.1–§3.2) ───────
+// ── §Sparkle — glints (LED flashes; the sparkle; SPARKLE.md §3.1–§3.2) ───────
 pub const SPARKLE_FLASH_FRAMES: u32 = 1; // on-time floor in frames (sub-frame impossible)
 pub const SPARKLE_ACCENT_GAIN: f64 = 0.85; // glint brightness pop per onset
 pub const SPARKLE_AFTERGLOW_DECAY_S: f64 = 0.025; // ~25 ms tail (≈1 frame); lower → sharper on-off / square strobe
 
-// ── §Ponytail — colour (RGB; SPARKLE.md §3.4) ────────────────────────────────
-pub const PONYTAIL_HUE_WARM_CENTROID: f64 = 0.00; // centroid → warm end (red/amber)
-pub const PONYTAIL_HUE_COOL_CENTROID: f64 = 1.00; // centroid → cool end (blue/white-ish)
-pub const PONYTAIL_SHIMMER_OCT2_MAX: f64 = 0.50; // onset_density → second-octave turbulence
+// ── §Sparkle — colour (RGB; SPARKLE.md §3.4) ────────────────────────────────
+pub const SPARKLE_HUE_WARM_CENTROID: f64 = 0.00; // centroid → warm end (red/amber)
+pub const SPARKLE_HUE_COOL_CENTROID: f64 = 1.00; // centroid → cool end (blue/white-ish)
+pub const SPARKLE_SHIMMER_OCT2_MAX: f64 = 0.50; // onset_density → second-octave turbulence
 
-// ── §Ponytail — white-sparkle mode (modal hard switch; SPARKLE.md §4) ─────────
+// ── §Sparkle — white-sparkle mode (modal hard switch; SPARKLE.md §4) ─────────
 pub const WHITE_MODE_PERLIN_SEED: u64 = 0x5eed_dead_beef_cafe; // own seed; slow gate
 pub const WHITE_MODE_PERLIN_SPEED: f64 = 0.02; // very slow → sparse, aperiodic eligibility
 pub const WHITE_MODE_GATE: f64 = 0.35; // Perlin threshold for an eligible window

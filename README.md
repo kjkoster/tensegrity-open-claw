@@ -54,6 +54,7 @@ macOS.
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. See below + `HARDWARE-DMX.md`. |
 | JB Systems Space-4 laser | 3-pin XLR off the HAT | DMX address `025`, 8-channel mode. See below + `LASER.md`. |
 | 3× CLF Yara LED par | DMX off the HAT | Addresses `100` / `107` / `113`, **4-channel mode** (R, G, B, White). The front-panel default is 11CH — set each one. |
+| HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Address `001`, **5-channel mode** (Effect, R, G, B, Speed). Mode *and* address are DIP switches, not a menu — see below. |
 
 ## OS configuration (once)
 

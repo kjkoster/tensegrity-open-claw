@@ -20,6 +20,16 @@
    <Universe Name="Universe 4" ID="3"/>
   </InputOutputMap>
   <Fixture>
+   <Manufacturer>HQ Power</Manufacturer>
+   <Model>VDPLPS36B2 LED Pinspot PAR36</Model>
+   <Mode>5 Channel</Mode>
+   <ID>8</ID>
+   <Name>Pinspot</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
    <Manufacturer>JB Systems</Manufacturer>
    <Model>Space-4 Laser</Model>
    <Mode>8 Channel</Mode>

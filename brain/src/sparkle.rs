@@ -1,5 +1,5 @@
-//! The Ponytail sparkle / breathing mapping (SPARKLE.md §1–§5): pure per-frame
-//! arithmetic from an `AudioFeatures` snapshot to the Ponytail's six channels —
+//! The sparkle / breathing mapping (SPARKLE.md §1–§5): pure per-frame
+//! arithmetic from an `AudioFeatures` snapshot to six output channels —
 //! intensity, R, G, B, white, gobo — each in 0..1, converted to DMX at slot-fill.
 //!
 //! The physical model (§1) splits the work by timescale: the LED carries the fast
@@ -28,7 +28,7 @@ const MUSIC_PRESENT: f64 = 0.5;
 const WARM_RGB: [f64; 3] = [1.00, 0.45, 0.10];
 const COOL_RGB: [f64; 3] = [0.60, 0.75, 1.00];
 
-pub struct PonytailOut {
+pub struct SparkleOut {
     pub intensity: f64,
     pub r: f64,
     pub g: f64,
@@ -82,7 +82,7 @@ enum WhiteMode {
     White,
 }
 
-pub struct PonytailMapping {
+pub struct SparkleMapping {
     // crossfade + glint state
     eff_music: f64,
     last_onset_count: u64,
@@ -91,7 +91,7 @@ pub struct PonytailMapping {
     // own breath clock (§2, §6) and colour-drift phase
     breath_s: f64,
     colour_t: f64,
-    // per-fixture noise seeds, so two Ponytails never share a colour field
+    // per-fixture noise seeds, so two fixtures never share a colour field
     seed_r: u64,
     seed_g: u64,
     seed_b: u64,
@@ -108,7 +108,7 @@ pub struct PonytailMapping {
     gobo: GoboSlew,
 }
 
-impl PonytailMapping {
+impl SparkleMapping {
     pub fn new(seed_r: u64, seed_g: u64, seed_b: u64, white_seed: u64) -> Self {
         Self {
             eff_music: 0.0,
@@ -132,7 +132,7 @@ impl PonytailMapping {
         }
     }
 
-    pub fn frame(&mut self, af: &AudioFeatures, dt: f64) -> PonytailOut {
+    pub fn frame(&mut self, af: &AudioFeatures, dt: f64) -> SparkleOut {
         // Crossfade: a stalled or absent producer reads as silence (§5), decaying our
         // own effective music_amount so the sculpture falls back to breathing.
         let stale = now_us().saturating_sub(af.timestamp_us) > cfg::STALE_US;
@@ -165,9 +165,9 @@ impl PonytailMapping {
         // Intensity (§2, §3.2): silence breath crossfaded with the music glow floor,
         // each slewed; the glint is added on top un-slewed for a sharp attack.
         self.breath_s += dt;
-        let phase = 2.0 * std::f64::consts::PI * self.breath_s / cfg::PONYTAIL_BREATH_PERIOD_S;
-        let breath = cfg::PONYTAIL_BREATH_FLOOR
-            + (cfg::PONYTAIL_BREATH_CEIL - cfg::PONYTAIL_BREATH_FLOOR) * 0.5 * (1.0 + phase.sin());
+        let phase = 2.0 * std::f64::consts::PI * self.breath_s / cfg::SPARKLE_BREATH_PERIOD_S;
+        let breath = cfg::SPARKLE_BREATH_FLOOR
+            + (cfg::SPARKLE_BREATH_CEIL - cfg::SPARKLE_BREATH_FLOOR) * 0.5 * (1.0 + phase.sin());
         // In music the steady field is dark (MUSIC_INTENSITY_FLOOR, default 0) and the
         // glints are the only light, flashing against black (§3.1). There is no
         // energy-driven glow: that tracked sustained loudness and kept the bundle lit
@@ -177,16 +177,16 @@ impl PonytailMapping {
 
         // Colour (§3.4): a slow Perlin wander in silence, crossfading to centroid
         // warmth with an onset-driven second-octave shimmer in music.
-        let drift_speed = mix(cfg::PONYTAIL_SILENCE_DRIFT, music_colour_speed(af), m);
+        let drift_speed = mix(cfg::SPARKLE_SILENCE_DRIFT, music_colour_speed(af), m);
         self.colour_t += drift_speed * dt;
-        let oct2 = cfg::PONYTAIL_SHIMMER_OCT2_MAX * m * (af.onset_density as f64).clamp(0.0, 1.0);
+        let oct2 = cfg::SPARKLE_SHIMMER_OCT2_MAX * m * (af.onset_density as f64).clamp(0.0, 1.0);
         let silence_rgb = [
             perlin_unit(self.colour_t, self.seed_r, oct2),
             perlin_unit(self.colour_t, self.seed_g, oct2),
             perlin_unit(self.colour_t, self.seed_b, oct2),
         ];
-        let warmth = ((af.centroid as f64 - cfg::PONYTAIL_HUE_WARM_CENTROID)
-            / (cfg::PONYTAIL_HUE_COOL_CENTROID - cfg::PONYTAIL_HUE_WARM_CENTROID))
+        let warmth = ((af.centroid as f64 - cfg::SPARKLE_HUE_WARM_CENTROID)
+            / (cfg::SPARKLE_HUE_COOL_CENTROID - cfg::SPARKLE_HUE_WARM_CENTROID))
             .clamp(0.0, 1.0);
         let music_rgb = warmth_to_rgb(warmth, self.colour_t, self.seed_r, oct2);
         let r = self.r.step(mix(silence_rgb[0], music_rgb[0], m), dt);
@@ -237,7 +237,7 @@ impl PonytailMapping {
 
         // White is modal: in white mode the LED is white and the RGB emitters are dark.
         match self.white_mode {
-            WhiteMode::White => PonytailOut {
+            WhiteMode::White => SparkleOut {
                 intensity,
                 r: 0.0,
                 g: 0.0,
@@ -245,7 +245,7 @@ impl PonytailMapping {
                 white: 1.0,
                 gobo,
             },
-            WhiteMode::Rgb => PonytailOut {
+            WhiteMode::Rgb => SparkleOut {
                 intensity,
                 r,
                 g,

@@ -31,11 +31,11 @@ The Pi acts as a WiFi access point and is reachable from a development laptop ov
 
 ### 1.1 DMX layout
 
-One universe, all of it wired. Slots 1–24 are unused — they were the four Ponytail fixtures,
-which have been removed from the project.
+One universe, all of it wired.
 
 | Slots | Fixture | Mode | Channels |
 |------:|---------|------|----------|
+| 1–5 | HQ Power VDPLPS36B2 pinspot | 5-channel | Effect, Red, Green, Blue, Speed |
 | 25–32 | JB Systems Space-4 laser | 8-channel | Mode, Pattern, Zoom, Y/X/Z roll, X/Y move |
 | 100–103 | Yara 1 | 4-channel | Red, Green, Blue, White |
 | 107–110 | Yara 2 | 4-channel | Red, Green, Blue, White |

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE FixtureDefinition>
+<FixtureDefinition xmlns="http://www.qlcplus.org/FixtureDefinition">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>5.2.1</Version>
+  <Author>Kees Jan Koster</Author>
+ </Creator>
+ <Manufacturer>HQ Power</Manufacturer>
+ <Model>VDPLPS36B2 LED Pinspot PAR36</Model>
+ <Type>Color Changer</Type>
+ <!-- DMX-controlled PAR36 spot, 61 × 5 mm RGB LEDs. Channel tables transcribed from the
+      Velleman/HQ Power manual for VDPLPS36B2 / VDPLPS36C2 (§6a, "3-Channel or 5-Channel
+      Mode"). The C2 is the same fixture in a different housing colour and shares this
+      protocol exactly.
+
+      Mode is selected by the FUNCTION DIP switches on the base, not over DMX, and it
+      selects master or slave as well as the channel count — so a fixture patched here as
+      5 Channel must have SW3..SW1 set to DMX master/slave 5-channel to match.
+
+      The unit also has stand-alone auto-change, auto-fade and manual modes driven entirely
+      from the DIP switches with no DMX attached. Those are outside a fixture definition,
+      which only describes what the fixture does when a console is talking to it. -->
+ <Channel Name="Effect">
+  <Group Byte="0">Effect</Group>
+  <!-- Below 64 the fixture takes its colour from the Red/Green/Blue channels. Above it,
+       the built-in programs take over the emitters and the RGB channels stop having any
+       effect — Speed then sets the program rate. -->
+  <Capability Min="0" Max="63">RGB control via the Red, Green and Blue channels</Capability>
+  <Capability Min="64" Max="127" Preset="GoboMacro" Res1="Others/rainbow.png">7 colour fade (rate on Speed)</Capability>
+  <Capability Min="128" Max="191" Preset="GoboMacro" Res1="Others/rainbow.png">7 colour change (rate on Speed)</Capability>
+  <Capability Min="192" Max="255" Preset="GoboMacro" Res1="Others/rainbow.png">3 colour change (rate on Speed)</Capability>
+ </Channel>
+ <Channel Name="Red" Preset="IntensityRed"/>
+ <Channel Name="Green" Preset="IntensityGreen"/>
+ <Channel Name="Blue" Preset="IntensityBlue"/>
+ <Channel Name="Speed">
+  <Group Byte="0">Speed</Group>
+  <!-- Only meaningful while Effect is 64 or above. Note the two separate dead bands and
+       that the active band runs fast to slow, so rising DMX slows the program down. -->
+  <Capability Min="0" Max="10" Preset="NoFunction">No speed</Capability>
+  <Capability Min="11" Max="100" Preset="FastToSlow">Fast to slow</Capability>
+  <Capability Min="101" Max="150" Preset="NoFunction">No speed</Capability>
+  <Capability Min="151" Max="255">Speed set on the unit, by music or by the potentiometer</Capability>
+ </Channel>
+ <Mode Name="3 Channel">
+  <Channel Number="0">Red</Channel>
+  <Channel Number="1">Green</Channel>
+  <Channel Number="2">Blue</Channel>
+ </Mode>
+ <Mode Name="5 Channel">
+  <Channel Number="0">Effect</Channel>
+  <Channel Number="1">Red</Channel>
+  <Channel Number="2">Green</Channel>
+  <Channel Number="3">Blue</Channel>
+  <Channel Number="4">Speed</Channel>
+ </Mode>
+ <Physical>
+  <Bulb Type="LED" Lumens="0" ColourTemperature="0"/>
+  <Dimensions Weight="0.84" Width="107" Height="176" Depth="107"/>
+  <Lens Name="Other" DegreesMin="0" DegreesMax="0"/>
+  <Focus Type="Fixed" PanMax="0" TiltMax="0"/>
+  <Technical PowerConsumption="12" DmxConnector="3-pin"/>
+ </Physical>
+</FixtureDefinition>
