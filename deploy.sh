@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — rsync the brain source and the QLC+ workspace to claw-pi, then run
+# deploy.sh — rsync the brain source and the QLC+ project to claw-pi, then run
 #             remote-deploy.sh there to build brain natively and restart it.
 #
 # Run from the repo root on the Mac (riverrain):  ./deploy.sh
@@ -28,11 +28,21 @@ step "rsync brain source to $PI:brain"
 # leaves unchanged files (and their mtimes) untouched, so cargo stays incremental.
 rsync -az --checksum --delete --exclude=target brain/ "$PI:brain/"
 
-step "rsync QLC+ workspace to $PI"
-# brain's build.rs reads ../open-claw.qxw and compiles its scenes in, so the workspace has
-# to sit beside brain/ on the Pi or the build fails outright. This is what makes "save in
-# QLC+, deploy" enough to get an edited scene onto the rig.
+step "rsync QLC+ project to $PI"
+# brain's build.rs reads both halves of the QLC+ project, and they must land beside brain/
+# on the Pi because it resolves them as ../open-claw.qxw and ../fixtures:
+#
+#   open-claw.qxw   the patch (what is where) and the scenes
+#   fixtures/*.qxf  the definitions (what each fixture's channels mean)
+#
+# Neither is optional — a missing definition fails the build, deliberately, because the Pi
+# has no QLC+ library to fall back on. Shipping both is what makes "save in QLC+, deploy"
+# enough to get an edited scene, address or mode onto the rig.
+#
+# --delete on fixtures/ so a definition removed here also leaves the Pi. A stale copy
+# lingering there would satisfy a build that ought to fail.
 rsync -az --checksum open-claw.qxw "$PI:open-claw.qxw"
+rsync -az --checksum --delete fixtures/ "$PI:fixtures/"
 
 rsync -az remote-deploy.sh "$PI:remote-deploy.sh"
 

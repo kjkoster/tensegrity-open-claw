@@ -6,7 +6,7 @@ use crate::config as cfg;
 
 /// The laser's eight channel values, in CH1..CH8 order.
 pub struct LaserOut {
-    pub channels: [u8; crate::patch::LASER.channels],
+    pub channels: [u8; crate::patch::Laser::CHANNELS],
 }
 
 #[derive(Default)]
@@ -36,7 +36,7 @@ impl LaserMapping {
             eprintln!("laser: CH1 mode sweep = {mode}");
         }
 
-        let mut channels = [0u8; crate::patch::LASER.channels];
+        let mut channels = [0u8; crate::patch::Laser::CHANNELS];
         channels[0] = mode; // CH1: TEMP sweep (was cfg::LASER_DMX_MODE)
         channels[1] = cfg::LASER_PATTERN; // CH2 pattern
         channels[2] = cfg::LASER_ZOOM; // CH3 zoom

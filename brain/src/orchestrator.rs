@@ -6,10 +6,10 @@
 use crate::audio_features::AudioFeatures;
 use crate::config as cfg;
 use crate::dmx;
-use crate::fixture::Fixture;
 use crate::laser::{LaserMapping, LaserOut};
 use crate::latest::LatestRx;
 use crate::patch;
+use crate::qlc_plus::{Rgb, White};
 use crate::sparkle::{SparkleMapping, SparkleOut};
 use embassy_time::{Duration, Ticker};
 use std::net::UdpSocket;
@@ -49,8 +49,14 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         // a fixture's block stay zero. The buffer is a full 512-slot universe for the wire;
         // the sACN frame sends only the live head.
         let mut slots = [0u8; zihatec_rs_485_dmx::SLOTS];
-        fill_pinspot(&mut slots, &patch::PINSPOT, &pinspot_map.frame(&snapshot, dt));
-        fill_laser(&mut slots, &patch::LASER, &laser_map.frame(dt));
+        fill_sparkle(&mut slots, &patch::PINSPOT, &pinspot_map.frame(&snapshot, dt));
+        // The pinspot's other two channels are its own, not the engine's: Effect below 64
+        // is what hands the emitters to the colour channels at all, and Speed only feeds
+        // the internal programs that Effect would start.
+        patch::PINSPOT.effect.set(&mut slots, 0);
+        patch::PINSPOT.speed.set(&mut slots, 0);
+
+        fill_laser(&mut slots, &laser_map.frame(dt));
         fill_yara(&mut slots, &patch::YARA_1, [255, 0, 0]); // red
         fill_yara(&mut slots, &patch::YARA_2, [0, 255, 0]); // green
         fill_yara(&mut slots, &patch::YARA_3, [0, 0, 255]); // blue
@@ -73,61 +79,44 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
     }
 }
 
-// The pinspot is written as its 5-channel mode: Effect, R, G, B, Speed. Repatch it to
-// 3-channel in QLC+ and the build stops here rather than writing green into the red slot.
-const _: () = assert!(patch::PINSPOT.channels == 5);
-
-/// Fill the pinspot's five DMX slots from the sparkle engine.
+/// Drive any colour-mixing fixture from the sparkle engine.
 ///
-/// The fixture has no dimmer channel, so the breathing intensity is folded into the colour
-/// channels instead. It is gamma-corrected first: that curve is about perceived brightness,
-/// which is what the breathing is shaped in, and the colours then ride on it linearly.
+/// Generic over [`Rgb`], so it accepts exactly those fixtures whose patched mode carries
+/// red, green and blue — and the compiler refuses the rest rather than letting the engine
+/// write colour into whatever channel happens to sit at that offset.
 ///
-/// It has no white emitter either, and the engine's white mode deliberately darkens RGB to
-/// hand the light to a white LED that does not exist here. Rendering that mode as equal
-/// parts red, green and blue keeps the white-sparkle phrase visible as a colour shift
-/// rather than dropping the fixture to black for the length of it.
-fn fill_pinspot(slots: &mut [u8], fixture: &Fixture, out: &SparkleOut) {
+/// Intensity is folded into the colours rather than sent to a dimmer, because the fixtures
+/// this drives have none. It is gamma-corrected first: that curve is about perceived
+/// brightness, which is what the breathing is shaped in, and the colours ride on it.
+///
+/// The engine's white mode deliberately darkens RGB to hand the light to a white emitter.
+/// On a fixture without one that would just black it out for the length of every
+/// white-sparkle phrase, so it is rendered as equal parts red, green and blue instead.
+fn fill_sparkle<F: Rgb>(slots: &mut [u8], fixture: &F, out: &SparkleOut) {
     let level = out.intensity.powf(1.0 / cfg::GAMMA);
     let (r, g, b) = if out.white > 0.0 {
         (out.white, out.white, out.white)
     } else {
         (out.r, out.g, out.b)
     };
-    // Effect below 64 is what hands the emitters to the colour channels; above it the
-    // fixture runs its own programs and ignores them. Speed only feeds those programs.
-    slots[fixture.slot(0)] = 0;
-    slots[fixture.slot(1)] = unit_to_byte(r * level);
-    slots[fixture.slot(2)] = unit_to_byte(g * level);
-    slots[fixture.slot(3)] = unit_to_byte(b * level);
-    slots[fixture.slot(4)] = 0;
+    fixture.red().set_unit(slots, r * level);
+    fixture.green().set_unit(slots, g * level);
+    fixture.blue().set_unit(slots, b * level);
 }
 
-/// Round a 0..1 value to a DMX byte. Round, not truncate, to match the fixture-side scaling.
-fn unit_to_byte(x: f64) -> u8 {
-    (x.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
-}
-
-/// Fill the laser's eight DMX slots from its CH1..CH8 values, starting at its address.
-fn fill_laser(slots: &mut [u8], laser: &Fixture, out: &LaserOut) {
-    for (offset, &value) in out.channels.iter().enumerate() {
-        slots[laser.slot(offset as u16)] = value;
+/// Fill the laser's channels from its CH1..CH8 values. The laser's map is positional — it
+/// has no colour to name — so this walks the mode's channels in order.
+fn fill_laser(slots: &mut [u8], out: &LaserOut) {
+    for (channel, &value) in patch::LASER.all().iter().zip(out.channels.iter()) {
+        channel.set(slots, value);
     }
 }
 
-// This code writes the Yaras' 4-channel mode by hand, so it has an opinion about their
-// patched width. Pin it: repatch a Yara to one of its other modes (6CH, 7CH, 11CH…) in QLC+
-// and the build stops here rather than quietly writing colour into a dimmer and a shutter.
-const _: () = assert!(patch::YARA_1.channels == 4);
-const _: () = assert!(patch::YARA_2.channels == 4);
-const _: () = assert!(patch::YARA_3.channels == 4);
-
-/// Fill one Yara par's four DMX slots with a hard primary. The Yaras run in 4-channel mode
-/// (R, G, B, White), so the colour maps straight onto the first three slots with white held
-/// off. There is no dimmer channel, so a full colour channel is full output.
-fn fill_yara(slots: &mut [u8], fixture: &Fixture, rgb: [u8; 3]) {
-    slots[fixture.slot(0)] = rgb[0]; // red
-    slots[fixture.slot(1)] = rgb[1]; // green
-    slots[fixture.slot(2)] = rgb[2]; // blue
-    slots[fixture.slot(3)] = 0; // white off
+/// Pin one Yara par to a hard primary for bring-up. Needs both colour and a white emitter,
+/// so the white can be held off rather than left wherever it was.
+fn fill_yara<F: Rgb + White>(slots: &mut [u8], fixture: &F, rgb: [u8; 3]) {
+    fixture.red().set(slots, rgb[0]);
+    fixture.green().set(slots, rgb[1]);
+    fixture.blue().set(slots, rgb[2]);
+    fixture.white().set(slots, 0);
 }

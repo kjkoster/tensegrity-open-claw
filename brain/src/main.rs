@@ -3,12 +3,12 @@ mod capture;
 mod clock;
 mod config;
 mod dmx;
-mod fixture;
 mod laser;
 mod latest;
 mod orchestrator;
 mod patch;
 mod perlin;
+mod qlc_plus;
 mod scenes;
 mod sparkle;
 
@@ -33,9 +33,22 @@ async fn main(spawner: Spawner) {
     let group = dmx::multicast_addr(UNIVERSE);
     eprintln!("brain: universe {UNIVERSE} → {group}:{SACN_PORT}  @ {FRAME_RATE_HZ} Hz");
 
-    // The scenes build.rs compiled in from open-claw.qxw. Logged so a running binary can be
-    // checked against the workspace that produced it: an edited scene missing from these
-    // lines means the build never saw the save. Nothing reads them at run time yet.
+    // The patch and scenes build.rs compiled in from open-claw.qxw. Logged so a running
+    // binary can be checked against the workspace that produced it: a fixture at the wrong
+    // address, or an edited scene missing from these lines, means the build never saw the
+    // save.
+    eprintln!("brain: {} fixtures from open-claw.qxw", patch::PATCH.len());
+    for fixture in &patch::PATCH {
+        // The slot span, not the channel count: the mode name already carries the count,
+        // and the last slot is what you check a patch against to see nothing collides.
+        eprintln!(
+            "brain:   {} @ {}–{} — {}",
+            fixture.name,
+            fixture.address,
+            fixture.address as usize + fixture.channels.len() - 1,
+            fixture.profile,
+        );
+    }
     eprintln!("brain: {} scenes from open-claw.qxw", scenes::SCENES.len());
     for scene in &scenes::SCENES {
         eprintln!("brain:   {} ({} values)", scene.name, scene.values.len());

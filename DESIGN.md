@@ -46,13 +46,22 @@ The wired frame is padded to a full 512-slot universe — a short frame makes th
 the data and free-run its own show (see §3.5 and README).
 
 **None of this addressing is written in Rust.** The QLC+ workspace (`open-claw.qxw`) is the
-source of truth: `brain/build.rs` reads its `<Fixture>` elements and generates one named
-constant per fixture into `patch.rs`, `DMX_SLOTS` included. Because each fixture becomes a
-*named* constant, drift is caught by the compiler in both directions — patching a fixture
-nothing drives leaves an unused constant (a dead-code warning), and deleting or renaming one
-that code drives removes the constant its use sites need (a compile error). Repatching a
-fixture to another mode changes its channel count, which `const` assertions at the fill sites
-pin. There is no drift checker because none is needed.
+source of truth for *where* fixtures sit, and the `.qxf` definitions committed in
+`fixtures/` are the source of truth for *what their channels mean*. `brain/build.rs` reads
+both, resolves each patched fixture against its definition's mode, and generates a struct
+per fixture into `patch.rs` — a named field per channel, `DMX_SLOTS` included.
+
+Because channels become *named fields* rather than offsets, drift is caught by the compiler
+in every direction. Patching a fixture nothing drives leaves an unused constant (a dead-code
+warning). Deleting or renaming one that code drives removes the constant its use sites need.
+Repatching to a mode that lacks a channel the code writes removes the field, or stops the
+fixture implementing the capability trait the code requires — so the sparkle engine can only
+be wired to a fixture that genuinely has red, green and blue. And a workspace hand-edited
+into disagreeing with its definition is caught by a channel-count check at generation time.
+There is no drift checker because none is needed.
+
+Every definition a patched fixture names must be committed: the Pi builds the daemon and has
+no QLC+ library to fall back on, so a missing `.qxf` fails the build outright.
 
 ### 1.2 Yara pars (CLF-Lighting, wired, RGBW)
 

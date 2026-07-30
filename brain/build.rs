@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The daemon sends exactly one universe (`config::UNIVERSE`). In the workspace that is
 /// the universe at 0-based index 0.
@@ -51,13 +51,42 @@ struct Patched {
     name: String,
     /// `name` as a Rust constant identifier — "Yara 1" becomes `YARA_1`.
     ident: String,
+    /// `ident` as a Rust type name — `YARA_1` becomes `Yara1`.
+    type_name: String,
+    manufacturer: String,
+    model: String,
+    mode: String,
     address: u32,
     channels: u32,
+    /// The mode's channels, resolved against the fixture definition. Empty until
+    /// `resolve_definitions` fills it in.
+    resolved: Vec<ResolvedChannel>,
+}
+
+/// One channel of a patched fixture's mode, resolved through its `.qxf`.
+struct ResolvedChannel {
+    /// The channel's name in the definition, for doc comments.
+    name: String,
+    /// The Rust field name it becomes: its preset's role, or the channel name.
+    field: String,
+    /// The `qlc_plus::Preset` variant.
+    preset: &'static str,
+    /// Absolute 0-based slot.
+    slot: u32,
+}
+
+/// A parsed `.qxf`: what each named channel is, and which channels each mode uses.
+struct Definition {
+    path: PathBuf,
+    /// Channel name → its `Preset` attribute, if it has one.
+    channels: BTreeMap<String, Option<String>>,
+    /// Mode name → its channel names, in `Number` order.
+    modes: BTreeMap<String, Vec<String>>,
 }
 
 impl Patched {
     /// Absolute 0-based slot for a fixture-relative channel offset. The inverse of the
-    /// daemon's `fixture::Fixture::slot()`, minus its `- 1`: QLC+ already stores the
+    /// absolute slot a `qlc_plus::Channel` holds: QLC+ already stores the
     /// start address 0-based.
     fn slot(&self, offset: u32) -> u32 {
         self.address + offset
@@ -99,13 +128,278 @@ fn main() {
             )
         });
 
-    let patch = parse_patch(engine);
+    let mut patch = parse_patch(engine);
     let scenes = parse_scenes(engine, &patch);
+
+    // The workspace names a definition; the definition says what the channels mean. Both
+    // are needed before a fixture can be given typed channels, so this runs before render.
+    let fixtures_dir = manifest_dir.join("..").join("fixtures");
+    println!("cargo:rerun-if-changed={}", fixtures_dir.display());
+    resolve_definitions(&mut patch, &fixtures_dir);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::write(out_dir.join("patch.rs"), render_patch(&patch)).unwrap();
     fs::write(out_dir.join("scenes.rs"), render_scenes(&scenes)).unwrap();
 }
+
+/// Loads every `.qxf` in `dir`, keyed by manufacturer and model.
+fn load_definitions(dir: &Path) -> BTreeMap<(String, String), Definition> {
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| {
+        panic!(
+            "cannot read the fixture definitions at {}: {e}\n\
+             Every fixture patched in the workspace needs its .qxf committed there — the \
+             Pi has no QLC+ installed to borrow them from.",
+            dir.display()
+        )
+    });
+
+    let mut definitions = BTreeMap::new();
+    for entry in entries {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("qxf") {
+            continue;
+        }
+
+        let xml = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let options = roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..roxmltree::ParsingOptions::default()
+        };
+        let doc = roxmltree::Document::parse_with_options(&xml, options)
+            .unwrap_or_else(|e| panic!("{} is not valid XML: {e}", path.display()));
+        let root = doc.root_element();
+
+        let text = |name: &str| -> String {
+            root.children()
+                .find(|n| n.is_element() && n.tag_name().name() == name)
+                .and_then(|n| n.text())
+                .unwrap_or_else(|| panic!("{} has no <{name}>", path.display()))
+                .trim()
+                .to_string()
+        };
+        let manufacturer = text("Manufacturer");
+        let model = text("Model");
+
+        let mut channels = BTreeMap::new();
+        for channel in root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "Channel")
+        {
+            let name = channel
+                .attribute("Name")
+                .unwrap_or_else(|| panic!("{}: a <Channel> has no Name", path.display()))
+                .trim()
+                .to_string();
+            channels.insert(name, channel.attribute("Preset").map(str::to_string));
+        }
+
+        let mut modes = BTreeMap::new();
+        for mode in root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "Mode")
+        {
+            let name = mode
+                .attribute("Name")
+                .unwrap_or_else(|| panic!("{}: a <Mode> has no Name", path.display()))
+                .trim()
+                .to_string();
+            // A mode lists its channels with an explicit Number; sort by it rather than
+            // trusting document order, because the offset is what addresses the slot.
+            let mut numbered: Vec<(u32, String)> = mode
+                .children()
+                .filter(|n| n.is_element() && n.tag_name().name() == "Channel")
+                .map(|n| {
+                    let number = n
+                        .attribute("Number")
+                        .unwrap_or_else(|| {
+                            panic!("{}: mode {name:?} has a <Channel> with no Number", path.display())
+                        })
+                        .parse()
+                        .unwrap_or_else(|e| panic!("{}: bad Channel Number: {e}", path.display()));
+                    (number, n.text().unwrap_or_default().trim().to_string())
+                })
+                .collect();
+            numbered.sort_by_key(|(number, _)| *number);
+            modes.insert(name, numbered.into_iter().map(|(_, name)| name).collect());
+        }
+
+        if let Some(previous) = definitions.insert(
+            (manufacturer.clone(), model.clone()),
+            Definition { path: path.clone(), channels, modes },
+        ) {
+            panic!(
+                "{manufacturer} {model} is defined twice: {} and {}",
+                previous.path.display(),
+                path.display()
+            );
+        }
+    }
+    definitions
+}
+
+/// Resolves every patched fixture against its definition, filling in typed channels.
+fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
+    let definitions = load_definitions(dir);
+
+    for fixture in patch.values_mut() {
+        let key = (fixture.manufacturer.clone(), fixture.model.clone());
+        let definition = definitions.get(&key).unwrap_or_else(|| {
+            let mut known: Vec<String> = definitions
+                .keys()
+                .map(|(m, model)| format!("{m} / {model}"))
+                .collect();
+            known.sort();
+            panic!(
+                "no fixture definition for {} / {} (patched as {:?}).\n\
+                 {} holds: {}\n\
+                 Export the .qxf from QLC+ into that directory and commit it — the Pi \
+                 builds the daemon and has no QLC+ library to fall back on.",
+                fixture.manufacturer,
+                fixture.model,
+                fixture.name,
+                dir.display(),
+                if known.is_empty() { "nothing".into() } else { known.join(", ") },
+            )
+        });
+
+        let mode = definition.modes.get(&fixture.mode).unwrap_or_else(|| {
+            let mut known: Vec<&str> = definition.modes.keys().map(String::as_str).collect();
+            known.sort();
+            panic!(
+                "{} / {} has no mode {:?} (patched as {:?}). {} defines: {}",
+                fixture.manufacturer,
+                fixture.model,
+                fixture.mode,
+                fixture.name,
+                definition.path.display(),
+                known.join(", "),
+            )
+        });
+
+        // The workspace stores the channel count too. QLC+ derives it from the mode, so a
+        // mismatch means the workspace was hand-edited into disagreeing with the
+        // definition — exactly the drift this resolution exists to catch.
+        if mode.len() as u32 != fixture.channels {
+            panic!(
+                "{:?} is patched as {} channels but mode {:?} of {} / {} has {}. \
+                 Re-pick the mode in QLC+'s Fixture Manager so the two agree.",
+                fixture.name,
+                fixture.channels,
+                fixture.mode,
+                fixture.manufacturer,
+                fixture.model,
+                mode.len(),
+            )
+        }
+
+        // Prefer the preset's role as the field name — a channel named "R" carrying
+        // IntensityRed still becomes `red`. Channels QLC+ gives no preset (wheels, gobos,
+        // maintenance) fall back to their own name.
+        let mut resolved: Vec<ResolvedChannel> = mode
+            .iter()
+            .enumerate()
+            .map(|(offset, channel_name)| {
+                let preset = definition.channels.get(channel_name).unwrap_or_else(|| {
+                    panic!(
+                        "{}: mode {:?} lists a channel {channel_name:?} the definition does \
+                         not declare",
+                        definition.path.display(),
+                        fixture.mode,
+                    )
+                });
+                let (variant, role) = preset_role(preset.as_deref());
+                ResolvedChannel {
+                    name: channel_name.clone(),
+                    field: role.map(str::to_string).unwrap_or_else(|| field_of(channel_name)),
+                    preset: variant,
+                    slot: fixture.slot(offset as u32),
+                }
+            })
+            .collect();
+
+        // Two channels can share a preset — pixel-mapped modes give every cell an
+        // IntensityRed. Where that happens the role is not a unique name, so fall back to
+        // the channel names, which QLC+ does keep distinct within a mode.
+        let clashes: Vec<String> = resolved
+            .iter()
+            .filter(|c| resolved.iter().filter(|o| o.field == c.field).count() > 1)
+            .map(|c| c.field.clone())
+            .collect();
+        for channel in resolved.iter_mut() {
+            if clashes.contains(&channel.field) {
+                channel.field = field_of(&channel.name);
+            }
+        }
+        for (index, channel) in resolved.iter().enumerate() {
+            if let Some(other) = resolved[..index].iter().find(|o| o.field == channel.field) {
+                panic!(
+                    "{:?}: channels {:?} and {:?} both map to the field `{}`. Rename one in {}.",
+                    fixture.name,
+                    other.name,
+                    channel.name,
+                    channel.field,
+                    definition.path.display(),
+                );
+            }
+        }
+
+        fixture.resolved = resolved;
+    }
+}
+
+/// Maps a QLC+ preset to its `qlc_plus::Preset` variant and, for the Intensity family, the
+/// field name that role gets. `None` role means the channel is named after itself.
+fn preset_role(preset: Option<&str>) -> (&'static str, Option<&'static str>) {
+    match preset {
+        Some("IntensityMasterDimmer") => ("IntensityMasterDimmer", Some("dimmer")),
+        Some("IntensityDimmer") => ("IntensityDimmer", Some("intensity")),
+        Some("IntensityRed") => ("IntensityRed", Some("red")),
+        Some("IntensityGreen") => ("IntensityGreen", Some("green")),
+        Some("IntensityBlue") => ("IntensityBlue", Some("blue")),
+        Some("IntensityWhite") => ("IntensityWhite", Some("white")),
+        Some("IntensityAmber") => ("IntensityAmber", Some("amber")),
+        Some("IntensityUV") => ("IntensityUV", Some("uv")),
+        Some("IntensityCyan") => ("IntensityCyan", Some("cyan")),
+        Some("IntensityMagenta") => ("IntensityMagenta", Some("magenta")),
+        Some("IntensityYellow") => ("IntensityYellow", Some("yellow")),
+        Some("IntensityHue") => ("IntensityHue", Some("hue")),
+        Some("IntensitySaturation") => ("IntensitySaturation", Some("saturation")),
+        Some("IntensityValue") => ("IntensityValue", Some("value")),
+        Some("IntensityLightness") => ("IntensityLightness", Some("lightness")),
+        _ => ("Custom", None),
+    }
+}
+
+/// Turns a channel name into a Rust field name: "Gobo rotation" → `gobo_rotation`.
+fn field_of(name: &str) -> String {
+    let mut field = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            field.push(c.to_ascii_lowercase());
+        } else if !field.ends_with('_') && !field.is_empty() {
+            field.push('_');
+        }
+    }
+    while field.ends_with('_') {
+        field.pop();
+    }
+    // A field may not start with a digit, and may not be a keyword. Both are rare enough
+    // in channel names that a prefix is friendlier than refusing to build.
+    if field.starts_with(|c: char| c.is_ascii_digit()) {
+        field.insert(0, 'c');
+    }
+    if RUST_KEYWORDS.contains(&field.as_str()) {
+        field.push('_');
+    }
+    field
+}
+
+/// Keywords a channel name could plausibly collide with — "Move" and "Loop" are real
+/// channel names on moving heads.
+const RUST_KEYWORDS: [&str; 12] = [
+    "move", "loop", "type", "ref", "box", "match", "where", "in", "fn", "mod", "self", "static",
+];
 
 /// Turns a QLC+ fixture name into a Rust constant identifier: "Yara 1" → `YARA_1`.
 ///
@@ -125,6 +419,20 @@ fn ident_of(name: &str) -> String {
         ident.pop();
     }
     ident
+}
+
+/// Turns that identifier into a type name: `YARA_1` → `Yara1`.
+fn type_name_of(ident: &str) -> String {
+    ident
+        .split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + &chars.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Builds the fixture ID → patch-row table from the `<Fixture>` elements.
@@ -187,10 +495,21 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
                 clash.name
             );
         }
-        if patch
-            .insert(id, Patched { name, ident, address, channels })
-            .is_some()
-        {
+        let inserted = patch.insert(
+            id,
+            Patched {
+                type_name: type_name_of(&ident),
+                name,
+                ident,
+                manufacturer: field("Manufacturer"),
+                model: field("Model"),
+                mode: field("Mode"),
+                address,
+                channels,
+                resolved: Vec::new(),
+            },
+        );
+        if inserted.is_some() {
             panic!("duplicate fixture ID {id} in the workspace patch");
         }
     }
@@ -336,27 +655,155 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
     let mut fixtures: Vec<&Patched> = patch.values().collect();
     fixtures.sort_by_key(|fixture| fixture.address);
 
+    // Import exactly the capability traits this patch implements. Naming them all in the
+    // hand-written half would warn about the ones no patched fixture happens to have, and
+    // that warning would be noise rather than the signal an unused import usually is.
+    let implements = |field: &str| {
+        fixtures
+            .iter()
+            .any(|fixture| fixture.resolved.iter().any(|c| c.field == field))
+    };
+    let mut imports = vec!["Channel", "PatchEntry", "Preset"];
+    if implements("red") && implements("green") && implements("blue") {
+        imports.push("Rgb");
+    }
+    if implements("white") {
+        imports.push("White");
+    }
+    if implements("dimmer") {
+        imports.push("Dimmer");
+    }
+    imports.sort_unstable();
+    writeln!(out, "use crate::qlc_plus::{{{}}};", imports.join(", ")).unwrap();
+    writeln!(out).unwrap();
+
     for fixture in &fixtures {
+        let profile = format!("{} {}, {}", fixture.manufacturer, fixture.model, fixture.mode);
+
+        // The struct: one field per channel of the patched mode, named for what QLC+ says
+        // that channel is. This is where a channel's role becomes part of the type.
         writeln!(
             out,
-            "/// {} — {} channels at DMX address {}, filling slots {}–{}.",
+            "/// {} — {}, DMX address {} (slots {}–{}).",
             fixture.name,
-            fixture.channels,
+            profile,
             fixture.address + 1,
             fixture.address + 1,
             fixture.address + fixture.channels,
         )
         .unwrap();
+        writeln!(out, "pub struct {} {{", fixture.type_name).unwrap();
+        for channel in &fixture.resolved {
+            writeln!(out, "    /// {} (slot {}).", channel.name, channel.slot + 1).unwrap();
+            writeln!(out, "    pub {}: Channel,", channel.field).unwrap();
+        }
+        writeln!(out, "}}").unwrap();
+        writeln!(out).unwrap();
+
+        // Positional access is a convenience for fixtures whose channels have no colour to
+        // name — the laser's, say. Which fixtures want it is a property of the hand-written
+        // code, not of the patch, so generating it everywhere and allowing it to go unused
+        // is honest; the dead-code warning that matters is the one on the fixture itself.
+        writeln!(out, "#[allow(dead_code)]").unwrap();
+        writeln!(out, "impl {} {{", fixture.type_name).unwrap();
+        writeln!(out, "    /// Channels the patched mode occupies.").unwrap();
+        writeln!(out, "    pub const CHANNELS: usize = {};", fixture.channels).unwrap();
+        writeln!(out).unwrap();
+        writeln!(out, "    /// Every channel, in mode order.").unwrap();
         writeln!(
             out,
-            "pub const {}: Fixture = Fixture {{ start_address: {}, channels: {} }};",
-            fixture.ident,
-            fixture.address + 1,
-            fixture.channels,
+            "    pub fn all(&self) -> [Channel; Self::CHANNELS] {{"
         )
         .unwrap();
+        writeln!(
+            out,
+            "        [{}]",
+            fixture
+                .resolved
+                .iter()
+                .map(|c| format!("self.{}", c.field))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out, "}}").unwrap();
+        writeln!(out).unwrap();
+
+        writeln!(
+            out,
+            "pub const {}: {} = {} {{",
+            fixture.ident, fixture.type_name, fixture.type_name
+        )
+        .unwrap();
+        for channel in &fixture.resolved {
+            writeln!(out, "    {}: Channel::at({}),", channel.field, channel.slot).unwrap();
+        }
+        writeln!(out, "}};").unwrap();
+        writeln!(out).unwrap();
+
+        // Capability traits, implemented only where the mode actually carries the channels.
+        // This is the type-safety the whole exercise is for: a fixture patched into a mode
+        // without colour cannot be handed to code that mixes colour.
+        let has = |field: &str| fixture.resolved.iter().any(|c| c.field == field);
+        if has("red") && has("green") && has("blue") {
+            writeln!(out, "impl Rgb for {} {{", fixture.type_name).unwrap();
+            for colour in ["red", "green", "blue"] {
+                writeln!(
+                    out,
+                    "    fn {colour}(&self) -> Channel {{ self.{colour} }}"
+                )
+                .unwrap();
+            }
+            writeln!(out, "}}").unwrap();
+        }
+        if has("white") {
+            writeln!(out, "impl White for {} {{", fixture.type_name).unwrap();
+            writeln!(out, "    fn white(&self) -> Channel {{ self.white }}").unwrap();
+            writeln!(out, "}}").unwrap();
+        }
+        if has("dimmer") {
+            writeln!(out, "impl Dimmer for {} {{", fixture.type_name).unwrap();
+            writeln!(out, "    fn dimmer(&self) -> Channel {{ self.dimmer }}").unwrap();
+            writeln!(out, "}}").unwrap();
+        }
         writeln!(out).unwrap();
     }
+
+    // The same patch as plain data, so the daemon can log what it was built against
+    // without a hand-maintained list of fixture names going stale beside it.
+    writeln!(out, "/// Every patched fixture, in address order.").unwrap();
+    writeln!(
+        out,
+        "pub const PATCH: [PatchEntry; {}] = [",
+        fixtures.len()
+    )
+    .unwrap();
+    for fixture in &fixtures {
+        writeln!(out, "    PatchEntry {{").unwrap();
+        writeln!(out, "        name: {:?},", fixture.name).unwrap();
+        writeln!(
+            out,
+            "        profile: {:?},",
+            format!("{} {}, {}", fixture.manufacturer, fixture.model, fixture.mode)
+        )
+        .unwrap();
+        writeln!(out, "        address: {},", fixture.address + 1).unwrap();
+        writeln!(
+            out,
+            "        channels: &[{}],",
+            fixture
+                .resolved
+                .iter()
+                .map(|c| format!("(Preset::{}, Channel::at({}))", c.preset, c.slot))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .unwrap();
+        writeln!(out, "    }},").unwrap();
+    }
+    writeln!(out, "];").unwrap();
+    writeln!(out).unwrap();
 
     let top = fixtures
         .iter()

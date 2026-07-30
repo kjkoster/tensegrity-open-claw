@@ -14,7 +14,7 @@ pub struct Scene {
     /// The QLC+ Function name, snake_case and unique across the workspace.
     pub name: &'static str,
     /// `(slot, value)` pairs, ascending by slot. `slot` is a 0-based index into the
-    /// universe's slot buffer — the same indexing `fixture::Fixture::slot` produces, so
+    /// universe's slot buffer, the same indexing `qlc_plus::Channel` carries, so
     /// DMX address 1 is slot 0.
     ///
     /// Sparse on purpose. A QLC+ scene carries only the channels the operator actually
