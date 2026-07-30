@@ -9,6 +9,7 @@ mod latest;
 mod orchestrator;
 mod perlin;
 mod recorder;
+mod scenes;
 mod sparkle;
 
 use audio_features::AudioFeatures;
@@ -33,6 +34,14 @@ async fn main(spawner: Spawner) {
     let cid = dmx::new_cid();
     let group = dmx::multicast_addr(UNIVERSE);
     eprintln!("brain: universe {UNIVERSE} → {group}:{SACN_PORT}  @ {FRAME_RATE_HZ} Hz");
+
+    // The scenes build.rs compiled in from open-claw.qxw. Logged so a running binary can be
+    // checked against the workspace that produced it: an edited scene missing from these
+    // lines means the build never saw the save. Nothing reads them at run time yet.
+    eprintln!("brain: {} scenes from open-claw.qxw", scenes::SCENES.len());
+    for scene in &scenes::SCENES {
+        eprintln!("brain:   {} ({} values)", scene.name, scene.values.len());
+    }
 
     // systemd stops the brain with SIGTERM. Catch it to release the brain's sACN
     // source — a burst of terminate frames — so a higher-priority console or the

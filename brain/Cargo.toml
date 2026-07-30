@@ -4,6 +4,12 @@ name         = "brain"
 rust-version = "1.96"
 version      = "0.1.0"
 
+# build.rs reads the QLC+ workspace. roxmltree is a read-only DOM with no dependencies of
+# its own, and it reports local tag names with the namespace already stripped — which is
+# what keeps QLC+'s default XML namespace from silently matching nothing.
+[build-dependencies]
+roxmltree = "0.21"
+
 [dependencies]
 alsa = "0.11.0"
 arc-swap = "1.7"

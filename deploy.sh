@@ -45,6 +45,12 @@ step "rsync brain source to $PI:brain"
 # leaves unchanged files (and their mtimes) untouched, so cargo stays incremental.
 rsync -az --checksum --delete --exclude=target brain/ "$PI:brain/"
 
+step "rsync QLC+ workspace to $PI"
+# brain's build.rs reads ../open-claw.qxw and compiles its scenes in, so the workspace has
+# to sit beside brain/ on the Pi or the build fails outright. This is what makes "save in
+# QLC+, deploy" enough to get an edited scene onto the rig.
+rsync -az --checksum open-claw.qxw "$PI:open-claw.qxw"
+
 step "rsync binaries to $PI:$REMOTE_DIR"
 ssh "$PI" "mkdir -p '$REMOTE_DIR'"
 rsync -az "$STAGE"/ "$PI:$REMOTE_DIR/"

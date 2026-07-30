@@ -11,20 +11,114 @@
    <BeatGenerator BeatType="Internal" BPM="120"/>
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
-    <Output Plugin="E1.31" UID="10.0.10.154" Line="0">
-     <PluginParameters mcastFullIP="239.255.0.1" multicast="1" priority="200" transmitMode="Full" universe="1"/>
+    <Output Plugin="E1.31" UID="127.0.0.1" Line="0">
+     <PluginParameters UniverseChannels="116" mcastFullIP="239.255.0.1" multicast="1" priority="200" transmitMode="Full" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
    <Universe Name="Universe 3" ID="2"/>
    <Universe Name="Universe 4" ID="3"/>
   </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Tensegrity Open Claw</Manufacturer>
+   <Model>Ponytail</Model>
+   <Mode>6 Channel</Mode>
+   <ID>0</ID>
+   <Name>Ponytail A</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Tensegrity Open Claw</Manufacturer>
+   <Model>Ponytail</Model>
+   <Mode>6 Channel</Mode>
+   <ID>1</ID>
+   <Name>Ponytail B</Name>
+   <Universe>0</Universe>
+   <Address>6</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Tensegrity Open Claw</Manufacturer>
+   <Model>Ponytail</Model>
+   <Mode>6 Channel</Mode>
+   <ID>2</ID>
+   <Name>Ponytail C</Name>
+   <Universe>0</Universe>
+   <Address>12</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Tensegrity Open Claw</Manufacturer>
+   <Model>Ponytail</Model>
+   <Mode>6 Channel</Mode>
+   <ID>3</ID>
+   <Name>Ponytail D</Name>
+   <Universe>0</Universe>
+   <Address>18</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>JB Systems</Manufacturer>
+   <Model>Space-4 Laser</Model>
+   <Mode>8 Channel</Mode>
+   <ID>4</ID>
+   <Name>Laser</Name>
+   <Universe>0</Universe>
+   <Address>24</Address>
+   <Channels>8</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Yara</Model>
+   <Mode>4 Channel</Mode>
+   <ID>5</ID>
+   <Name>Yara 1</Name>
+   <Universe>0</Universe>
+   <Address>99</Address>
+   <Channels>4</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Yara</Model>
+   <Mode>4 Channel</Mode>
+   <ID>6</ID>
+   <Name>Yara 2</Name>
+   <Universe>0</Universe>
+   <Address>106</Address>
+   <Channels>4</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Yara</Model>
+   <Mode>4 Channel</Mode>
+   <ID>7</ID>
+   <Name>Yara 3</Name>
+   <Universe>0</Universe>
+   <Address>112</Address>
+   <Channels>4</Channels>
+  </Fixture>
+  <Function ID="0" Type="Scene" Name="new_scene_0">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,0,2,174,3,0,4,0,5,138</FixtureVal>
+   <FixtureVal ID="1">0,199,1,0,2,0,3,0,4,108,5,0</FixtureVal>
+   <FixtureVal ID="2">0,0,1,0,2,139,3,0,4,0,5,0</FixtureVal>
+  </Function>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>
    <ChannelStyle>0</ChannelStyle>
    <ValueStyle>0</ValueStyle>
    <Grid Width="5" Height="3" Depth="5" Units="0" POV="1"/>
    <StageItem>0</StageItem>
+   <FxItem ID="0" XPos="0" YPos="1000" ZPos="0"/>
+   <FxItem ID="1" XPos="350" YPos="1000" ZPos="0"/>
+   <FxItem ID="2" XPos="700" YPos="1000" ZPos="0"/>
+   <FxItem ID="3" XPos="1050" YPos="1000" ZPos="0"/>
+   <FxItem ID="4" XPos="1400" YPos="1000" ZPos="0"/>
+   <FxItem ID="5" XPos="1595" YPos="1000" ZPos="0"/>
+   <FxItem ID="6" XPos="1824" YPos="1000" ZPos="0"/>
+   <FxItem ID="7" XPos="2053" YPos="1000" ZPos="0"/>
   </Monitor>
  </Engine>
  <VirtualConsole>
