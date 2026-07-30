@@ -5,10 +5,6 @@
 pub const UNIVERSE: u16 = 1;
 pub const SACN_PORT: u16 = 5568;
 // Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
-// The BLE-bridged fixtures cannot absorb this many changes/s, but that is handled where
-// the constraint lives: each ponytail's filter stage resamples the wire down to its own
-// BLE update rate for the bridge alone, so the wire and every fast consumer run
-// full-rate here.
 pub const FRAME_RATE_HZ: u64 = 40;
 
 // E1.31 source priority. The brain holds the default 100; a manual console (QLC+)
@@ -19,18 +15,16 @@ pub const SACN_PRIORITY: u8 = 100;
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
-// The head of the universe is four contiguous 6-channel Ponytails (Intensity, R, G, B, White,
-// Gobo) from slot 1 (A@1, B@7, C@13, D@19), then the wired laser's block (25–32).
-// The sACN frame runs from slot 1 through the last live slot. The Ponytail block (slots 1–24)
-// and the laser (25–32) sit at the head, but the three Yara pars are patched far up the
-// universe (see YARA_ADDRESSES), so the frame must reach the last Yara slot — the slots in
-// between stay zero. Derived from the top Yara address so it tracks the patch automatically.
+// The sACN frame runs from slot 1 through the last live slot. The laser sits at the head
+// (25–32), but the three Yara pars are patched far up the universe (see YARA_ADDRESSES), so
+// the frame must reach the last Yara slot — the slots in between, including the now-unused
+// head, stay zero. Derived from the top Yara address so it tracks the patch automatically.
 pub const DMX_SLOTS: usize =
     YARA_ADDRESSES[YARA_ADDRESSES.len() - 1] as usize - 1 + YARA_CHANNELS;
 
 // ── JB Systems Space-4 laser (wired; LASER.md) ───────────────────────────────
-// Patched into the same universe after the Ponytail block: 8-channel mode at address 25,
-// so it fills slots 25–32. CH1 must be ≥192 to unlock DMX control of CH2–CH8; below that
+// 8-channel mode at address 25, so it fills slots 25–32. CH1 must be ≥192 to unlock DMX
+// control of CH2–CH8; below that
 // the laser ignores them and free-runs its internal auto/sound show. The diagonal is drawn
 // purely by sweeping CH7/CH8 (absolute X/Y position) in lockstep — no pattern rotation.
 pub const LASER_ADDRESS: u16 = 25;
@@ -218,10 +212,3 @@ pub const WHITE_MODE_MAX_DWELL_S: f64 = 25.0; // exit on next dark frame after d
 
 // ── §10 Observability ────────────────────────────────────────────────────────
 pub const STATUS_INTERVAL_S: f32 = 5.0;
-
-// ── §14 Sound-profile recorder ───────────────────────────────────────────────
-pub const RECORDER_DIR: &str = "/home/kjkoster/ear";
-pub const RECORDER_RATE_HZ: u64 = 10;
-pub const RECORDER_ROTATE_S: u64 = 600;
-pub const RECORDER_BATCH_ROWS: usize = 100; // one row group + flush per ~10 s
-pub const RECORDER_RETRY_S: u64 = 10;

@@ -24,7 +24,7 @@ pub fn new_cid() -> [u8; 16] {
 
 /// Encodes an E1.31 sACN data packet. `options` is the framing options byte (offset
 /// 112): 0 for a normal data frame, `STREAM_TERMINATED` for a clean stop.
-/// Layout per DESIGN.md Appendix A; validated against the ponytail's parse_e131_slots().
+/// Layout per DESIGN.md Appendix A.
 pub fn encode(
     universe: u16,
     sequence: u8,

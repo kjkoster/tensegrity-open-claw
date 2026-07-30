@@ -13,9 +13,8 @@ mod spectral;
 
 pub use pipeline::FeaturePipeline;
 
-/// Written by the capture thread at block rate, read by the DMX loop at 44 Hz
-/// and by the recorder at 10 Hz. All features are nominally 0..1 (post-AGC,
-/// post-floor) unless noted.
+/// Written by the capture thread at block rate, read by the DMX loop at the frame
+/// rate. All features are nominally 0..1 (post-AGC, post-floor) unless noted.
 #[derive(Clone, Copy, Default)]
 pub struct AudioFeatures {
     pub seq: u64,

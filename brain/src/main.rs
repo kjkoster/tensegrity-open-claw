@@ -8,7 +8,6 @@ mod laser;
 mod latest;
 mod orchestrator;
 mod perlin;
-mod recorder;
 mod scenes;
 mod sparkle;
 
@@ -22,10 +21,8 @@ use std::net::UdpSocket;
 async fn main(spawner: Spawner) {
     let (tx, rx) = latest::latest(AudioFeatures::default());
 
-    // Audio capture and the parquet recorder each run on their own OS thread,
-    // alongside Embassy.
+    // Audio capture runs on its own OS thread, alongside Embassy.
     let _audio = capture::spawn_capture(tx);
-    let _recorder = recorder::spawn_recorder(rx.clone());
 
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
     socket

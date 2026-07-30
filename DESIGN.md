@@ -2,100 +2,70 @@
 
 ## 1. System Overview
 
-The system is split into two halves that communicate via sACN (E1.31) over a closed WiFi network:
+The rig is a **Raspberry Pi driving one DMX-512 universe of wired fixtures**. The Pi runs a
+Rust program on Linux (`brain`) that captures audio, runs a generative engine over it, and
+clocks the resulting universe out of an RS-485 HAT at 40 Hz. The same universe also goes out
+as E1.31 sACN over the network — nothing consumes it today, but it is what a monitor or a
+console works against, and it is the path an external override arrives on.
 
-- **Pi controller** — a Raspberry Pi running a Rust program on Linux. It generates 8 channels of independent Perlin noise, maps them to IRGBW DMX slots for two fixtures, and multicasts an sACN frame at 44 Hz. The Pi also acts as a WiFi access point for the fixtures and is reachable from a development laptop via its Ethernet port.
-
-- **Ponytail fixture** — a fibre-optic light fixture retrofitted with an ESP32-S3 (Seeed Studio XIAO). The MCU joins the Pi's WiFi as a station, subscribes to the configured sACN universe, and drives the LED array via LEDC PWM and Bluetooth Low Energy (BLE). The DMX start address, universe, sACN port, and WiFi credentials are compiled in, selected at boot from a table keyed by the board's WiFi station MAC (see `ponytail/src/config.rs`).
+The Pi acts as a WiFi access point and is reachable from a development laptop over Ethernet.
 
 ```
     ┌── Laptop ───────────────────────────────────────┐
-    │  (SSH / cross-compile Ponytail for xTensa)      │
-    └────────────────── Ethernet ─────────────────────┘
+    │  (SSH / deploy; QLC+ for override + scenes)     │
+    └────────────────── Ethernet / WiFi ──────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
-    |  (compile for Brain/local audio)                |
-    │  Perlin noise engine                            │
-    │  sACN sender (44 Hz) ────────── WiFi AP         │
+    │  (builds brain; local audio capture)            │
+    │  Generative engine                              │
+    │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
+    │  └── sACN sender ──────────── network           │
     └─────────────────────────────────────────────────┘
-                                  │ WiFi (sACN multicast)
+                                  │ wired DMX
                           ┌───────┴────────┐
-                     ┌────┴─────┐    ┌─────┴────┐
-                     │ Ponytail │    │ Ponytail │
-                     │ ESP32-S3 │    │ ESP32-S3 │
-                     └──────────┘    └──────────┘
+                     ┌────┴─────┐    ┌─────┴──────┐
+                     │  Laser   │    │ 3× Yara    │
+                     │  @25     │    │ @100/107/113│
+                     └──────────┘    └────────────┘
 ```
 
 ### 1.1 DMX layout
 
-Each Ponytail fixture is IRGBW + Gobo rotation: Intensity on base address +0, then R, G, B, W, Gobo.
-Two Ponytail fixtures occupy one universe, 12 slots, as shown in the table below: ponytail A
-starts at slot 1, ponytail B at slot 7.
+One universe, all of it wired. Slots 1–24 are unused — they were the four Ponytail fixtures,
+which have been removed from the project.
 
-| Slot | Ponytail | Channel       | Driven by                 |
-|-----:|----------|---------------|---------------------------|
-| 1    | A       | Intensity     | audio loudness            |
-| 2    | A       | Red           | Perlin (seed 0)           |
-| 3    | A       | Green         | Perlin (seed 1)           |
-| 4    | A       | Blue          | Perlin (seed 2)           |
-| 5    | A       | White         | Perlin (seed 3)           |
-| 6    | A       | Gobo rotation | 0 (BLE personality only)  |
-| 7    | B       | Intensity     | audio loudness            |
-| 8    | B       | Red           | Perlin (seed 4)           |
-| 9    | B       | Green         | Perlin (seed 5)           |
-| 10   | B       | Blue          | Perlin (seed 6)           |
-| 11   | B       | White         | Perlin (seed 7)           |
-| 12   | B       | Gobo rotation | 0 (BLE personality only)  |
+| Slots | Fixture | Mode | Channels |
+|------:|---------|------|----------|
+| 25–32 | JB Systems Space-4 laser | 8-channel | Mode, Pattern, Zoom, Y/X/Z roll, X/Y move |
+| 100–103 | Yara 1 | 4-channel | Red, Green, Blue, White |
+| 107–110 | Yara 2 | 4-channel | Red, Green, Blue, White |
+| 113–116 | Yara 3 | 4-channel | Red, Green, Blue, White |
 
-The sixth channel, Gobo rotation, is consumed only by the BLE bridge personality (Build 8);
-the PWM fixtures ignore it and the brain currently holds it at 0.
+The frame spans slots 1–116 (`DMX_SLOTS`), derived from the top Yara address so it tracks the
+patch automatically; every slot outside a fixture's block stays zero. The wired frame is
+padded to a full 512-slot universe — a short frame makes the laser ignore the data and
+free-run its own show (see §3.5 and README).
 
-White rides Perlin like the other colour channels, but because W desaturates the mix it
-typically wants scaling down — a per-channel output gain handles this without changing the
-noise model. The Intensity slots use a silence-breathing baseline, overridden by audio
-loudness when music is present.
+### 1.2 Yara pars (CLF-Lighting, wired, RGBW)
+
+Three CLF-Lighting Yara LED pars at addresses **100, 107, and 113** in **4-channel mode**
+(`Red, Green, Blue, White` — see `reference/Manual-CLF-Yara-1.0.pdf`). There is no dimmer
+channel in this mode, so a full colour channel is full output. The fixtures' front-panel
+default is 11CH; each par must be set to 4CH by hand, and nothing in software can detect it
+being wrong.
+
+For bring-up they are pinned to hard primaries (red, green, blue) so the three are trivially
+distinguishable and their addressing is verifiable.
+
+**Pending:** the generative engine in `brain/src/sparkle.rs` — silence breathing, music
+glints, colour drift — currently has no consumer, because the fixtures it drove have been
+removed. It is retained to be repointed at the Yaras, one mapping instance per par with its
+own seed group. The Yara is RGBW, so the colour side maps across unchanged; the engine's gobo
+output has no counterpart and is dropped.
 
 ---
 
 ## 2. Hardware
-
-### 2.1 Ponytail fixture (fibre-optic, Seeed Studio XIAO-ESP32-S3)
-
-A cheap, generic Chinese fibre-optic light fixture. It consists of plastic optic fibres lit
-by an LED array, with a patterned metal plate rotated by a stepper motor in front of them.
-It runs from a 12V 2A supply. In its current form, we send commands to the device using BLE,
-emulating the app that comes with this device.
-
-For testing we still drive a few GPIO pins using PWM, with the same colours as the LEDs in the
-fibre optic fixture.
-
-**Identified components**
-
-| Part | Role | Notes |
-|------|------|-------|
-| EP2T10 | RF SoC + MCU | Daughterboard, 36-pin QFN/QFP, 24MHz crystal, 2.4GHz antenna |
-| 5B7TP18 | I/O / audio controller (probable) | 28-pin SMD, 2 microphones nearby |
-| ULN2803A | 8-ch Darlington driver | Drives LED strings; inputs are the intervention point |
-| 7805 / 78M05 | Linear regulator | 12V → 5V internal logic rail |
-| GM13x (×2, SOT-23) | Small switching transistor | Discrete loads (motor / LED channel) |
-| 28BYJ-48 | Unipolar stepper, 5V | Rotates the patterned plate; 5 wires (4 coils + common) |
-| LED daughterboard | LED array | 5 leads, cooled, decent current → likely RGBW/RGBA (4 + common) |
-
-The EP2T10, 5B7TP18, and the 8-pin GM13x are opaque Chinese OEM parts with no public
-datasheets.
-
-RF sniffing was attempted (nRF24L01+ in pseudo-promiscuous mode, sweeping all 126 channels
-at 250 k/1 M/2 Mbps) and produced no usable data. The remote's RF chip (PL1167-family)
-likely operates at 500 kbps, which the nRF24L01+ cannot demodulate. OTA emulation of the
-remote is not possible with available hardware and is not pursued further.
-
-**Open hardware questions (block Build 2 — direct control)**
-
-- LED daughterboard supply voltage (5V or 12V?) — measure with the original board running.
-- Does the daughterboard carry its own constant-current driver IC, or is it raw voltage-driven?
-- LED array common-anode or common-cathode? IRLz44N (low-side N-channel) suits common-anode.
-- Confirm the 5-lead connector is the LED array, not the motor.
-- 7805 current headroom for the 5V rail (stepper + logic) — or replace with a buck converter.
 
 ### 2.2 Raspberry Pi controller
 
@@ -113,37 +83,22 @@ Debian / Raspberry Pi OS. The Pi:
 
 ### 3.1 Transport: sACN over WiFi
 
-sACN (E1.31, ANSI E1.31) is the primary transport for this rig, and the only one between the
-Pi and the WiFi-attached fixtures. (Build 9 adds a second, *wired* DMX-512 universe out of
-the Pi for rental base lights — a local output stage in the cabinet, not a change to how the
-WiFi fixtures are driven.) It carries DMX-512 slots over UDP; the Pi sends each universe as
-multicast.
+**Wired DMX-512 out of the RS-485 HAT is what drives the rig.** sACN (E1.31) carries the same
+universe over the network in parallel. It has no fixtures listening to it today, but it is
+kept because it costs nothing, it lets a monitor or a console see what the daemon is doing,
+and it is the path an external override arrives on.
 
 Art-Net is explicitly not supported: we control all devices on the network, so compatibility
 with older rigs is not a requirement.
 
-### 3.2 Fixture control paths
-
-Two paths exist into the fixture hardware:
-
-- **Direct board replacement (Build 2):** replace the original board entirely and drive the
-  RGBW LED array and 28BYJ-48 stepper directly from the ESP32-S3 for full per-channel
-  control. Requires the hardware investigation in §2.1 first.
-- **BLE bridge to the original controller (Build 8):** keep the fixture's original Telink
-  BLE board and bridge sACN-DMX to its BLE write characteristic — the only path that reaches
-  the gobo motor. A new ponytail personality, distinct from the PWM build.
-
 ### 3.3 Software stack
 
-**Ponytail (ESP32-S3):** `no_std` Rust on `esp-hal`, async via Embassy. LEDC PWM at ≥20 kHz
-(video-safe, flicker-free). Inline sACN E1.31 decoder in `sacn.rs`; the `sacn` and
-`sacn-unofficial` crates are `std`-only and not usable on bare metal. For wired DMX receive
-(Build 3), standard `esp-hal` UART traits treat the >88µs DMX Break as a framing error;
-interrupt-driven break detection via `pac` (`rxd_break` flag) will be needed. BLE to control
-the board is implemented too.
-
-**Pi controller:** standard Rust on Trixie Raspbian Linux, `std`. sACN E1.31 encoder writing
-to a UDP socket. Clones the sACN library from the Ponytail. `cpal` via ALSA for audio capture.
+**Pi controller:** standard Rust on Trixie Raspbian Linux, `std`. Hand-rolled sACN E1.31
+encoder writing to a UDP socket — the `sacn` and `sacn-unofficial` crates were not a good
+fit. DMX-512 framing (BREAK/MAB timing, full-512 padding) comes from the
+`zihatec-rs-485-dmx` crate. ALSA for audio capture. Embassy (`executor-thread` +
+`embassy-time`) for the frame loop, with blocking producers — audio capture, and the sACN
+receiver — on their own OS threads feeding it through a lock-free latest-value seam.
 
 ### 3.4 Power and signal separation
 
@@ -164,8 +119,8 @@ DC-DC, or an integrated isolated RS-485 transceiver (e.g. ADM2582E) — is a gro
 design decision.
 
 Because the hybrid cable runs power alongside DMX data lines, a fray or short could
-introduce supply voltage onto the ESP32's UART port. **TVS diodes must be added to the
-DMX data lines inside the ponytail (Build 3) to protect the MCU.**
+introduce supply voltage onto a fixture's data port. **TVS diodes must be added across the
+DMX data lines at each fixture entry.**
 
 In the final multi-station chain (Build 7) there are several separately-powered nodes on a
 structure of uncertain earth; per-station isolation is detailed there.
@@ -174,19 +129,20 @@ structure of uncertain earth; per-station isolation is detailed there.
 
 ## 4. Build Plan
 
-### Build 1 — Pi sACN sender + ponytail (first end-to-end system)
+### Build 1 — Pi driving the wired universe (first end-to-end system)
 
-**The current target.** The Pi generates autonomous Perlin noise and multicasts sACN frames at
-44 Hz to the ponytail. The ponytail firmware is already implemented; Build 1 is complete
-when the full chain runs unattended: Pi up, ponytail connects, fixture glows with smoothly
-drifting Perlin colour.
+**The current target.** The Pi captures audio, runs the generative engine, and clocks one
+DMX-512 universe out of the RS-485 HAT at 40 Hz. Build 1 is complete when the chain runs
+unattended: Pi up, wire live, fixtures showing smoothly drifting generative colour.
 
 #### Open tasks — scrub home-WiFi credentials from git history
 
 The old home-network SSID/passphrase (`radiowaves` / `IkWilInternetten!!`) are
-committed across history — in the current `*/src/config.rs`, the removed
-`ponytail/src/storage.rs`, and the old `bone/src/main.rs`. Rewrite history to
-replace them everywhere with the new network values, then force-push.
+committed across history — in files that have since been removed from `HEAD`
+(the ESP32 crates' `src/config.rs`, `ponytail/src/storage.rs`, the old
+`bone/src/main.rs`). Deleting them does not remove them from history, so this
+task stands: rewrite history to replace them everywhere with the new network
+values, then force-push.
 **Destructive — coordinate; every clone must be re-cloned afterwards.**
 
 - [ ] Back up first: `git clone --mirror <repo> backup.git`.
@@ -204,101 +160,11 @@ replace them everywhere with the new network values, then force-push.
 
     git filter-repo --replace-text replacements.txt --force
 
-#### Open tasks — remove Parquet recording
-
-Remove the offline sound-profile recorder (the Arrow/Parquet capture from SOUND.md
-§14). It samples the `AudioFeatures` snapshot at 10 Hz and writes rotating Parquet
-files to disk — useful during DSP tuning, but not wanted in the deployed piece, and
-its continuous SD-card writes work directly against the read-only-root goal in
-Build 6.
-
-- [ ] Delete `brain/src/recorder.rs`.
-- [ ] Remove `mod recorder;` and the `spawn_recorder` call (and its comment) from
-      `brain/src/main.rs`; `rx` then no longer needs the extra `.clone()`.
-- [ ] Remove the `RECORDER_*` constants from `brain/src/config.rs`.
-- [ ] Drop the now-unused `arrow`, `parquet`, and `chrono` dependencies from
-      `brain/Cargo.toml`.
-- [ ] Rebuild on the Pi and confirm the DMX loop is unaffected (the removal must not
-      touch the sACN send path).
-
----
-
-### Build 2 — Direct board replacement (ponytail)
-
-Replace the original controller board entirely and drive the RGBW LED array and 28BYJ-48
-stepper directly from the ESP32-S3. This gives full per-channel colour control and motor
-speed/direction. **Requires completing the hardware investigation in §2.1 before ordering
-any components.**
-
-#### Hardware investigation (blocking)
-
-- [ ] Measure LED daughterboard voltage with original board running.
-- [ ] Determine if daughterboard has onboard constant-current driver IC.
-- [ ] Determine LED driver input type (PWM / analogue / digital).
-- [ ] Confirm LED array common-anode or common-cathode.
-- [ ] Confirm 5-lead connector is LED array, not motor.
-- [ ] Verify 7805 headroom for 5V rail, or plan buck converter replacement.
-
-#### Hardware BOM (pending investigation results)
-
-- [ ] 4× IRLz44N (pending LED driver investigation — may not be needed)
-- [ ] ULN2003A (for 28BYJ-48 stepper)
-- [ ] 4× 100Ω (IRLz44N gate), 4× 10kΩ (IRLz44N gate pulldown)
-- [ ] Decoupling: 100nF ceramic per IC pin, 10µF electrolytic per rail
-- [ ] 12V→5V regulation (reuse 7805 or buck converter)
-
-#### Firmware
-
-- [ ] 28BYJ-48 stepper sequencing via ULN2003A (timer-driven).
-- [ ] Map DMX channels for motor speed and motor direction.
-
-#### Integration
-
-- [ ] Design and prototype replacement PCB.
-- [ ] Verify fitment in enclosure.
-- [ ] Connect and test LED array.
-- [ ] Connect and test stepper.
-- [ ] End-to-end via Pi sACN sender.
-
----
-
-### Build 3 — Wired DMX receive (ponytail)
-
-Add an RS-485 wired DMX-512 receiver to the ponytail as an alternative to WiFi sACN. This
-allows control from a traditional DMX console via a 5-pin XLR without any network
-configuration.
-
-#### Hardware BOM
-
-- [ ] SIT65HVD08P or MAX3485 (RS-485 transceiver)
-- [ ] **Decision:** verify SIT65HVD08P RO output level is ≤3.3V; if not, substitute MAX3485
-      to avoid damaging the ESP32.
-- [ ] 5-pin XLR socket (fixture end)
-- [ ] 120Ω termination resistor (if last device in chain)
-- [ ] 4-wire cable (12V, GND, data+, data−) — bench/single-fixture case
-- [ ] TVS diodes across DMX data lines to protect the ESP32 (see §3.5)
-- [ ] USB-DMX interface dongle (for Mac / QLC+ bench testing)
-
-#### Firmware
-
-- [ ] DMX-512 receive via UART (250kbaud, 8N2).
-- [ ] Interrupt-driven break detection via ESP32 `pac` (`rxd_break` flag) — see §3.3 for
-      why the standard `esp-hal` UART traits are insufficient.
-- [ ] Integrate `dmx-rdm` transport, or implement own `dmx512-rs485` on `esp-hal`.
-- [ ] Evaluate `dmx512-rdm-protocol` `DmxUniverse` for the multi-channel universe model
-      now that we handle 6 DMX channels (R, G, B, W, motor speed, motor direction).
-- [ ] Review forum thread for ESP32/WiFi context: https://esp32.com/viewtopic.php?t=47612
-
-#### Validation
-
-- [ ] Control onboard LED over wired DMX via QLC+.
-- [ ] End-to-end: QLC+ → USB-DMX dongle → XLR → fixture.
-
 ---
 
 ### Build 4 — Bone (electroluminescent strip)
 
-An electroluminescent (EL) strip fixture driven by an ESP32-S3 over sACN, like the ponytail.
+An electroluminescent (EL) strip fixture driven by an ESP32-S3 over sACN.
 EL is not a DC load: it needs high-voltage AC (≈100V at a few hundred Hz), so the work splits
 into making a *controllable* EL driver and then wiring that driver into DMX. The firmware
 scaffold exists — `bone/` already joins the Pi's WiFi, self-identifies by station MAC, and
@@ -316,7 +182,7 @@ inverter; the GPIO13 drive is a logic-level placeholder.
 
 #### Firmware
 
-- [ ] sACN E1.31 listener (reuse the ponytail `sacn.rs` decoder).
+- [ ] sACN E1.31 listener.
 - [ ] Map one DMX channel to EL brightness via the inverter gate line (replace the fixed
       2 kHz placeholder on GPIO13).
 - [ ] Add bone's DMX start address / universe to `bone/src/config.rs`, keyed by station MAC.
@@ -341,12 +207,12 @@ work on this universe.
 
 - [ ] Determine spotlight electrical type (voltage, constant-current vs constant-voltage,
       single-colour vs RGBW) and per-channel current.
-- [ ] Driver: low-side MOSFET per channel from an ESP32-S3 (as the ponytail drives RGBW), or
-      an off-the-shelf DMX-capable LED driver if the current is beyond a discrete MOSFET.
+- [ ] Driver: low-side MOSFET per channel from an ESP32-S3, or an off-the-shelf DMX-capable
+      LED driver if the current is beyond a discrete MOSFET.
 
 #### Firmware
 
-- [ ] sACN E1.31 listener (reuse the ponytail firmware).
+- [ ] sACN E1.31 listener.
 - [ ] LEDC PWM channel(s) for the spotlights at ≥20 kHz (video-safe).
 - [ ] Assign hoof a DMX start address / universe, keyed by station MAC.
 
@@ -507,63 +373,6 @@ logic.
 
 ---
 
-### Build 8 — Ponytail BLE bridge (Telink gobo fixture)
-
-A completely new ponytail personality. Instead of driving the LED array via PWM (Build 1) or
-replacing the board (Build 2), this keeps the fixture's **original Telink BLE controller** and
-bridges sACN-DMX → BLE write commands to it. It is the only control path that reaches the
-fixture's **gobo motor**. The reverse-engineered 7E/EF protocol, the 9-byte frame builders,
-and the DMX→BLE translation are captured in `ble/DMX-BLE.md` and the `ble/telink*.py` /
-`ble/telinkled.lua` reference (test code — reference only, may contain bugs).
-
-The fixture is **modal**: the RGB emitters and the white LED cannot light together, so
-White > 0 overrides RGB (interlocked white), and the master dimmer is applied **in software**
-(the native brightness command is dead in white mode — and software dimming matches what the
-PWM ponytail already does with the Intensity channel). It has **no readback**, so the bridge
-always asserts the complete desired state: it re-sends on every change, on a 10 s heartbeat,
-and on every reconnect.
-
-The personality grows to **6 channels** (Dimmer, R, G, B, White, Gobo rotation) — one more
-than the current IRGBW fixtures. The channel re-spacing touches the brain and both ponytail
-personalities; it is fully reversible via git, so we implement it and roll back if it
-misbehaves.
-
-#### Ponytail BLE personality (firmware)
-
-- [ ] Keep the PWM personality during bring-up — it is the known-good reference for confirming
-      that sACN data arrives correctly (right slots, right values) while the BLE path is tested.
-      **TODO: remove the PWM personality** once the BLE bridge is validated.
-- [ ] Simulate the modal white interlock in the PWM personality too, so it matches the BLE
-      fixture's behaviour: when White > 0, force R = G = B = 0 (White overrides RGB). This keeps
-      the reference path faithful to interlocked white rather than co-lighting RGB and W.
-- [ ] Drive the gobo with **power + speed only** (no Gobo Preset `0x15`), per the doc.
-      **TODO: test on hardware** that the gobo actually renders without a preset recall (add a
-      one-shot preset on connect if it doesn't), and re-sweep the 1–10 speed range to confirm.
-
-#### Review items (the doc is reference, not gospel)
-
-- [ ] **TODO review:** `ble/DMX-BLE.md` is prescriptive in places; where a cleaner approach
-      gives the same observable effect, take it and note the deviation.
-- [ ] **TODO review:** the doc's author did not know this codebase — reshape the suggested
-      structure to fit ponytail's existing patterns (reuse `Listener`/`Signal`, config-by-MAC,
-      the existing software-dimming convention) even where it contradicts the doc.
-
-#### Docs
-
-- [ ] Document this BLE-bridge personality and the 6-channel map in §2.1 / §3.2.
-
-#### Validation
-
-- [ ] Hold WiFi + BLE together through a multi-minute run; sACN loss does not drop BLE and
-      vice-versa.
-- [ ] Connection survives a fixture power-cycle and range loss (auto-reconnect + resync).
-- [ ] Interlock look check: White > 0 hard-cuts to white and back; Dimmer at 0 powers the LED
-      (and, via the hardware coupling, the gobo) off.
-- [ ] Gobo rotation tracks the channel; 0 stops the motor.
-- [ ] End-to-end via the Pi sACN sender.
-
----
-
 ### Build 9 — Outgoing DMX universe 0 (wired, Pi DMX HAT)
 
 The Pi gains a **second DMX universe**, emitted as **wired DMX-512** through a Pi
@@ -571,8 +380,8 @@ HAT, alongside the existing WiFi sACN universe 1. Universe 0 drives the **base
 lights** — conventional rental fixtures that differ from deployment to deployment.
 
 The split between the two universes is **only routing and cable management**:
-universe 1 is the WiFi-attached ESP32 fixtures (ponytail / bone / hoof), universe 0
-is whatever wired fixtures we rent for the base. The generative engine stays
+universe 1 is the sculpture's own fixtures, universe 0 is whatever wired fixtures
+we rent for the base. The generative engine stays
 **universe-agnostic** — it does not know or care where a value goes. A new **patch
 layer** is the single place that maps generated signals onto real fixtures at real
 addresses in real universes, so re-patching for a new rental is a config edit, not
@@ -580,8 +389,8 @@ a code change.
 
 #### Software architecture — separate the engine from the routing
 
-Today `noise_task` (`brain/src/orchestrator.rs`) does everything in one loop: generate
-Perlin + intensity, hardcode Ponytails A and B, pack 12 slots, send one universe.
+Today `noise_task` (`brain/src/orchestrator.rs`) does everything in one loop: hardcode
+each fixture and its address, pack the slots, send one universe.
 Build 9 splits that into four concerns, each replaceable on its own:
 
 1. **Engine (universe-agnostic, mostly exists).** Produces a per-frame bundle of
@@ -592,8 +401,8 @@ Build 9 splits that into four concerns, each replaceable on its own:
 2. **Patch (new — the per-deployment config).** A table of fixtures, each carrying:
    target **universe**, **start address**, **profile** (channel layout), and a
    **source binding** (which engine streams feed its channels). This is the one
-   module that changes when the rental list changes; treat it like `ponytail`'s
-   config-by-MAC table — a hand-edited deployment constant, not runtime logic.
+   module that changes when the rental list changes — a hand-edited deployment
+   constant, not runtime logic.
 3. **Renderer (new — mechanical).** Walks the patch, reads the engine bundle, and
    fills one slot buffer **per universe**. No creative decisions live here.
 4. **Sinks (new — an abstraction over the existing send).** One output per universe:
@@ -665,7 +474,7 @@ break included** — no per-byte direction flipping.
 - [ ] Replace the single `UNIVERSE` constant with a list of universe outputs, each
       bound to a sink.
 - [ ] Extract the engine bundle from `noise_task` so generation no longer references
-      Ponytails A/B directly.
+      individual fixtures directly.
 - [ ] Add `patch.rs`: the fixture table (universe, address, profile, source binding)
       and the profile enum.
 - [ ] Add a renderer that produces one slot buffer per universe from engine + patch.
@@ -680,8 +489,8 @@ break included** — no per-byte direction flipping.
       Serial Port: login shell off"). Do *not* try to assert `init_uart_clock` (not exposed on a
       stable path, and 250000 divides cleanly from the default clock anyway) or the S1 DIP / K3
       jumper (hardware, unreadable from software).
-- [ ] Move Ponytails A/B into the patch table (universe 1) so the existing rig is just
-      the first patch entry — no behavioural change for Build 1.
+- [ ] Move the laser and the three Yaras into the patch table (universe 1) so the
+      existing rig is just the first patch entries — no behavioural change for Build 1.
 
 #### Validation
 

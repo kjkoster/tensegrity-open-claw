@@ -296,7 +296,7 @@ fn render(scenes: &[(String, Vec<(u32, u8)>)]) -> String {
             writeln!(out, "        values: &[],").unwrap();
         } else {
             writeln!(out, "        values: &[").unwrap();
-            // Six pairs per line, so one Ponytail's worth of channels reads as one row.
+            // Six pairs per line, so a typical fixture's channels read as one row.
             for row in values.chunks(6) {
                 let row: Vec<String> = row
                     .iter()
