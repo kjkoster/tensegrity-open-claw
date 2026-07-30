@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Workspace>
-<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="SDESK">
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FIXANDFUNC">
  <Creator>
   <Name>Q Light Controller Plus</Name>
   <Version>5.2.1</Version>
@@ -23,18 +23,48 @@
    <Manufacturer>HQ Power</Manufacturer>
    <Model>VDPLPS36B2 LED Pinspot PAR36</Model>
    <Mode>5 Channel</Mode>
-   <ID>8</ID>
-   <Name>Pinspot</Name>
+   <ID>0</ID>
+   <Name>pinspot</Name>
    <Universe>0</Universe>
    <Address>0</Address>
    <Channels>5</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>UKing</Manufacturer>
+   <Model>ZQ-B243</Model>
+   <Mode>12 Channel</Mode>
+   <ID>1</ID>
+   <Name>ZQ-B243 leg A</Name>
+   <Universe>0</Universe>
+   <Address>9</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>UKing</Manufacturer>
+   <Model>ZQ-B243</Model>
+   <Mode>12 Channel</Mode>
+   <ID>2</ID>
+   <Name>ZQ-B243 leg B</Name>
+   <Universe>0</Universe>
+   <Address>21</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>UKing</Manufacturer>
+   <Model>ZQ-B243</Model>
+   <Mode>12 Channel</Mode>
+   <ID>3</ID>
+   <Name>ZQ-B243 leg C</Name>
+   <Universe>0</Universe>
+   <Address>33</Address>
+   <Channels>12</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>CLF</Manufacturer>
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>5</ID>
-   <Name>Yara 1</Name>
+   <Name>Yara leg A</Name>
    <Universe>0</Universe>
    <Address>99</Address>
    <Channels>4</Channels>
@@ -44,7 +74,7 @@
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>6</ID>
-   <Name>Yara 2</Name>
+   <Name>Yara leg B</Name>
    <Universe>0</Universe>
    <Address>106</Address>
    <Channels>4</Channels>
@@ -54,7 +84,7 @@
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>7</ID>
-   <Name>Yara 3</Name>
+   <Name>Yara leg C</Name>
    <Universe>0</Universe>
    <Address>112</Address>
    <Channels>4</Channels>
@@ -65,14 +95,15 @@
    <ValueStyle>0</ValueStyle>
    <Grid Width="5" Height="3" Depth="5" Units="0" POV="1"/>
    <StageItem>0</StageItem>
-   <FxItem ID="0" XPos="0" YPos="1000" ZPos="0"/>
-   <FxItem ID="1" XPos="350" YPos="1000" ZPos="0"/>
+   <FxItem ID="0" XPos="0" YPos="0" ZPos="0"/>
+   <FxItem ID="1" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="2" XPos="700" YPos="1000" ZPos="0"/>
    <FxItem ID="3" XPos="1050" YPos="1000" ZPos="0"/>
    <FxItem ID="4" XPos="1400" YPos="1000" ZPos="0"/>
    <FxItem ID="5" XPos="1595" YPos="1000" ZPos="0"/>
    <FxItem ID="6" XPos="1824" YPos="1000" ZPos="0"/>
    <FxItem ID="7" XPos="2053" YPos="1000" ZPos="0"/>
+   <FxItem ID="8" XPos="0" YPos="0" ZPos="0"/>
   </Monitor>
  </Engine>
  <VirtualConsole>

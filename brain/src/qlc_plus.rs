@@ -41,34 +41,6 @@ impl Channel {
     }
 }
 
-/// The QLC+ channel presets we recognise, which is the Intensity family — the roles a
-/// colour-mixing fixture is built from.
-///
-/// Everything else QLC+ can express (colour wheels, gobos, strobes, maintenance channels)
-/// arrives as [`Preset::Custom`]. That is deliberate: those channels are indexed bands
-/// rather than continuous levels, so a mixing engine cannot drive them by writing a level,
-/// and pretending otherwise in the type system would be worse than leaving them unnamed.
-/// They still get a field, named after the channel, so they can be set explicitly.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Preset {
-    IntensityMasterDimmer,
-    IntensityDimmer,
-    IntensityRed,
-    IntensityGreen,
-    IntensityBlue,
-    IntensityWhite,
-    IntensityAmber,
-    IntensityUV,
-    IntensityCyan,
-    IntensityMagenta,
-    IntensityYellow,
-    IntensityHue,
-    IntensitySaturation,
-    IntensityValue,
-    IntensityLightness,
-    Custom,
-}
-
 /// One row of the generated patch table: a fixture as the workspace describes it.
 ///
 /// The per-fixture structs are the typed interface; this is the same information as plain
@@ -81,8 +53,12 @@ pub struct PatchEntry {
     pub profile: &'static str,
     /// 1-based DMX start address.
     pub address: u16,
-    /// Every channel of the patched mode, in mode order, with the role QLC+ gives it.
-    pub channels: &'static [(Preset, Channel)],
+    /// Every channel of the patched mode, in mode order.
+    ///
+    /// Channels only, not roles: what each one *is* lives in the fixture struct's field
+    /// names and its capability traits, where the compiler checks it. Carrying a runtime
+    /// copy of the same fact would be a second encoding able to drift from the first.
+    pub channels: &'static [Channel],
 }
 
 /// A fixture with additive red, green and blue emitters.

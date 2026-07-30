@@ -53,9 +53,9 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         patch::PINSPOT.effect.set(&mut slots, 0);
         patch::PINSPOT.speed.set(&mut slots, 0);
 
-        fill_yara(&mut slots, &patch::YARA_1, [255, 0, 0]); // red
-        fill_yara(&mut slots, &patch::YARA_2, [0, 255, 0]); // green
-        fill_yara(&mut slots, &patch::YARA_3, [0, 0, 255]); // blue
+        fill_yara(&mut slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
+        fill_yara(&mut slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
+        fill_yara(&mut slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
 
         let packet = dmx::encode(
             cfg::UNIVERSE,
