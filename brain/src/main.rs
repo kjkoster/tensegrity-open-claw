@@ -32,9 +32,9 @@ async fn main(spawner: Spawner) {
     let cid = dmx::new_cid();
 
     // The external-takeover receiver: a second OS thread alongside audio capture, because a
-    // blocking recv_from would stall the executor's single task. It needs our CID to reject
-    // the brain's own multicast looping back on this host.
-    let (takeover_tx, _takeover_rx) = latest::latest(sacn_in::Takeover::idle());
+    // blocking recv_from would stall the executor's single task. It publishes candidates;
+    // the frame loop decides once per frame whether one is actually driving.
+    let (takeover_tx, takeover_rx) = latest::latest(sacn_in::Takeover::idle());
     let _sacn_in = sacn_in::spawn_receiver(cid, takeover_tx);
 
     let group = dmx::multicast_addr(UNIVERSE);
@@ -79,5 +79,5 @@ async fn main(spawner: Spawner) {
         }
     });
 
-    spawner.spawn(orchestrator::noise_task(socket, cid, rx).unwrap());
+    spawner.spawn(orchestrator::noise_task(socket, cid, rx, takeover_rx).unwrap());
 }

@@ -2,20 +2,31 @@
 //! `AudioFeatures`, runs the sparkle mapping for the pinspot, fills the slot array, and
 //! emits one sACN packet at the frame rate. The three Yara pars are pinned to hard R/G/B
 //! primaries for bring-up (see fill_yara).
+//!
+//! This is also where an external console takes the rig over. Ownership is decided once per
+//! frame and one slot buffer goes to both outputs, so the wire and the network can never be
+//! driven from different sources.
 
 use crate::audio_features::AudioFeatures;
+use crate::clock;
 use crate::config as cfg;
 use crate::dmx;
 use crate::latest::LatestRx;
 use crate::patch;
 use crate::qlc_plus::{Rgb, White};
+use crate::sacn_in::Takeover;
 use crate::sparkle::{SparkleMapping, SparkleOut};
 use embassy_time::{Duration, Ticker};
 use std::net::UdpSocket;
 use zihatec_rs_485_dmx::{DmxHat, DmxTiming};
 
 #[embassy_executor::task]
-pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<AudioFeatures>) -> ! {
+pub async fn noise_task(
+    socket: UdpSocket,
+    cid: [u8; 16],
+    features: LatestRx<AudioFeatures>,
+    takeover: LatestRx<Takeover>,
+) -> ! {
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
     // onsets, with its own slow white-mode gate. One instance per fixture, so several
     // fixtures sparkle independently rather than in lock-step (SPARKLE.md §6).
@@ -36,6 +47,7 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
     let mut ticker = Ticker::every(frame_period);
     let mut sequence: u8 = 0;
     let dt = 1.0 / cfg::FRAME_RATE_HZ as f64;
+    let mut overridden = false;
 
     loop {
         ticker.next().await;
@@ -56,6 +68,32 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         fill_yara(&mut slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
         fill_yara(&mut slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
         fill_yara(&mut slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
+
+        // The engine above runs every frame whether or not it is driving. Its Perlin fields,
+        // breath phase, white-mode dwell and slews stay continuous, so handback resumes
+        // mid-stride instead of springing out of a frozen frame — and the audio pipeline
+        // never stops feeding it either way.
+        //
+        // One decision, one buffer: everything below ships whatever `slots` holds, to both
+        // the wire and the network, so the two can never follow different sources. Takeover
+        // is whole-universe — the external frame replaces every slot, never some of them.
+        let external = takeover.snapshot();
+        let external_driving = external.in_force(clock::now_us());
+        if external_driving {
+            slots = external.slots;
+        }
+
+        if external_driving != overridden {
+            overridden = external_driving;
+            if overridden {
+                eprintln!("sacn: takeover by {}", external.describe());
+            } else {
+                eprintln!(
+                    "sacn: released by {} — internal engine resumes",
+                    external.describe()
+                );
+            }
+        }
 
         let packet = dmx::encode(
             cfg::UNIVERSE,
