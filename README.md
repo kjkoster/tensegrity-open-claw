@@ -24,16 +24,25 @@ macOS.
 
 - SSH alias **`claw-pi`** → `10.0.1.1`, user `kjkoster`, key `~/.ssh/id_rsa`
   (`IdentitiesOnly yes`).
-- Two networks: `10.0.1.1` (SSH/dev) and `10.0.0.1` (the WiFi AP for the fixtures; DHCP
-  `10.0.0.10+`, `/24`).
+- The Pi's interfaces, per `ifconfig` on `claw-pi`:
+
+  | Interface | Address | Purpose |
+  |---|---|---|
+  | `eth0` | `10.0.1.1/24` | SSH / deploy from a directly-connected laptop |
+  | `wlan0` | `10.0.10.1/24` | the WiFi AP |
+  | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
+  | `wwan0` | DHCP | 4G uplink |
+
+  `wg0` is **POINTOPOINT with no MULTICAST flag**. A console reaching the Pi over the tunnel
+  must therefore send sACN **unicast** to `10.8.0.3`; multicast only works on `eth0`/`wlan0`.
 
 ## Networking
 
 ### WiFi AP (fixtures join this)
 
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
-  `10.0.0.1`, leased from `10.0.0.10+`. The Pi's `hostapd.conf` is the only source of truth
-  for the SSID and passphrase.
+  `10.0.10.1`, leased from `10.0.10.10+`. The Pi's `hostapd.conf` is the only source of
+  truth for the SSID and passphrase.
 - The **Ethernet port** is exposed to a dev laptop for SSH.
 
 ### 4G uplink
@@ -41,7 +50,7 @@ macOS.
 > ⚠️ **Not yet captured in the repo.** The deployed Pi reaches the internet over a 4G modem,
 > but no config for it lives in this tree. To document: modem device + connection method
 > (USB dongle vs. tethering; ModemManager/`mmcli`, `usb0` DHCP, or `ppp`), APN/SIM, routing
-> metrics (4G as default route while the AP `10.0.0.0/24` and dev Ethernet `10.0.1.0/24` stay
+> metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet `10.0.1.0/24` stay
 > local), and boot-time bring-up so a reboot reconnects.
 
 ## Attached hardware

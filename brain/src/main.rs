@@ -8,6 +8,7 @@ mod orchestrator;
 mod patch;
 mod perlin;
 mod qlc_plus;
+mod sacn_in;
 mod scenes;
 mod sparkle;
 
@@ -29,6 +30,13 @@ async fn main(spawner: Spawner) {
         .set_multicast_ttl_v4(1)
         .expect("set multicast TTL failed");
     let cid = dmx::new_cid();
+
+    // The external-takeover receiver: a second OS thread alongside audio capture, because a
+    // blocking recv_from would stall the executor's single task. It needs our CID to reject
+    // the brain's own multicast looping back on this host.
+    let (takeover_tx, _takeover_rx) = latest::latest(sacn_in::Takeover::idle());
+    let _sacn_in = sacn_in::spawn_receiver(cid, takeover_tx);
+
     let group = dmx::multicast_addr(UNIVERSE);
     eprintln!("brain: universe {UNIVERSE} → {group}:{SACN_PORT}  @ {FRAME_RATE_HZ} Hz");
 

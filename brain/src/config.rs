@@ -1,19 +1,54 @@
 //! All tunables in one place, grouped by the section numbers of SOUND.md.
 //! The festival tuning loop is "edit numbers, rebuild, restart".
 
+use std::net::Ipv4Addr;
+
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
 pub const UNIVERSE: u16 = 1;
 pub const SACN_PORT: u16 = 5568;
 // Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
 pub const FRAME_RATE_HZ: u64 = 40;
 
-// E1.31 source priority. The brain holds the default 100; a manual console (QLC+)
-// overrides by sending the same universe at a strictly higher value.
+// E1.31 source priority — one number with two jobs, deliberately not split. It is the
+// priority the brain transmits at, and it is the bar an external console must clear to take
+// the universe: takeover requires STRICTLY greater (see sacn_in.rs). Strict is load-bearing.
+// Every sACN source ships defaulted to 100, so any laptop that joins the network with a live
+// universe would otherwise seize the rig; taking over has to be a deliberate act. The QLC+
+// workspace is configured at 200. Equal priority is not a tie — the brain keeps driving.
+// Two constants here would drift apart and break that silently.
 pub const SACN_PRIORITY: u8 = 100;
 // Stream-terminated frames emitted on shutdown. UDP is lossy, so repeat: any one
 // arriving makes the fixtures drop the brain's source at once instead of waiting out
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
+
+// ── E1.31 receive / external takeover ────────────────────────────────────────
+// The E1.31 network-data-loss timeout: an external source that goes quiet this long loses
+// the universe and the internal engine resumes. This is the backstop only — a clean QLC+
+// shutdown sets the stream-terminated bit and hands back inside one frame.
+pub const SACN_SOURCE_TIMEOUT_US: u64 = 2_500_000;
+
+// Distinct senders tracked at once. Normally one console; a few more absorbs strays without
+// unbounded storage, and an expiring entry frees a slot within the timeout above.
+pub const SACN_MAX_SOURCES: usize = 4;
+
+// The one address the receiver binds — the Pi's WireGuard address, where the console lives.
+//
+// Deliberately not the wildcard. Binding a single address is what keeps the brain's own sACN
+// multicast, which it transmits at frame rate, from being delivered straight back to its own
+// receiver. There are no multicast joins for the same reason: wg0 is POINTOPOINT with no
+// MULTICAST flag, so a console on the tunnel has to unicast here regardless.
+//
+// Two consequences worth knowing. A console on eth0 or wlan0 cannot take over — set this to
+// `Ipv4Addr::UNSPECIFIED` to accept from anywhere again, and the loopback comes back with
+// it. And if the tunnel is down at startup the bind fails, which is wanted: the receiver
+// retries with backoff and comes up whenever wg0 does.
+pub const SACN_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 8, 0, 3);
+
+// Rebind backoff cap for the receive socket. Retrying rather than dying means the takeover
+// path comes back the moment whatever held the port lets go, and the sculpture keeps
+// breathing on the internal engine meanwhile.
+pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
 // Fixture addressing is not here: it is generated from the QLC+ workspace into `patch.rs`,
 // which is the single source of truth for what is patched where (`DMX_SLOTS` included).
