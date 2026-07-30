@@ -156,9 +156,14 @@ Rsyncs `brain/` and `open-claw.qxw` to `claw-pi`, then runs `remote-deploy.sh` t
 builds `brain` natively, installs `/usr/local/bin/brain` + the systemd unit, and restarts the
 daemon.
 
-The workspace goes with the sources because `brain/build.rs` reads it and compiles its scenes
-in — so saving in QLC+ and deploying is all it takes to get an edited scene onto the rig. The
-startup log names the scenes the running binary was built from.
+The workspace goes with the sources because `brain/build.rs` reads it and compiles **both the
+fixture patch and the scenes** in — so saving in QLC+ and deploying is all it takes to get an
+edited scene onto the rig. The startup log names the scenes the running binary was built from.
+
+The workspace is the **source of truth for fixture addressing**: there is no copy of it in the
+Rust sources. Patch a fixture in QLC+ that nothing drives and the build warns it is unused;
+delete or rename one the daemon drives and the build fails. Repatch one to a different mode
+and the channel-count assertions at the fill sites stop the build too.
 
 ---
 

@@ -78,7 +78,7 @@ pub fn encode(
 /// every fixture — including the highest-addressed — finds its slots and honours the flag;
 /// only the flag matters, not the contents.
 pub fn encode_release(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16]) -> Vec<u8> {
-    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; crate::config::DMX_SLOTS])
+    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; crate::patch::DMX_SLOTS])
 }
 
 /// The sACN multicast group address for the given universe.

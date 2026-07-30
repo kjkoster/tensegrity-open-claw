@@ -9,21 +9,14 @@ use crate::dmx;
 use crate::fixture::Fixture;
 use crate::laser::{LaserMapping, LaserOut};
 use crate::latest::LatestRx;
+use crate::patch;
 use embassy_time::{Duration, Ticker};
 use std::net::UdpSocket;
 use zihatec_rs_485_dmx::{DmxHat, DmxTiming};
 
 #[embassy_executor::task]
 pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<AudioFeatures>) -> ! {
-    let laser = Fixture { start_address: cfg::LASER_ADDRESS };
     let mut laser_map = LaserMapping::default();
-
-    // Three CLF Yara pars, patched high in the same universe (@100, @107, @113). For bring-up
-    // they are pinned to hard, full-intensity primaries (red/green/blue) so the three are
-    // trivially distinguishable and their DMX addressing is verifiable (see fill_yara).
-    let yara_a = Fixture { start_address: cfg::YARA_ADDRESSES[0] };
-    let yara_b = Fixture { start_address: cfg::YARA_ADDRESSES[1] };
-    let yara_c = Fixture { start_address: cfg::YARA_ADDRESSES[2] };
 
     // The wired HAT mirrors the same slot buffer as the sACN send (HARDWARE-DMX.md).
     // A broken serial setup is a deploy-time gate, not a runtime hazard, so panic
@@ -39,14 +32,15 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
     loop {
         ticker.next().await;
 
-        // One universe: the laser (@25), then the three Yara pars (@100, @107, @113).
-        // Intervening slots stay zero. The buffer is a full 512-slot universe for the wire;
+        // Every fixture named here comes from the QLC+ patch (see patch.rs), so this list is
+        // also the record of which patched fixtures the daemon actually drives. Slots outside
+        // a fixture's block stay zero. The buffer is a full 512-slot universe for the wire;
         // the sACN frame sends only the live head.
         let mut slots = [0u8; zihatec_rs_485_dmx::SLOTS];
-        fill_laser(&mut slots, &laser, &laser_map.frame(dt));
-        fill_yara(&mut slots, &yara_a, [255, 0, 0]); // @100 red
-        fill_yara(&mut slots, &yara_b, [0, 255, 0]); // @107 green
-        fill_yara(&mut slots, &yara_c, [0, 0, 255]); // @113 blue
+        fill_laser(&mut slots, &patch::LASER, &laser_map.frame(dt));
+        fill_yara(&mut slots, &patch::YARA_1, [255, 0, 0]); // red
+        fill_yara(&mut slots, &patch::YARA_2, [0, 255, 0]); // green
+        fill_yara(&mut slots, &patch::YARA_3, [0, 0, 255]); // blue
 
         let packet = dmx::encode(
             cfg::UNIVERSE,
@@ -54,7 +48,7 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
             cfg::SACN_PRIORITY,
             0,
             &cid,
-            &slots[..cfg::DMX_SLOTS],
+            &slots[..patch::DMX_SLOTS],
         );
         dmx::send_multicast(&socket, cfg::UNIVERSE, cfg::SACN_PORT, &packet);
         // A wire write error is logged, not fatal — a yanked cable must not take the
@@ -72,6 +66,13 @@ fn fill_laser(slots: &mut [u8], laser: &Fixture, out: &LaserOut) {
         slots[laser.slot(offset as u16)] = value;
     }
 }
+
+// This code writes the Yaras' 4-channel mode by hand, so it has an opinion about their
+// patched width. Pin it: repatch a Yara to one of its other modes (6CH, 7CH, 11CH…) in QLC+
+// and the build stops here rather than quietly writing colour into a dimmer and a shutter.
+const _: () = assert!(patch::YARA_1.channels == 4);
+const _: () = assert!(patch::YARA_2.channels == 4);
+const _: () = assert!(patch::YARA_3.channels == 4);
 
 /// Fill one Yara par's four DMX slots with a hard primary. The Yaras run in 4-channel mode
 /// (R, G, B, White), so the colour maps straight onto the first three slots with white held

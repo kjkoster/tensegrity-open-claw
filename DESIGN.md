@@ -41,10 +41,18 @@ which have been removed from the project.
 | 107–110 | Yara 2 | 4-channel | Red, Green, Blue, White |
 | 113–116 | Yara 3 | 4-channel | Red, Green, Blue, White |
 
-The frame spans slots 1–116 (`DMX_SLOTS`), derived from the top Yara address so it tracks the
-patch automatically; every slot outside a fixture's block stays zero. The wired frame is
-padded to a full 512-slot universe — a short frame makes the laser ignore the data and
-free-run its own show (see §3.5 and README).
+The frame spans slots 1–116 (`DMX_SLOTS`); every slot outside a fixture's block stays zero.
+The wired frame is padded to a full 512-slot universe — a short frame makes the laser ignore
+the data and free-run its own show (see §3.5 and README).
+
+**None of this addressing is written in Rust.** The QLC+ workspace (`open-claw.qxw`) is the
+source of truth: `brain/build.rs` reads its `<Fixture>` elements and generates one named
+constant per fixture into `patch.rs`, `DMX_SLOTS` included. Because each fixture becomes a
+*named* constant, drift is caught by the compiler in both directions — patching a fixture
+nothing drives leaves an unused constant (a dead-code warning), and deleting or renaming one
+that code drives removes the constant its use sites need (a compile error). Repatching a
+fixture to another mode changes its channel count, which `const` assertions at the fill sites
+pin. There is no drift checker because none is needed.
 
 ### 1.2 Yara pars (CLF-Lighting, wired, RGBW)
 
@@ -475,8 +483,12 @@ break included** — no per-byte direction flipping.
       bound to a sink.
 - [ ] Extract the engine bundle from `noise_task` so generation no longer references
       individual fixtures directly.
-- [ ] Add `patch.rs`: the fixture table (universe, address, profile, source binding)
-      and the profile enum.
+- [x] Add `patch.rs`: the fixture table. **Done differently and better** — it is
+      generated from the QLC+ workspace rather than hand-edited, so the patch has one
+      source of truth and the compiler catches drift (see §1.1). What is *not* yet
+      there is the per-fixture **profile** and **source binding**; QLC+ knows a
+      fixture's mode but not which engine stream should feed which channel, so that
+      half stays hand-written and still needs designing.
 - [ ] Add a renderer that produces one slot buffer per universe from engine + patch.
 - [ ] Add a `dmx_hat` sink that owns the serial port and clocks universe 0 out at
       44 Hz; keep the sACN sink for universe 1.

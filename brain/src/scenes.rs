@@ -9,8 +9,6 @@
 //! the scenes the running binary was built from, which is how the operator confirms the
 //! edit was picked up.
 
-use crate::config as cfg;
-
 /// One QLC+ scene.
 pub struct Scene {
     /// The QLC+ Function name, snake_case and unique across the workspace.
@@ -31,4 +29,4 @@ include!(concat!(env!("OUT_DIR"), "/scenes.rs"));
 // A scene reaching past the end of the frame the daemon actually sends would be silently
 // truncated on the wire. This is the one place the QLC+ patch and the daemon's own
 // addressing are cross-checked against each other, and the compiler does it for free.
-const _: () = assert!(HIGHEST_SLOT < cfg::DMX_SLOTS);
+const _: () = assert!(HIGHEST_SLOT < crate::patch::DMX_SLOTS);

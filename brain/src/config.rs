@@ -15,20 +15,13 @@ pub const SACN_PRIORITY: u8 = 100;
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
-// The sACN frame runs from slot 1 through the last live slot. The laser sits at the head
-// (25–32), but the three Yara pars are patched far up the universe (see YARA_ADDRESSES), so
-// the frame must reach the last Yara slot — the slots in between, including the now-unused
-// head, stay zero. Derived from the top Yara address so it tracks the patch automatically.
-pub const DMX_SLOTS: usize =
-    YARA_ADDRESSES[YARA_ADDRESSES.len() - 1] as usize - 1 + YARA_CHANNELS;
+// Fixture addressing is not here: it is generated from the QLC+ workspace into `patch.rs`,
+// which is the single source of truth for what is patched where (`DMX_SLOTS` included).
 
 // ── JB Systems Space-4 laser (wired; LASER.md) ───────────────────────────────
-// 8-channel mode at address 25, so it fills slots 25–32. CH1 must be ≥192 to unlock DMX
-// control of CH2–CH8; below that
+// CH1 must be ≥192 to unlock DMX control of CH2–CH8; below that
 // the laser ignores them and free-runs its internal auto/sound show. The diagonal is drawn
 // purely by sweeping CH7/CH8 (absolute X/Y position) in lockstep — no pattern rotation.
-pub const LASER_ADDRESS: u16 = 25;
-pub const LASER_CHANNELS: usize = 8;
 // Sibling JB lasers misdocument their DMX map (Beglec confirmed the Lounge Laser manual was
 // wrong and channels must stay in a "5–127" active band), so distrust the printed thresholds:
 // drive CH1 to the very top of the documented DMX-mode band, and keep every other channel out
@@ -44,15 +37,6 @@ pub const LASER_MODE_SWEEP_PERIOD_S: f64 = 30.0; // TEMP diagnostic: sweep CH1 a
 // Restore 5 / 122 afterward.
 pub const LASER_POS_MIN: u8 = 60;
 pub const LASER_POS_MAX: u8 = 60;
-
-// ── CLF-Lighting Yara LED pars (Manual-CLF-Yara-1.0.pdf) ──────────────────────
-// Three RGBW pars in 4-channel mode (R, G, B, White — no dimmer, so a full colour channel is
-// full output), patched high in the universe after the laser. For bring-up they are pinned to
-// hard primaries (red @100, green @107, blue @113) so the three are trivially distinguishable
-// and their DMX addressing is verifiable (see fill_yara in orchestrator.rs). Only R/G/B are
-// driven; White is held off.
-pub const YARA_CHANNELS: usize = 4;
-pub const YARA_ADDRESSES: [u16; 3] = [100, 107, 113];
 
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe

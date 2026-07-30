@@ -7,6 +7,7 @@ mod fixture;
 mod laser;
 mod latest;
 mod orchestrator;
+mod patch;
 mod perlin;
 mod scenes;
 mod sparkle;
