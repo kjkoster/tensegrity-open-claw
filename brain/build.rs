@@ -701,7 +701,8 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         writeln!(out).unwrap();
 
         // Positional access is a convenience for fixtures whose channels have no colour to
-        // name — the laser's, say. Which fixtures want it is a property of the hand-written
+        // name — a moving head's position channels, say. Which fixtures want it is a
+        // property of the hand-written
         // code, not of the patch, so generating it everywhere and allowing it to go unused
         // is honest; the dead-code warning that matters is the one on the fixture itself.
         writeln!(out, "#[allow(dead_code)]").unwrap();

@@ -3,7 +3,6 @@ mod capture;
 mod clock;
 mod config;
 mod dmx;
-mod laser;
 mod latest;
 mod orchestrator;
 mod patch;

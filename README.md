@@ -9,11 +9,9 @@ The system is two parts:
   runs the generative engine, and emits one DMX universe **two ways** at 40 Hz: out the wired
   RS-485 HAT as raw DMX-512, and over the network as E1.31 sACN. The wire is what drives the
   rig; the sACN copy is there for monitoring and for QLC+ to work against.
-- **Wired DMX** — a JB Systems Space-4 laser and three CLF Yara pars on the HAT.
+- **Wired DMX** — an HQ Power pinspot and three CLF Yara pars on the HAT.
 
-Deep-dive companions: [`HARDWARE-DMX.md`](HARDWARE-DMX.md) (wired DMX/HAT rationale),
-[`LASER.md`](LASER.md) (laser build phases), [`DESIGN.md`](DESIGN.md) (system design),
-[`SPARKLE.md`](SPARKLE.md) (the light engine).
+Deep-dive companion: [`DESIGN.md`](DESIGN.md) (system design).
 
 ---
 
@@ -51,8 +49,7 @@ macOS.
 | Device | Interface | Notes |
 |---|---|---|
 | Alesis io\|2 USB audio | USB (`plughw:CARD=io2,DEV=0`) | ALSA capture; confirm with `arecord -L`. VID:PID `0x13b2:0x0008`. Set in `brain/src/config.rs`. |
-| Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. See below + `HARDWARE-DMX.md`. |
-| JB Systems Space-4 laser | 3-pin XLR off the HAT | DMX address `025`, 8-channel mode. See below + `LASER.md`. |
+| Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Addresses `100` / `107` / `113`, **4-channel mode** (R, G, B, White). The front-panel default is 11CH — set each one. |
 | HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Address `001`, **5-channel mode** (Effect, R, G, B, Speed). Mode *and* address are DIP switches, not a menu — see below. |
 
@@ -61,7 +58,7 @@ macOS.
 ### Serial / UART for wired DMX
 
 The mini-UART (`ttyS0`) can't hold 250 kbaud, so move the PL011 onto the header and free it
-from the login console (rationale in `HARDWARE-DMX.md`):
+from the login console.
 
 1. `/boot/firmware/config.txt`, add:
    - `dtoverlay=disable-bt` — makes `/dev/serial0 → ttyAMA0`.
@@ -78,13 +75,13 @@ if they're wrong.
 
 ### DMX timing hardening
 
-The wired laser is a strict, cheap DMX receiver. Getting it to obey took three things — one
-essential, two insurance:
+Cheap DMX receivers are strict about framing. Three things went in — one essential, two
+insurance:
 
-- **Full 512-slot frame (the actual fix).** A short DMX frame makes this laser ignore the
-  data and free-run its internal auto/sound show — with a *steady* "DMX detected" display, so
-  it looks connected. `brain` pads the wired frame to a full 512-slot universe
-  (`WIRED_FRAME_SLOTS`); do not ship a short frame to this fixture.
+- **Full 512-slot frame (the actual fix).** A short DMX frame can make a fixture ignore the
+  data and free-run its internal auto/sound show — with a *steady* "DMX detected" display,
+  so it looks connected. `brain` pads the wired frame to a full 512-slot universe; do not
+  ship a short frame.
 - **`disable_pvt=1`** in `config.txt` — removes Broadcom firmware voltage/temperature timing
   jitter. Cheap, keep it.
 - **Real-time scheduling** — `brain.service` sets `CPUSchedulingPolicy=fifo` /
@@ -96,8 +93,15 @@ essential, two insurance:
 
 ### Clock
 
-The Pi has **no NTP/RTC** and its clock drifts. `deploy.sh` pushes the Mac's UTC time to the
-Pi before each rsync so cargo's mtime freshness check stays sane.
+The Pi has **no RTC**, so it relies on `systemd-timesyncd` against the Debian NTP pool once
+the network is up. Check with `timedatectl` (`System clock synchronized: yes`) or
+`timedatectl timesync-status` for the server and offset.
+
+This matters to deploys: cargo decides freshness by mtime, so a Pi clock lagging the Mac
+would make every rsynced source look newer than every build artifact and rebuild the world.
+`deploy.sh` used to push the Mac's time across to force agreement; that is gone now the Pi
+keeps its own. Note there is still a window after each boot — before timesyncd reaches a
+server — where the clock comes from `fake-hwclock` and is stale.
 
 ## Zihatec HAT — DIP switches (manual DE/RE via GPIO18)
 
@@ -117,23 +121,9 @@ Pi before each rsync so cargo's mtime freshness check stays sane.
 | B | data− | pin 2 |
 | Shield | gnd/shield | pin 1 |
 
-HAT output pigtail is **female**; the Space-4's DMX **input is 3-pin male** (JB reversed the
-usual gender), output female. A standard male↔female DMX lead mates: male → HAT, female →
-laser input. Put a **male 120 Ω terminator** in the laser's female DMX **OUT** (last device on
-the bus).
-
-## JB Systems Space-4 laser
-
-- **Address `025`, 8-channel mode**, filling slots 25–32. Slots 1–24 are unused.
-- Set on the front panel: FUNC until `1Ch`/`8Ch` → UP/DOWN to `8Ch` → ENTER → FUNC (address
-  blinks) → UP/DOWN to `025` → ENTER.
-- Fit the **interlock plug** (or spare shorting connector) and turn the **key** on, or there
-  is no laser output.
-- **Distrust the manual's DMX value thresholds** — sibling JB lasers misdocument them
-  (Beglec's own support corrected the Lounge Laser manual by email, telling users to keep
-  channels in a "5–127" active band and out of a 0–4 dead zone). `brain` accordingly drives
-  CH1 to `255` (top of the DMX-mode band) and keeps CH7/CH8 positioning in `5–122`. Channel
-  map and sweep live in `brain/src/config.rs` + `brain/src/laser.rs`. See `LASER.md`.
+HAT output pigtail is **female**. Check each fixture's connector gender before assuming a
+lead will mate — some makers reverse the usual convention. Put a **120 Ω terminator** in the
+DMX **OUT** of the last device on the bus.
 
 ## systemd
 
@@ -170,5 +160,6 @@ and the channel-count assertions at the fill sites stop the build too.
 
 # Datasheets
 
-In the repo root: `Datasheet RS485 HAT Rev D.pdf`, `Application Note DMX512 Rev D.pdf`,
-`JB-Systems-Space-4-Laser.pdf`.
+In `reference/`, each with a `.txt` conversion alongside it: `Datasheet RS485 HAT Rev D`,
+`Application Note DMX512 Rev D`, `Manual-CLF-Yara-1.0`, `vdplps36b2vdplps36c2gbnlfresd`
+(the HQ Power pinspot).

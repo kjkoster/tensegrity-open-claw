@@ -18,26 +18,6 @@ pub const SACN_RELEASE_FRAMES: u8 = 3;
 // Fixture addressing is not here: it is generated from the QLC+ workspace into `patch.rs`,
 // which is the single source of truth for what is patched where (`DMX_SLOTS` included).
 
-// ── JB Systems Space-4 laser (wired; LASER.md) ───────────────────────────────
-// CH1 must be ≥192 to unlock DMX control of CH2–CH8; below that
-// the laser ignores them and free-runs its internal auto/sound show. The diagonal is drawn
-// purely by sweeping CH7/CH8 (absolute X/Y position) in lockstep — no pattern rotation.
-// Sibling JB lasers misdocument their DMX map (Beglec confirmed the Lounge Laser manual was
-// wrong and channels must stay in a "5–127" active band), so distrust the printed thresholds:
-// drive CH1 to the very top of the documented DMX-mode band, and keep every other channel out
-// of the 0–4 dead zone the firmware appears to ignore.
-#[allow(dead_code)] // TEMP: CH1 is swept by the mode-sweep diagnostic in laser.rs
-pub const LASER_DMX_MODE: u8 = 255; // CH1: top of the 192–255 DMX-mode band
-pub const LASER_PATTERN: u8 = 250; // CH2: selects the 246–255 pattern; only picks what CH7/CH8 move
-pub const LASER_ZOOM: u8 = 5; // CH3: low end of 0–127 (≈full size), held in the active band
-pub const LASER_SWEEP_PERIOD_S: f64 = 4.0; // one up-and-back diagonal traversal
-pub const LASER_MODE_SWEEP_PERIOD_S: f64 = 30.0; // TEMP diagnostic: sweep CH1 across 0..255 in ~30 s
-// TEMP experiment: MIN == MAX freezes CH7/CH8 at one position, to test whether the laser
-// honours DMX position at all (beam sits still ⇒ honoured; keeps animating ⇒ its own show).
-// Restore 5 / 122 afterward.
-pub const LASER_POS_MIN: u8 = 60;
-pub const LASER_POS_MAX: u8 = 60;
-
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe
 // mirrors the wireless one — one universe, two transports. Framing (BREAK/MAB timing,

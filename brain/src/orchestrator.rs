@@ -1,12 +1,11 @@
 //! Orchestrator stage (SPARKLE.md §0.3, §6): the per-frame DMX loop. Reads the latest
-//! `AudioFeatures`, runs the sparkle mapping for the pinspot and a `LaserMapping` for the
-//! laser, fills the slot array, and emits one sACN packet at the frame rate. The three Yara
-//! pars are pinned to hard R/G/B primaries for bring-up (see fill_yara).
+//! `AudioFeatures`, runs the sparkle mapping for the pinspot, fills the slot array, and
+//! emits one sACN packet at the frame rate. The three Yara pars are pinned to hard R/G/B
+//! primaries for bring-up (see fill_yara).
 
 use crate::audio_features::AudioFeatures;
 use crate::config as cfg;
 use crate::dmx;
-use crate::laser::{LaserMapping, LaserOut};
 use crate::latest::LatestRx;
 use crate::patch;
 use crate::qlc_plus::{Rgb, White};
@@ -17,8 +16,6 @@ use zihatec_rs_485_dmx::{DmxHat, DmxTiming};
 
 #[embassy_executor::task]
 pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<AudioFeatures>) -> ! {
-    let mut laser_map = LaserMapping::default();
-
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
     // onsets, with its own slow white-mode gate. One instance per fixture, so several
     // fixtures sparkle independently rather than in lock-step (SPARKLE.md §6).
@@ -56,7 +53,6 @@ pub async fn noise_task(socket: UdpSocket, cid: [u8; 16], features: LatestRx<Aud
         patch::PINSPOT.effect.set(&mut slots, 0);
         patch::PINSPOT.speed.set(&mut slots, 0);
 
-        fill_laser(&mut slots, &laser_map.frame(dt));
         fill_yara(&mut slots, &patch::YARA_1, [255, 0, 0]); // red
         fill_yara(&mut slots, &patch::YARA_2, [0, 255, 0]); // green
         fill_yara(&mut slots, &patch::YARA_3, [0, 0, 255]); // blue
@@ -102,14 +98,6 @@ fn fill_sparkle<F: Rgb>(slots: &mut [u8], fixture: &F, out: &SparkleOut) {
     fixture.red().set_unit(slots, r * level);
     fixture.green().set_unit(slots, g * level);
     fixture.blue().set_unit(slots, b * level);
-}
-
-/// Fill the laser's channels from its CH1..CH8 values. The laser's map is positional — it
-/// has no colour to name — so this walks the mode's channels in order.
-fn fill_laser(slots: &mut [u8], out: &LaserOut) {
-    for (channel, &value) in patch::LASER.all().iter().zip(out.channels.iter()) {
-        channel.set(slots, value);
-    }
 }
 
 /// Pin one Yara par to a hard primary for bring-up. Needs both colour and a white emitter,

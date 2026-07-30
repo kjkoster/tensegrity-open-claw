@@ -23,10 +23,10 @@ The Pi acts as a WiFi access point and is reachable from a development laptop ov
     └─────────────────────────────────────────────────┘
                                   │ wired DMX
                           ┌───────┴────────┐
-                     ┌────┴─────┐    ┌─────┴──────┐
-                     │  Laser   │    │ 3× Yara    │
-                     │  @25     │    │ @100/107/113│
-                     └──────────┘    └────────────┘
+                     ┌────┴─────┐    ┌─────┴───────┐
+                     │ Pinspot  │    │ 3× Yara     │
+                     │ @1       │    │ @100/107/113│
+                     └──────────┘    └─────────────┘
 ```
 
 ### 1.1 DMX layout
@@ -36,14 +36,14 @@ One universe, all of it wired.
 | Slots | Fixture | Mode | Channels |
 |------:|---------|------|----------|
 | 1–5 | HQ Power VDPLPS36B2 pinspot | 5-channel | Effect, Red, Green, Blue, Speed |
-| 25–32 | JB Systems Space-4 laser | 8-channel | Mode, Pattern, Zoom, Y/X/Z roll, X/Y move |
 | 100–103 | Yara 1 | 4-channel | Red, Green, Blue, White |
 | 107–110 | Yara 2 | 4-channel | Red, Green, Blue, White |
 | 113–116 | Yara 3 | 4-channel | Red, Green, Blue, White |
 
 The frame spans slots 1–116 (`DMX_SLOTS`); every slot outside a fixture's block stays zero.
-The wired frame is padded to a full 512-slot universe — a short frame makes the laser ignore
-the data and free-run its own show (see §3.5 and README).
+The wired frame is padded to a full 512-slot universe: a short frame is a known way to lose
+cheap DMX receivers, which fall back to their own internal show while still reporting a
+healthy signal.
 
 **None of this addressing is written in Rust.** The QLC+ workspace (`open-claw.qxw`) is the
 source of truth for *where* fixtures sit, and the `.qxf` definitions committed in
@@ -75,10 +75,10 @@ For bring-up they are pinned to hard primaries (red, green, blue) so the three a
 distinguishable and their addressing is verifiable.
 
 **Pending:** the generative engine in `brain/src/sparkle.rs` — silence breathing, music
-glints, colour drift — currently has no consumer, because the fixtures it drove have been
-removed. It is retained to be repointed at the Yaras, one mapping instance per par with its
-own seed group. The Yara is RGBW, so the colour side maps across unchanged; the engine's gobo
-output has no counterpart and is dropped.
+glints, colour drift — currently drives only the pinspot. The Yaras should get it too, one
+mapping instance per par with its own seed group, so the three sparkle independently rather
+than in lock-step. They are RGBW, so the colour side maps across unchanged; the engine's
+gobo output has no counterpart here and is dropped.
 
 ---
 
@@ -510,7 +510,7 @@ break included** — no per-byte direction flipping.
       Serial Port: login shell off"). Do *not* try to assert `init_uart_clock` (not exposed on a
       stable path, and 250000 divides cleanly from the default clock anyway) or the S1 DIP / K3
       jumper (hardware, unreadable from software).
-- [ ] Move the laser and the three Yaras into the patch table (universe 1) so the
+- [ ] Move the pinspot and the three Yaras into the patch table (universe 1) so the
       existing rig is just the first patch entries — no behavioural change for Build 1.
 
 #### Validation

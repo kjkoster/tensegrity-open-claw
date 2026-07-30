@@ -30,16 +30,6 @@
    <Channels>5</Channels>
   </Fixture>
   <Fixture>
-   <Manufacturer>JB Systems</Manufacturer>
-   <Model>Space-4 Laser</Model>
-   <Mode>8 Channel</Mode>
-   <ID>4</ID>
-   <Name>Laser</Name>
-   <Universe>0</Universe>
-   <Address>24</Address>
-   <Channels>8</Channels>
-  </Fixture>
-  <Fixture>
    <Manufacturer>CLF</Manufacturer>
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
