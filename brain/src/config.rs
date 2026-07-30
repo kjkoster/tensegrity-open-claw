@@ -4,11 +4,12 @@
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
 pub const UNIVERSE: u16 = 1;
 pub const SACN_PORT: u16 = 5568;
-// Full wire rate. The BLE-bridged fixtures cannot absorb this many changes/s, but that
-// is now handled where the constraint lives: each ponytail's filter stage resamples the
-// wire down to its own BLE update rate for the bridge alone, so the wire and every
-// fast consumer run full-rate here.
-pub const FRAME_RATE_HZ: u64 = 44;
+// Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
+// The BLE-bridged fixtures cannot absorb this many changes/s, but that is handled where
+// the constraint lives: each ponytail's filter stage resamples the wire down to its own
+// BLE update rate for the bridge alone, so the wire and every fast consumer run
+// full-rate here.
+pub const FRAME_RATE_HZ: u64 = 40;
 
 // E1.31 source priority. The brain holds the default 100; a manual console (QLC+)
 // overrides by sending the same universe at a strictly higher value.
@@ -18,12 +19,14 @@ pub const SACN_PRIORITY: u8 = 100;
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
-// Each Ponytail is a contiguous block of channels: Intensity, R, G, B, White, Gobo.
-pub const CHANNELS_PER_FIXTURE: usize = 6;
-// Fixture blocks lie end to end from slot 1 (A@1, B@7, C@13, D@19), then the wired laser's
-// block. Bump the relevant constant when a fixture is added.
-pub const FIXTURE_COUNT: usize = 4;
-pub const DMX_SLOTS: usize = FIXTURE_COUNT * CHANNELS_PER_FIXTURE + LASER_CHANNELS;
+// The head of the universe is four contiguous 6-channel Ponytails (Intensity, R, G, B, White,
+// Gobo) from slot 1 (A@1, B@7, C@13, D@19), then the wired laser's block (25–32).
+// The sACN frame runs from slot 1 through the last live slot. The Ponytail block (slots 1–24)
+// and the laser (25–32) sit at the head, but the three Yara pars are patched far up the
+// universe (see YARA_ADDRESSES), so the frame must reach the last Yara slot — the slots in
+// between stay zero. Derived from the top Yara address so it tracks the patch automatically.
+pub const DMX_SLOTS: usize =
+    YARA_ADDRESSES[YARA_ADDRESSES.len() - 1] as usize - 1 + YARA_CHANNELS;
 
 // ── JB Systems Space-4 laser (wired; LASER.md) ───────────────────────────────
 // Patched into the same universe after the Ponytail block: 8-channel mode at address 25,
@@ -48,21 +51,23 @@ pub const LASER_MODE_SWEEP_PERIOD_S: f64 = 30.0; // TEMP diagnostic: sweep CH1 a
 pub const LASER_POS_MIN: u8 = 60;
 pub const LASER_POS_MAX: u8 = 60;
 
+// ── CLF-Lighting Yara LED pars (Manual-CLF-Yara-1.0.pdf) ──────────────────────
+// Three RGBW pars in 4-channel mode (R, G, B, White — no dimmer, so a full colour channel is
+// full output), patched high in the universe after the laser. For bring-up they are pinned to
+// hard primaries (red @100, green @107, blue @113) so the three are trivially distinguishable
+// and their DMX addressing is verifiable (see fill_yara in orchestrator.rs). Only R/G/B are
+// driven; White is held off.
+pub const YARA_CHANNELS: usize = 4;
+pub const YARA_ADDRESSES: [u16; 3] = [100, 107, 113];
+
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe
-// mirrors the wireless one — one universe, two transports. Always open the /dev/serial0
-// alias, never a bare ttyAMA*/ttyS0: it stays stable while USB serial adapters renumber
-// around it, and resolves to the PL011 once Bluetooth is disabled.
+// mirrors the wireless one — one universe, two transports. Framing (BREAK/MAB timing,
+// full-512 padding) lives in the zihatec-rs-485-dmx crate; only the device path is ours.
+// Always open the /dev/serial0 alias, never a bare ttyAMA*/ttyS0: it stays stable while
+// USB serial adapters renumber around it, and resolves to the PL011 once Bluetooth is
+// disabled.
 pub const SERIAL_DEVICE: &str = "/dev/serial0";
-// DMX frame delimiters: BREAK holds the line low, MAB (mark-after-break) high, then the
-// 0x00 start code and slots follow. These are spec minimums — slightly long is harmless,
-// so busy-spin jitter is tolerable.
-pub const DMX_BREAK_US: u64 = 92;
-pub const DMX_MAB_US: u64 = 12;
-// Pad the wired frame to a full DMX-512 universe. Our live data is only ~32 slots, but some
-// fixtures mis-decode an unusually short frame, so we clock the standard 512 (zeros past the
-// live slots). Wired-only — the sACN frame stays at DMX_SLOTS.
-pub const WIRED_FRAME_SLOTS: usize = 512;
 
 // ── Noise engine ─────────────────────────────────────────────────────────────
 pub const CONTRAST: f64 = 1.6;

@@ -3,7 +3,6 @@ mod capture;
 mod clock;
 mod config;
 mod dmx;
-mod dmx_hat;
 mod fixture;
 mod laser;
 mod latest;
