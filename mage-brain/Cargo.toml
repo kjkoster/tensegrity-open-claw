@@ -1,0 +1,11 @@
+[package]
+edition      = "2024"
+name         = "mage-brain"
+rust-version = "1.96"
+version      = "0.1.0"
+
+[build-dependencies]
+cortex-build = { path = "../cortex-build" }
+
+[dependencies]
+cortex = { path = "../cortex" }

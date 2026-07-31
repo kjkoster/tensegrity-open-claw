@@ -1,8 +1,8 @@
-//! The scenes programmed in the QLC+ workspace, resolved into DMX slots.
+//! The shape of a QLC+ scene, resolved into DMX slots.
 //!
-//! `build.rs` reads `open-claw.qxw` at build time and generates the `SCENES` table
-//! included below; everything else here is hand-written. Scenes are keyed by **name** —
-//! QLC+'s numeric Function IDs shift whenever functions are deleted and deliberately do
+//! The scenes themselves are per-rig: each rig's build script generates its own `SCENES`
+//! table from its own workspace, and only this type is shared. Scenes are keyed by **name**
+//! — QLC+'s numeric Function IDs shift whenever functions are deleted and deliberately do
 //! not cross into Rust.
 //!
 //! To change a scene: edit it in QLC+, save the workspace, deploy. The startup log names
@@ -23,10 +23,3 @@ pub struct Scene {
     /// the difference away.
     pub values: &'static [(u32, u8)],
 }
-
-include!(concat!(env!("OUT_DIR"), "/scenes.rs"));
-
-// A scene reaching past the end of the frame the daemon actually sends would be silently
-// truncated on the wire. This is the one place the QLC+ patch and the daemon's own
-// addressing are cross-checked against each other, and the compiler does it for free.
-const _: () = assert!(HIGHEST_SLOT < crate::patch::DMX_SLOTS);

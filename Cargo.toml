@@ -1,0 +1,3 @@
+[workspace]
+members  = ["claw-brain", "cortex", "cortex-build", "mage-brain"]
+resolver = "3"

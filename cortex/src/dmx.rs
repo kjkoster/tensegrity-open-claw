@@ -77,8 +77,18 @@ pub fn encode(
 /// fixtures release the brain's source at once. The slot width matches the live stream so
 /// every fixture — including the highest-addressed — finds its slots and honours the flag;
 /// only the flag matters, not the contents.
-pub fn encode_release(universe: u16, sequence: u8, priority: u8, cid: &[u8; 16]) -> Vec<u8> {
-    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &[0u8; crate::patch::DMX_SLOTS])
+///
+/// The width comes from the rig rather than a constant: each rig's patch spans its own
+/// number of slots, and this crate is compiled once for both.
+pub fn encode_release(
+    universe: u16,
+    sequence: u8,
+    priority: u8,
+    cid: &[u8; 16],
+    dmx_slots: usize,
+) -> Vec<u8> {
+    const ZEROS: [u8; zihatec_rs_485_dmx::SLOTS] = [0u8; zihatec_rs_485_dmx::SLOTS];
+    encode(universe, sequence, priority, STREAM_TERMINATED, cid, &ZEROS[..dmx_slots])
 }
 
 /// The sACN multicast group address for the given universe.

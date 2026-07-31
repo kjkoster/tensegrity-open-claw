@@ -1,4 +1,9 @@
-//! Ingests the scenes from the QLC+ workspace at build time.
+//! Ingests the patch and the scenes from a QLC+ workspace at build time.
+//!
+//! One rig, one workspace: each rig crate's build script calls [`ingest`] with its own
+//! `.qxw`, and the fixtures it names are generated inside that rig's crate. A rig can
+//! therefore only reach the fixtures it patched — the other rig's constants do not exist
+//! in its address space to reach for.
 //!
 //! QLC+ stores scene values **fixture-relative**:
 //!
@@ -37,8 +42,8 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The daemon sends exactly one universe (`config::UNIVERSE`). In the workspace that is
-/// the universe at 0-based index 0.
+/// The daemon sends exactly one universe (`cortex::config::UNIVERSE`). In the workspace that
+/// is the universe at 0-based index 0.
 const WORKSPACE_UNIVERSE_INDEX: u32 = 0;
 
 /// Slots in a DMX-512 universe. Spelled out rather than borrowed from the crate that
@@ -91,16 +96,20 @@ impl Patched {
     }
 }
 
-fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let workspace = manifest_dir.join("..").join("open-claw.qxw");
+/// Generates `patch.rs` and `scenes.rs` into `OUT_DIR` from one QLC+ workspace.
+///
+/// The fixture definitions are taken from the `fixtures/` directory beside the workspace,
+/// which is one directory for every rig: a CLF Yara definition is the same object whichever
+/// sculpture it hangs on. Each rig reads every definition and resolves only what its own
+/// patch names.
+pub fn ingest(workspace: &Path) {
     println!("cargo:rerun-if-changed={}", workspace.display());
 
-    let xml = fs::read_to_string(&workspace).unwrap_or_else(|e| {
+    let xml = fs::read_to_string(workspace).unwrap_or_else(|e| {
         panic!(
             "cannot read the QLC+ workspace at {}: {e}\n\
-             The daemon's scenes come from that file. deploy.sh rsyncs it to the Pi \
-             beside brain/; if you are building by hand, make sure it is there.",
+             The rig's patch and scenes come from that file. deploy.sh rsyncs the whole \
+             repository to the Pi; if you are building by hand, make sure it is there.",
             workspace.display()
         )
     });
@@ -131,14 +140,57 @@ fn main() {
 
     // The workspace names a definition; the definition says what the channels mean. Both
     // are needed before a fixture can be given typed channels, so this runs before render.
-    let fixtures_dir = manifest_dir.join("..").join("fixtures");
+    let fixtures_dir = workspace
+        .parent()
+        .unwrap_or_else(|| panic!("{} has no parent directory", workspace.display()))
+        .join("fixtures");
     println!("cargo:rerun-if-changed={}", fixtures_dir.display());
     resolve_definitions(&mut patch, &fixtures_dir);
     assign_type_names(&mut patch);
 
+    // The generated file names the workspace it came from, so a stray copy found on its own
+    // still says which rig it belongs to.
+    let source = workspace
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| panic!("{} has no file name", workspace.display()));
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    fs::write(out_dir.join("patch.rs"), render_patch(&patch)).unwrap();
-    fs::write(out_dir.join("scenes.rs"), render_scenes(&scenes)).unwrap();
+    fs::write(out_dir.join("rig.rs"), render_rig(&patch, &scenes, source)).unwrap();
+}
+
+/// Renders the whole of a rig's generated half: both modules and the check between them.
+///
+/// One file rather than two, included at the rig crate's root, because the two halves are
+/// cross-checked against each other and that check is generated from numbers only this
+/// function has. Splitting them would put the assertion in a hand-written file, where it is
+/// a line each rig has to remember to copy.
+fn render_rig(
+    patch: &BTreeMap<u32, Patched>,
+    scenes: &[(String, Vec<(u32, u8)>)],
+    source: &str,
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "// Generated from {source}. Do not edit.").unwrap();
+    writeln!(out).unwrap();
+    write_module(&mut out, "patch", &render_patch(patch));
+    write_module(&mut out, "scenes", &render_scenes(scenes));
+    out
+}
+
+/// Wraps a rendered body in `pub mod <name> { … }`, indenting it so the generated file still
+/// reads like Rust when someone opens it under `target/`.
+fn write_module(out: &mut String, name: &str, body: &str) {
+    writeln!(out, "pub mod {name} {{").unwrap();
+    for line in body.lines() {
+        if line.is_empty() {
+            writeln!(out).unwrap();
+        } else {
+            writeln!(out, "    {line}").unwrap();
+        }
+    }
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
 }
 
 /// Loads every `.qxf` in `dir`, keyed by manufacturer and model.
@@ -527,6 +579,16 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
                  not something to fold in silently."
             );
         }
+        if channels == 0 {
+            // Nothing downstream expects an empty fixture: the daemon's slot span is derived
+            // from the channels a fixture occupies, and one occupying none is a patch entry
+            // for a fixture that cannot be driven. The mode-vs-count check further down
+            // cannot catch it either, because zero equals zero.
+            panic!(
+                "fixture {id} {name:?} is patched with zero channels. Re-pick its mode in \
+                 QLC+'s Fixture Manager."
+            );
+        }
         if address + channels > UNIVERSE_SLOTS {
             panic!(
                 "fixture {id} {name:?} spans wire slots {}..{}, past the end of the universe",
@@ -719,18 +781,24 @@ fn is_snake_case(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Renders the fixture table included by `src/patch.rs`: one named constant per fixture in
-/// the QLC+ patch, plus the width of the frame they span.
+/// Renders the fixture table: one named constant per fixture in the QLC+ patch, a struct per
+/// fixture *type* with a named field per channel, and the width of the frame they span.
 ///
 /// Naming each fixture is what makes the workspace the source of truth, because it hands
-/// both directions of drift to the compiler. A fixture added in QLC+ that no code drives is
-/// an unused constant — a dead-code warning. A fixture deleted in QLC+ that code still
-/// drives is a missing constant — the use site stops compiling. Neither needs a checker.
+/// every direction of drift to the compiler:
+///
+///   * Patch a **new** fixture in QLC+ that no code drives → its constant is unused, and the
+///     build warns about dead code.
+///   * Delete or rename a fixture that code drives → its constant is gone, and every use site
+///     stops compiling.
+///   * Repatch a fixture into a mode without a channel the code writes → the field is gone,
+///     or the capability trait is no longer implemented, and again the use site fails.
+///
+/// That last one is why channels are typed rather than numbered. `PINSPOT.red` names the red
+/// emitter because the definition says that channel of that mode is `IntensityRed`; there is
+/// no offset in the source to get wrong, and a fixture with no red simply has no `red`.
 fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
     let mut out = String::new();
-
-    writeln!(out, "// Generated by build.rs from open-claw.qxw. Do not edit.").unwrap();
-    writeln!(out).unwrap();
 
     let mut fixtures: Vec<&Patched> = patch.values().collect();
     fixtures.sort_by_key(|fixture| fixture.address);
@@ -754,7 +822,7 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         imports.push("Dimmer");
     }
     imports.sort_unstable();
-    writeln!(out, "use crate::qlc_plus::{{{}}};", imports.join(", ")).unwrap();
+    writeln!(out, "use cortex::qlc_plus::{{{}}};", imports.join(", ")).unwrap();
     writeln!(out).unwrap();
 
     // One struct per fixture *type*, shared by every instance of it: three Yaras patched
@@ -863,10 +931,13 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
 
     // The same patch as plain data, so the daemon can log what it was built against
     // without a hand-maintained list of fixture names going stale beside it.
+    // A static rather than a const: the rig hands this table to the frame loop as a
+    // `&'static [PatchEntry]`, and a static has that lifetime outright instead of leaning on
+    // a promotion rule.
     writeln!(out, "/// Every patched fixture, in address order.").unwrap();
     writeln!(
         out,
-        "pub const PATCH: [PatchEntry; {}] = [",
+        "pub static PATCH: [PatchEntry; {}] = [",
         fixtures.len()
     )
     .unwrap();
@@ -904,18 +975,23 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         .map(|fixture| fixture.address + fixture.channels)
         .max()
         .unwrap_or(0);
+    // The daemon derives the frame width from the channels the fixtures occupy, so this is
+    // not what it sends; it exists for the scene bound below, where a compile-time number is
+    // the only thing an assertion can be written against.
     writeln!(out, "/// Slots the sACN frame spans: 1 through the last patched slot.").unwrap();
     writeln!(out, "pub const DMX_SLOTS: usize = {top};").unwrap();
 
     out
 }
 
-/// Renders the table included by `src/scenes.rs`. Only the data lives here; the `Scene`
-/// type and everything that reads it stay hand-written and reviewable.
+/// Renders the scene table, and the one check that spans both halves of a rig.
+///
+/// Only the data is generated; the `Scene` type and everything that reads it stay
+/// hand-written and reviewable in `cortex`.
 fn render_scenes(scenes: &[(String, Vec<(u32, u8)>)]) -> String {
     let mut out = String::new();
 
-    writeln!(out, "// Generated by build.rs from open-claw.qxw. Do not edit.").unwrap();
+    writeln!(out, "use cortex::scenes::Scene;").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "pub static SCENES: [Scene; {}] = [", scenes.len()).unwrap();
     for (name, values) in scenes {
@@ -947,6 +1023,12 @@ fn render_scenes(scenes: &[(String, Vec<(u32, u8)>)]) -> String {
         .unwrap_or(0);
     writeln!(out, "/// Highest slot index any scene above touches.").unwrap();
     writeln!(out, "const HIGHEST_SLOT: usize = {highest};").unwrap();
+    writeln!(out).unwrap();
+
+    // A scene reaching past the end of the frame the daemon sends would be silently truncated
+    // on the wire. This is the one place a rig's patch and its scenes are checked against each
+    // other, and the compiler does it for free.
+    writeln!(out, "const _: () = assert!(HIGHEST_SLOT < super::patch::DMX_SLOTS);").unwrap();
 
     out
 }

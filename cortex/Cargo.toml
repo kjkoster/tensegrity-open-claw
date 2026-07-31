@@ -1,0 +1,19 @@
+[package]
+edition      = "2024"
+name         = "cortex"
+rust-version = "1.96"
+version      = "0.1.0"
+
+# Everything both rigs use: audio capture and features, the noise fields, the sACN transports,
+# the frame loop. Code lives here until something proves it must move — the value of two rigs
+# on one cabinet is almost entirely in what they hold in common, and a boundary drawn early is
+# drawn on guesses about two shows that barely exist yet.
+[dependencies]
+alsa = "0.11.0"
+arc-swap = "1.7"
+signal-hook = "0.3"
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
+embassy-time     = { version = "0.5.0",  features = ["std"] }
+rusb = "0.9.4"
+rustfft = "6.2"
+zihatec-rs-485-dmx = "0.1.0"

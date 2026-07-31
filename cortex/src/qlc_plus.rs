@@ -1,7 +1,7 @@
 //! A small model of QLC+'s fixture vocabulary — enough of it to describe the fixtures we
 //! patch, and no more.
 //!
-//! QLC+ splits a fixture across two files. The workspace (`open-claw.qxw`) says *what is
+//! QLC+ splits a fixture across two files. The workspace (`claw.qxw`) says *what is
 //! patched where*: manufacturer, model, mode, address. The fixture definition (`.qxf`) says
 //! *what the channels of that mode mean*: which one is red, which is a strobe, which is a
 //! colour wheel. Together they answer "slot 2 of this fixture is its green emitter", which

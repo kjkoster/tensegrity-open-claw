@@ -10,13 +10,19 @@ The system is two parts:
   RS-485 HAT as raw DMX-512, and over the network as E1.31 sACN. The wire is what drives the
   rig; the sACN copy is there for monitoring and for QLC+ to work against.
 - **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg,
-  plus a pinspot. What is patched where lives in `open-claw.qxw`, not in this file.
+  plus a pinspot. What is patched where lives in `claw.qxw`, not in this file.
+
+The cabinet drives **two rigs**, one at a time: the claw described above, and the mage rig —
+same Pi, same HAT, a camera instead of a microphone. Both binaries are always built and
+installed, and `/usr/local/bin/brain` is a symlink selecting which one runs; see
+[Selecting the rig](#selecting-the-rig). [`MAGE.md`](MAGE.md) is the mage rig's own reference.
 
 Deep dives. None of them describe what the code does today — that is what this file and the
 code itself are for:
 
 - [`DESIGN.md`](DESIGN.md) — the system's architectural decisions, and what is not built yet.
 - [`SHOW.md`](SHOW.md) — the show: moods, behaviours, and the pipeline that will drive them.
+- [`MAGE.md`](MAGE.md) — the second rig, and what the two share.
 - [`PET-THE-DOG.md`](PET-THE-DOG.md) — watchdog layering for unattended operation.
 - [`TODO.md`](TODO.md) — the empirical tests, and open items.
 
@@ -63,13 +69,13 @@ macOS.
 
 ## Attached hardware
 
-**Addresses and modes are deliberately not listed here.** `open-claw.qxw` is the source of
+**Addresses and modes are deliberately not listed here.** `claw.qxw` is the source of
 truth and it changes; read them out of QLC+ and set each fixture to match. What this table
 records is *how* you set them on each model, which does not change.
 
 | Device | Interface | Notes |
 |---|---|---|
-| Alesis io\|2 USB audio | USB (`plughw:CARD=io2,DEV=0`) | ALSA capture; confirm with `arecord -L`. VID:PID `0x13b2:0x0008`. Set in `brain/src/config.rs`. |
+| Alesis io\|2 USB audio | USB (`plughw:CARD=io2,DEV=0`) | ALSA capture; confirm with `arecord -L`. VID:PID `0x13b2:0x0008`. Set in `cortex/src/config.rs`. |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
 | 3× UKing ZQ-B243 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
@@ -156,6 +162,28 @@ DMX **OUT** of the last device on the bus.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
 - The 4G/WiFi bring-up units belong here too once documented.
 
+### Selecting the rig
+
+`/usr/local/bin/brain` is a **symlink** to `claw-brain` or `mage-brain`, and the unit execs
+through it. The symlink is the state — there is no second file to go stale. A deploy moves it
+only when you name a rig, and otherwise leaves it exactly as found:
+
+```
+./deploy.sh mage-brain          # from the Mac: deploy, select the mage rig, restart
+./deploy.sh                     # deploy and restart whatever is already live
+```
+
+On the Pi, by hand:
+
+```
+readlink /usr/local/bin/brain                            # which rig is live
+sudo ln -sfn /usr/local/bin/mage-brain /usr/local/bin/brain
+sudo systemctl restart brain
+```
+
+`journalctl -u brain` also says so on every line: the running rig prefixes its log with its own
+name.
+
 `brain.service` is the only unit `remote-deploy.sh` installs. The health daemon
 (`stem.service`), the local MQTT broker and the systemd watchdog settings are designed in
 [`SHOW.md`](SHOW.md) and [`PET-THE-DOG.md`](PET-THE-DOG.md) but **not built** — when they
@@ -168,27 +196,49 @@ on the Pi that is not in the repo at all; getting it versioned is an open item i
 From the Mac at the repo root:
 
 ```
-./deploy.sh
+./deploy.sh                 # build, install, restart the rig that is already selected
+./deploy.sh mage-brain      # … and point the symlink at the mage rig first
 ```
 
-Rsyncs `brain/` and `open-claw.qxw` to `claw-pi`, then runs `remote-deploy.sh` there, which
-builds `brain` natively, installs `/usr/local/bin/brain` + the systemd unit, and restarts the
-daemon.
+Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `remote-deploy.sh` there, which builds
+both rigs natively and installs `/usr/local/bin/claw-brain`, `/usr/local/bin/mage-brain` and
+the systemd unit. Naming a rig is the only thing that moves the symlink.
 
-The workspace goes with the sources because the build compiles **both the fixture patch and
-the scenes** in — so saving in QLC+ and deploying is all it takes to get an edited scene onto
-the rig.
+The cargo workspace is four crates:
+
+| | |
+|---|---|
+| `cortex/` | everything both rigs use: capture, features, noise, both transports, the frame loop |
+| `cortex-build/` | the QLC+ ingest, a build-dependency of both rigs |
+| `claw-brain/` | the claw: `claw.qxw`'s patch and the sparkle show |
+| `mage-brain/` | the mage rig: `mage.qxw`'s patch and its show |
+
+A rig crate is two files: a `build.rs` naming its workspace, and a `main.rs` that includes the
+generated patch and writes the show.
+
+The deploy ships **only what the Pi builds from** — the four crates, both `.qxw` workspaces,
+`fixtures/`, `brain.service` and `remote-deploy.sh`. The list is written out in `deploy.sh`
+rather than filtered by exclusions, so adding something is a decision; the design documents,
+the reference PDFs and the git history stay on the Mac. Both workspaces go because each rig's
+build compiles **its fixture patch and its scenes** in — so saving in QLC+ and deploying is
+all it takes to get an edited scene onto the rig.
+
+> The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
+> hand — the deploy leaves it alone rather than removing things on the Pi on its own.
 
 ### What the build does with the workspace
 
-`brain/build.rs` — *Scene* — ingests `open-claw.qxw` at build time. Worth understanding,
-because it is why saving in QLC+ is the whole workflow, and because every way it can go wrong
-is a failed build with a message rather than a wrong-looking rig.
+`cortex-build` — *Scene* — ingests a rig's `.qxw` at build time, called from that rig's
+`build.rs`. Worth understanding, because it is why saving in QLC+ is the whole workflow, and
+because every way it can go wrong is a failed build with a message rather than a wrong-looking
+rig.
 
 **What it reads.** Two sources of truth, neither of them Rust. The workspace says *where*
 fixtures sit; the `.qxf` definitions in `fixtures/` say *what their channels mean*. Scene
 reads both, resolves each patched fixture against its definition's mode, and generates a
-struct per fixture into `patch.rs` — a named field per channel, `DMX_SLOTS` included.
+`patch` module with a struct per fixture — a named field per channel — plus a `scenes` module,
+into the rig crate that asked for them. `fixtures/` is one directory for both rigs; each build
+reads every definition and resolves only what its own patch names.
 
 **Why it happens at build time.** Ingesting rather than committing a generated file means
 there is no stale copy to go stale. `cargo` is told to watch the workspace, so saving in QLC+
@@ -233,11 +283,14 @@ outright, with a message naming the manufacturer and model.
 was built from:
 
 ```
-brain: 7 fixtures from open-claw.qxw
-brain:   pinspot @ 1–5 — HQ Power VDPLPS36B2 LED Pinspot PAR36, 5 Channel
-brain: 1 scenes from open-claw.qxw
-brain:   front_wash_warm (18 values)
+claw-brain: 7 fixtures
+claw-brain:   pinspot @ 1–5 — HQ Power VDPLPS36B2 LED Pinspot PAR36, 5 Channel
+claw-brain: 1 scenes
+claw-brain:   front_wash_warm (18 values)
 ```
+
+The prefix is the rig, which is also how you confirm the symlink points where you think — and
+the rig is what says which workspace this came from, since a rig has exactly one.
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
@@ -249,10 +302,11 @@ running binary actually believes.
 QLC+ does two jobs here and nothing else: taking the rig over by hand, and programming
 scenes. It is stock — no plugins, no patches.
 
-The master workspace is [`open-claw.qxw`](open-claw.qxw), and it is the **source of truth**
-for what is patched where. `brain/build.rs` reads it at build time along with the `.qxf`
-definitions in `fixtures/`, so a change in QLC+ reaches the rig by saving and deploying —
-there is no second copy of the patch in the Rust sources to keep in step.
+There is one workspace per rig — [`claw.qxw`](claw.qxw) and [`mage.qxw`](mage.qxw) —
+and each is the **source of truth** for what that rig has patched where. `cortex-build` reads
+it at build time along with the `.qxf` definitions in `fixtures/`, so a change in QLC+ reaches
+the rig by saving and deploying — there is no second copy of the patch in the Rust sources to
+keep in step.
 
 ## Installing the fixture definitions (once, and after any change to `fixtures/`)
 
@@ -323,8 +377,8 @@ with a live universe cannot seize the rig by accident.
 6. `./deploy.sh`, then check the startup log names your scene:
 
    ```
-   brain: 1 scenes from open-claw.qxw
-   brain:   front_wash_warm (18 values)
+   claw-brain: 1 scenes
+   claw-brain:   front_wash_warm (18 values)
    ```
 
    That line is the confirmation the build ingested the save. Scenes have no runtime role

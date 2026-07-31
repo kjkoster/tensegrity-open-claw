@@ -1,8 +1,10 @@
 [Unit]
-Description=Tensegrity Open Claw Brain Daemon
+Description=Tensegrity Brain Daemon
 After=network.target
 
 [Service]
+# Through the symlink, never at a rig binary directly: /usr/local/bin/brain points at
+# claw-brain or mage-brain, and moving it is the whole of switching rigs.
 ExecStart=/usr/local/bin/brain
 Restart=always
 RestartSec=5

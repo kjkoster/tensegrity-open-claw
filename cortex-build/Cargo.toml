@@ -1,0 +1,16 @@
+[package]
+edition      = "2024"
+name         = "cortex-build"
+rust-version = "1.96"
+version      = "0.1.0"
+
+# The QLC+ ingest. Its own crate rather than a module of cortex because a build script may
+# use only its build-dependencies: this needs an XML reader and nothing else, and putting
+# ALSA, the executor and an FFT onto the host build graph to read a patch file would be a
+# poor trade.
+#
+# roxmltree is a read-only DOM with no dependencies of its own, and it reports local tag
+# names with the namespace already stripped — which is what keeps QLC+'s default XML
+# namespace from silently matching nothing.
+[dependencies]
+roxmltree = "0.21"

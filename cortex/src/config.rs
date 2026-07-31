@@ -1,5 +1,11 @@
-//! All tunables in one place, grouped by the section numbers of SOUND.md.
-//! The festival tuning loop is "edit numbers, rebuild, restart".
+//! All tunables in one place. The festival tuning loop is "edit numbers, rebuild, restart".
+//!
+//! One file for both rigs, because these describe the *cabinet* rather than the sculpture
+//! hanging off it: the same Pi, the same RS-485 HAT, the same audio interface, the same
+//! serial device, the same WireGuard address a console arrives on. `UNIVERSE` stays here for
+//! the same reason — only one rig runs at a time and both clock the one wire — and two
+//! constants that could disagree about which universe the HAT sends would be a worse failure
+//! than the sharing it avoids.
 
 use std::net::Ipv4Addr;
 
@@ -50,8 +56,8 @@ pub const SACN_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 8, 0, 3);
 // breathing on the internal engine meanwhile.
 pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
-// Fixture addressing is not here: it is generated from the QLC+ workspace into `patch.rs`,
-// which is the single source of truth for what is patched where (`DMX_SLOTS` included).
+// Fixture addressing is not here: it is generated from each rig's QLC+ workspace into that
+// rig's own `patch` module, the single source of truth for what is patched where.
 
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe
