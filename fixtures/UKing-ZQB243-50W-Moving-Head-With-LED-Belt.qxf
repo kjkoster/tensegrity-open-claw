@@ -15,12 +15,26 @@
  <Channel Name="Tilt Fine" Preset="PositionTiltFine"/>
  <Channel Name="Color">
   <Group Byte="0">Colour</Group>
-  <Capability Min="0" Max="139">Color Selection</Capability>
+  <Capability Min="0" Max="9" Preset="ColorMacro" Res1="#ffffff">White</Capability>
+  <Capability Min="10" Max="19" Preset="ColorMacro" Res1="#ff0000">Red</Capability>
+  <Capability Min="20" Max="29" Preset="ColorMacro" Res1="#ffff00">Yellow</Capability>
+  <Capability Min="30" Max="39" Preset="ColorMacro" Res1="#0000ff">Blue</Capability>
+  <Capability Min="40" Max="49" Preset="ColorMacro" Res1="#00ff00">Green</Capability>
+  <Capability Min="50" Max="59" Preset="ColorMacro" Res1="#ff8000">Orange</Capability>
+  <Capability Min="60" Max="69" Preset="ColorMacro" Res1="#ff69b4">Pink</Capability>
+  <Capability Min="70" Max="79" Preset="ColorMacro" Res1="#87cefa">Light Blue</Capability>
+  <Capability Min="80" Max="89" Preset="ColorDoubleMacro" Res1="#ff69b4" Res2="#87cefa">Pink + Light Blue</Capability>
+  <Capability Min="90" Max="99" Preset="ColorDoubleMacro" Res1="#ff8000" Res2="#ff69b4">Orange + Pink</Capability>
+  <Capability Min="100" Max="109" Preset="ColorDoubleMacro" Res1="#00ff00" Res2="#ff8000">Green + Orange</Capability>
+  <Capability Min="110" Max="119" Preset="ColorDoubleMacro" Res1="#0000ff" Res2="#00ff00">Blue + Green</Capability>
+  <Capability Min="120" Max="129" Preset="ColorDoubleMacro" Res1="#ffff00" Res2="#0000ff">Yellow + Blue</Capability>
+  <Capability Min="130" Max="139" Preset="ColorDoubleMacro" Res1="#ff0000" Res2="#ffff00">Red + Yellow</Capability>
   <Capability Min="140" Max="255" Preset="SlowToFast">Automatic Color Change</Capability>
  </Channel>
  <Channel Name="Gobo">
   <Group Byte="0">Gobo</Group>
-  <Capability Min="0" Max="63">Fixed Gobo</Capability>
+  <Capability Min="0" Max="7">Open (White)</Capability>
+  <Capability Min="8" Max="63">Fixed Gobo</Capability>
   <Capability Min="64" Max="127">Shaking Gobo</Capability>
   <Capability Min="128" Max="255" Preset="SlowToFast">Automatic Change Pattern</Capability>
  </Channel>
@@ -40,12 +54,13 @@
  </Channel>
  <Channel Name="Reset">
   <Group Byte="0">Maintenance</Group>
-  <Capability Min="0" Max="234">No Function</Capability>
-  <Capability Min="235" Max="255">Reset</Capability>
+  <Capability Min="0" Max="249">No Function</Capability>
+  <Capability Min="250" Max="255">Reset (hold 5s)</Capability>
  </Channel>
  <Channel Name="Light Strips">
   <Group Byte="0">Colour</Group>
-  <Capability Min="0" Max="109">Color Selection</Capability>
+  <Capability Min="0" Max="4">Off</Capability>
+  <Capability Min="5" Max="109">Color Selection</Capability>
   <Capability Min="110" Max="255">Color Auto Operation</Capability>
  </Channel>
  <Channel Name="Motor Speed" Preset="SpeedPanTiltSlowFast"/>

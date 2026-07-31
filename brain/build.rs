@@ -573,6 +573,33 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
              daemon's scenes are resolved through it — so an empty one is never right."
         );
     }
+
+    // Overlapping fixtures are the one patch error the generated names cannot catch. Every
+    // constant is well-formed on its own, so the build stays clean and only the wire is
+    // wrong — two fixtures answering to the same slots, which reads as a broken fixture
+    // rather than a broken patch. It takes the whole patch to see, so it cannot live in the
+    // per-fixture loop above: the neighbour has not been parsed yet.
+    let mut spans: Vec<&Patched> = patch.values().collect();
+    spans.sort_by_key(|fixture| fixture.address);
+    for pair in spans.windows(2) {
+        let (first, second) = (pair[0], pair[1]);
+        let first_end = first.address + first.channels;
+        if first_end > second.address {
+            panic!(
+                "fixtures {:?} and {:?} overlap: {:?} spans wire slots {}..{} in {} mode, and \
+                 {:?} starts at {}. Re-address one of them in QLC+.",
+                first.name,
+                second.name,
+                first.name,
+                first.address + 1,
+                first_end,
+                first.mode,
+                second.name,
+                second.address + 1
+            );
+        }
+    }
+
     patch
 }
 
