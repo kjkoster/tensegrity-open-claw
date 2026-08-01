@@ -104,6 +104,34 @@ no drift checker because none is needed. What that catches, and how to read the 
 complaints when it does, is in [`README.md`](README.md) — it is part of the save-and-deploy
 workflow rather than a thing to know in advance.
 
+**The same rule runs past addressing into values.** A `.qxf` says a great deal more than
+which slot a channel occupies: which value opens the shutter, which end of a speed channel is
+the fast one, which capabilities of a colour wheel are single filters and which are split
+positions, how far the head pans. Every one of those is a fact about the fixture, and every
+one of them written into Rust is the same second copy this section exists to refuse — worse
+than an address, because a wrong address is at least wrong on every fixture equally, while a
+wrong speed polarity is wrong on one model and right on the next.
+
+So the ingest keeps growing to read more of the definition, and the code asks the patch
+rather than spelling a number out. Where the definition does not carry the fact yet — a gobo
+channel with one undivided "fixed gobo" band, a strobe channel with no capabilities at all —
+the fix is to measure it and put it in the `.qxf`, not to add a constant next to the code
+that wanted it. Each of those measurements is a [`TODO.md`](TODO.md) item, and landing one
+makes the code that reads it work on every fixture sharing the definition at once.
+
+There is one class of exception, and it is worth naming so it does not get used as an excuse.
+A `.qxf` describes what a fixture's channels *are* — ranges, bands, travel — and says nothing
+about how it *behaves*: the slowest speed at which a head still moves smoothly is a fact about
+that model, measured like any other, with no field in the format to hold it. Facts like that
+live in `cortex`, beside the code that enforces them, because the alternative is a per-rig
+copy of a number that describes neither rig. The test is whether the format could carry it: if
+it could, the definition gets fixed and this section applies unchanged.
+
+What stays written down is what is genuinely a choice: how fast we are willing to slew, how
+long a breath lasts, how long a turn runs. Those live with whoever is choosing — the rig's own
+crate for a rig's numbers, `cortex`'s `config.rs` for the cabinet's. What the fixture *is* is
+not a choice, and belongs to neither.
+
 ### 2.4 External takeover: strict priority, whole universe
 
 A console (QLC+ on the Mac) can take the universe live and hand it back, so a human can
@@ -176,9 +204,17 @@ the order they were written down, which is not the order they get built in — �
 
 ### 4.1 Drive the moving heads
 
-The heads are patched and the daemon does not touch them. Everything below assumes they
-move, so this comes first: pan/tilt written as 16-bit pairs, the safety channels pinned, and
-the signal-loss blackout confirmed on the fixtures themselves.
+The claw's heads are patched and its daemon does not touch them. Everything below assumes
+they move, so this comes first.
+
+What it takes is no longer a build of its own. The mage rig needed the same machinery sooner
+and it landed in `cortex`: pan and tilt as 16-bit pairs, travel and park values read from the
+definitions, a rate limiter in degrees per second with the floor these heads impose. So this
+is the claw's show reaching for what already exists, plus the parts that are the claw's
+alone — the aim points of §4.8, and the signal-loss blackout confirmed on the fixtures
+themselves.
+
+It still sits after §4.6, because the repatch moves every address the show would name.
 
 ### 4.2 The show pipeline
 
@@ -300,10 +336,10 @@ wider range runs the same code at a different apparent speed while still compili
 running. In degrees they transfer, which is what makes "a rental is a new driver and nothing
 above it changes" true rather than merely stated.
 
-The per-model range is not a hand-written constant either: `PanMax` and `TiltMax` sit in the
-committed `.qxf` beside the channel definitions, so §2.3 covers them unchanged once
-`build.rs` reads the `<Focus>` element — and `Type="Fixed"` is what generates a fixture with
-no position at all, the same way a fixture with no red channel gets no `red` field.
+The per-model range is not a hand-written constant either. `PanMax` and `TiltMax` sit in the
+committed `.qxf` beside the channel definitions, so §2.3 covers them unchanged — a fixture
+whose definition declares no travel gets no position at all, the same way one with no red
+channel gets no `red` field.
 
 ### 4.8 Named aim points
 

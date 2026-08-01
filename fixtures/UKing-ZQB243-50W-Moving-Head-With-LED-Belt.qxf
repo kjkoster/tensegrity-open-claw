@@ -38,11 +38,18 @@
   <Capability Min="64" Max="127">Shaking Gobo</Capability>
   <Capability Min="128" Max="255" Preset="SlowToFast">Automatic Change Pattern</Capability>
  </Channel>
- <Channel Name="Strobe" Preset="ShutterStrobeSlowFast"/>
+ <Channel Name="Strobe">
+  <Group Byte="0">Shutter</Group>
+  <!-- Measured on the rig: at 0 the shutter is open and the head holds steady. Nothing above
+       0 is declared, because nothing above 0 has been measured — the manual gives this
+       channel as a bare 0–255 with no breakdown, and a guessed band boundary here would read
+       as fact to everything downstream. The gap is the honest state, not an omission. -->
+  <Capability Min="0" Max="0" Preset="ShutterOpen">Shutter open</Capability>
+ </Channel>
  <Channel Name="Dimmer" Preset="IntensityMasterDimmer"/>
  <Channel Name="Automatic Mode">
   <Group Byte="0">Effect</Group>
-  <Capability Min="0" Max="59">Other channels function</Capability>
+  <Capability Min="0" Max="59" Preset="NoFunction">Other channels function</Capability>
   <Capability Min="60" Max="84">Automatic Mode 3</Capability>
   <Capability Min="85" Max="109">Automatic Mode 2</Capability>
   <Capability Min="110" Max="134">Automatic Mode 1</Capability>
@@ -54,7 +61,7 @@
  </Channel>
  <Channel Name="Reset">
   <Group Byte="0">Maintenance</Group>
-  <Capability Min="0" Max="249">No Function</Capability>
+  <Capability Min="0" Max="249" Preset="NoFunction">No Function</Capability>
   <Capability Min="250" Max="255">Reset (hold 5s)</Capability>
  </Channel>
  <Channel Name="Light Strips">
@@ -63,7 +70,11 @@
   <Capability Min="5" Max="109">Color Selection</Capability>
   <Capability Min="110" Max="255">Color Auto Operation</Capability>
  </Channel>
- <Channel Name="Motor Speed" Preset="SpeedPanTiltSlowFast"/>
+ <!-- Fast to slow, which is the opposite way round from most heads: 0 is the fastest the
+      motors will move and 255 the slowest. The definition shipped with this the wrong way
+      round, and a driver that parks the channel at 255 to mean "get out of my way" gets the
+      head's own slowest internal ramp fighting an interpolated position stream instead. -->
+ <Channel Name="Motor Speed" Preset="SpeedPanTiltFastSlow"/>
  <Mode Name="12 Channel">
   <Channel Number="0">Pan</Channel>
   <Channel Number="1">Pan Fine</Channel>

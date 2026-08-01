@@ -63,28 +63,97 @@ struct Patched {
     mode: String,
     address: u32,
     channels: u32,
-    /// The mode's channels, resolved against the fixture definition. Empty until
-    /// `resolve_definitions` fills it in.
+    /// The mode's channels, resolved against the fixture definition, in mode order. Empty
+    /// until `resolve_definitions` fills it in. This stays the wire's view of the fixture:
+    /// one entry per DMX slot it occupies, whatever the generated struct groups together.
     resolved: Vec<ResolvedChannel>,
+    /// The struct's fields, over the channels above. A fine channel has no field of its own
+    /// — it belongs to the coarse channel it extends.
+    fields: Vec<Field>,
+    /// How far the head moves, where the definition says it is a head at all.
+    focus: Option<Focus>,
 }
 
 /// One channel of a patched fixture's mode, resolved through its `.qxf`.
 struct ResolvedChannel {
     /// The channel's name in the definition, for doc comments.
     name: String,
-    /// The Rust field name it becomes: its preset's role, or the channel name.
-    field: String,
     /// Absolute 0-based slot.
     slot: u32,
+    /// The channel's `Preset` attribute, if it has one.
+    preset: Option<String>,
+    /// What the definition says the channel does, band by band.
+    capabilities: Vec<Capability>,
+}
+
+/// One field of the generated struct, over the channels it is made of.
+enum Field {
+    /// A channel that stands alone, at `resolved[index]`.
+    Single { index: usize, name: String },
+    /// A coarse channel and the fine channel extending it, as one 16-bit field.
+    Pair {
+        coarse: usize,
+        fine: usize,
+        name: String,
+    },
+}
+
+impl Field {
+    /// The index of the channel the field is named after, which carries its preset and its
+    /// capabilities.
+    fn head(&self) -> usize {
+        match self {
+            Field::Single { index, .. } => *index,
+            Field::Pair { coarse, .. } => *coarse,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Field::Single { name, .. } | Field::Pair { name, .. } => name,
+        }
+    }
+
+    fn set_name(&mut self, new: String) {
+        match self {
+            Field::Single { name, .. } | Field::Pair { name, .. } => *name = new,
+        }
+    }
+}
+
+/// One band of a channel's range, as the definition states it.
+#[derive(Clone)]
+struct Capability {
+    min: u8,
+    max: u8,
+    preset: Option<String>,
+    name: String,
+}
+
+/// A fixture's travel, from `<Physical><Focus>`. Only heads have one: `Type="Fixed"` (or a
+/// zero range, which is how QLC+ writes "not applicable") yields `None`, and a fixture with
+/// no focus generates no position at all — the same way one with no red channel gets no
+/// `red`.
+#[derive(Clone)]
+struct Focus {
+    pan_max_deg: f64,
+    tilt_max_deg: f64,
 }
 
 /// A parsed `.qxf`: what each named channel is, and which channels each mode uses.
 struct Definition {
     path: PathBuf,
-    /// Channel name → its `Preset` attribute, if it has one.
-    channels: BTreeMap<String, Option<String>>,
+    /// Channel name → what the definition says about it.
+    channels: BTreeMap<String, ChannelDef>,
     /// Mode name → its channel names, in `Number` order.
     modes: BTreeMap<String, Vec<String>>,
+    focus: Option<Focus>,
+}
+
+/// One `<Channel>` of a definition.
+struct ChannelDef {
+    preset: Option<String>,
+    capabilities: Vec<Capability>,
 }
 
 impl Patched {
@@ -242,7 +311,54 @@ fn load_definitions(dir: &Path) -> BTreeMap<(String, String), Definition> {
                 .unwrap_or_else(|| panic!("{}: a <Channel> has no Name", path.display()))
                 .trim()
                 .to_string();
-            channels.insert(name, channel.attribute("Preset").map(str::to_string));
+
+            // A channel either carries a Preset and no capabilities, or spells its bands
+            // out. Both forms say what the channel does; only the second says where.
+            let mut capabilities = Vec::new();
+            for capability in channel
+                .children()
+                .filter(|n| n.is_element() && n.tag_name().name() == "Capability")
+            {
+                let bound = |attribute: &str| -> u8 {
+                    capability
+                        .attribute(attribute)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "{}: a <Capability> of {name:?} has no {attribute}",
+                                path.display()
+                            )
+                        })
+                        .trim()
+                        .parse()
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "{}: {name:?} has a <Capability> with a non-byte {attribute}: {e}",
+                                path.display()
+                            )
+                        })
+                };
+                let (min, max) = (bound("Min"), bound("Max"));
+                if min > max {
+                    panic!(
+                        "{}: {name:?} has a <Capability> running {min}..{max}, backwards",
+                        path.display()
+                    );
+                }
+                capabilities.push(Capability {
+                    min,
+                    max,
+                    preset: capability.attribute("Preset").map(str::to_string),
+                    name: capability.text().unwrap_or_default().trim().to_string(),
+                });
+            }
+
+            channels.insert(
+                name,
+                ChannelDef {
+                    preset: channel.attribute("Preset").map(str::to_string),
+                    capabilities,
+                },
+            );
         }
 
         let mut modes = BTreeMap::new();
@@ -275,9 +391,37 @@ fn load_definitions(dir: &Path) -> BTreeMap<(String, String), Definition> {
             modes.insert(name, numbered.into_iter().map(|(_, name)| name).collect());
         }
 
+        // A head's travel, where the definition declares one. QLC+ writes `Type="Fixed"` with
+        // zero maxima for everything that does not move, so both tests are the same test.
+        let focus = root
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "Physical")
+            .and_then(|physical| {
+                physical
+                    .children()
+                    .find(|n| n.is_element() && n.tag_name().name() == "Focus")
+            })
+            .and_then(|element| {
+                let degrees = |attribute: &str| -> f64 {
+                    element
+                        .attribute(attribute)
+                        .unwrap_or("0")
+                        .trim()
+                        .parse()
+                        .unwrap_or_else(|e| {
+                            panic!("{}: <Focus> has a non-numeric {attribute}: {e}", path.display())
+                        })
+                };
+                let (pan_max_deg, tilt_max_deg) = (degrees("PanMax"), degrees("TiltMax"));
+                (pan_max_deg > 0.0 && tilt_max_deg > 0.0).then_some(Focus {
+                    pan_max_deg,
+                    tilt_max_deg,
+                })
+            });
+
         if let Some(previous) = definitions.insert(
             (manufacturer.clone(), model.clone()),
-            Definition { path: path.clone(), channels, modes },
+            Definition { path: path.clone(), channels, modes, focus },
         ) {
             panic!(
                 "{manufacturer} {model} is defined twice: {} and {}",
@@ -344,14 +488,11 @@ fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
             )
         }
 
-        // Prefer the preset's role as the field name — a channel named "R" carrying
-        // IntensityRed still becomes `red`. Channels QLC+ gives no preset (wheels, gobos,
-        // maintenance) fall back to their own name.
-        let mut resolved: Vec<ResolvedChannel> = mode
+        let resolved: Vec<ResolvedChannel> = mode
             .iter()
             .enumerate()
             .map(|(offset, channel_name)| {
-                let preset = definition.channels.get(channel_name).unwrap_or_else(|| {
+                let channel = definition.channels.get(channel_name).unwrap_or_else(|| {
                     panic!(
                         "{}: mode {:?} lists a channel {channel_name:?} the definition does \
                          not declare",
@@ -361,42 +502,109 @@ fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
                 });
                 ResolvedChannel {
                     name: channel_name.clone(),
-                    field: role_of(preset.as_deref())
-                        .map(str::to_string)
-                        .unwrap_or_else(|| field_of(channel_name)),
                     slot: fixture.slot(offset as u32),
+                    preset: channel.preset.clone(),
+                    capabilities: channel.capabilities.clone(),
                 }
             })
             .collect();
 
+        let mut fields = pair_fine_channels(&resolved);
+
+        // Prefer the preset's role as the field name — a channel named "R" carrying
+        // IntensityRed still becomes `red`. Channels QLC+ gives no preset (wheels, gobos,
+        // maintenance) fall back to their own name.
+        for field in fields.iter_mut() {
+            let channel = &resolved[field.head()];
+            let name = role_of(channel.preset.as_deref())
+                .map(str::to_string)
+                .unwrap_or_else(|| field_of(&channel.name));
+            field.set_name(name);
+        }
+
         // Two channels can share a preset — pixel-mapped modes give every cell an
         // IntensityRed. Where that happens the role is not a unique name, so fall back to
         // the channel names, which QLC+ does keep distinct within a mode.
-        let clashes: Vec<String> = resolved
+        let clashes: Vec<String> = fields
             .iter()
-            .filter(|c| resolved.iter().filter(|o| o.field == c.field).count() > 1)
-            .map(|c| c.field.clone())
+            .filter(|f| fields.iter().filter(|o| o.name() == f.name()).count() > 1)
+            .map(|f| f.name().to_string())
             .collect();
-        for channel in resolved.iter_mut() {
-            if clashes.contains(&channel.field) {
-                channel.field = field_of(&channel.name);
+        for field in fields.iter_mut() {
+            if clashes.contains(&field.name().to_string()) {
+                let name = field_of(&resolved[field.head()].name);
+                field.set_name(name);
             }
         }
-        for (index, channel) in resolved.iter().enumerate() {
-            if let Some(other) = resolved[..index].iter().find(|o| o.field == channel.field) {
+        for (index, field) in fields.iter().enumerate() {
+            if let Some(other) = fields[..index].iter().find(|o| o.name() == field.name()) {
                 panic!(
                     "{:?}: channels {:?} and {:?} both map to the field `{}`. Rename one in {}.",
                     fixture.name,
-                    other.name,
-                    channel.name,
-                    channel.field,
+                    resolved[other.head()].name,
+                    resolved[field.head()].name,
+                    field.name(),
                     definition.path.display(),
                 );
             }
         }
 
+        fixture.focus = definition.focus.clone();
         fixture.resolved = resolved;
+        fixture.fields = fields;
     }
+}
+
+/// Groups a mode's channels into the fields the generated struct gets, folding every fine
+/// channel into the coarse one it extends.
+///
+/// The pairing is read off the presets rather than the channel names: QLC+ spells a fine
+/// channel as its coarse preset with `Fine` on the end, across every attribute that has one,
+/// so this holds for a dimmer or a colour wheel as much as for pan. Names are no use for it
+/// — "Pan Fine", "Pan fine" and "PAN FINE" are all real, and a definition is free to call it
+/// something else entirely.
+///
+/// A fine channel whose coarse partner is not in the same mode keeps a field of its own. It
+/// is then an 8-bit channel that happens to be called fine, which is what the definition
+/// said, and the alternative is a build that fails on a fixture that works.
+///
+/// Which channel comes first in the mode does not matter. Definitions conventionally list a
+/// coarse channel and then its fine one, but nothing enforces that, and a pairing that only
+/// looked forward would fold a channel it had already emitted a field for.
+fn pair_fine_channels(resolved: &[ResolvedChannel]) -> Vec<Field> {
+    // The coarse channel each fine channel extends, if that channel is in this mode too.
+    let extends = |index: usize| -> Option<usize> {
+        let coarse = resolved[index]
+            .preset
+            .as_deref()?
+            .strip_suffix("Fine")
+            .filter(|coarse| !coarse.is_empty())?;
+        resolved
+            .iter()
+            .position(|channel| channel.preset.as_deref() == Some(coarse))
+    };
+
+    let fine_of: BTreeMap<usize, usize> = (0..resolved.len())
+        .filter_map(|index| extends(index).map(|coarse| (coarse, index)))
+        .collect();
+    let folded: BTreeSet<usize> = fine_of.values().copied().collect();
+
+    // Fields land in the order the mode puts the *coarse* channel, which is the order the
+    // fixture's manual lists them in.
+    (0..resolved.len())
+        .filter(|index| !folded.contains(index))
+        .map(|index| match fine_of.get(&index) {
+            Some(&fine) => Field::Pair {
+                coarse: index,
+                fine,
+                name: String::new(),
+            },
+            None => Field::Single {
+                index,
+                name: String::new(),
+            },
+        })
+        .collect()
 }
 
 /// Names the Rust type each fixture is an instance of.
@@ -622,6 +830,8 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
                 address,
                 channels,
                 resolved: Vec::new(),
+                fields: Vec::new(),
+                focus: None,
             },
         );
         if inserted.is_some() {
@@ -781,6 +991,151 @@ fn is_snake_case(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
+/// Whether a fixture can be aimed: its definition declares travel, and its mode carries pan
+/// and tilt as 16-bit pairs.
+///
+/// Both halves are required, and a head failing either gets no position rather than a
+/// half-working one. A `<Focus>` with no fine channels would be a head driven in 8-bit steps,
+/// which is visible on any slow move; fine channels with no `<Focus>` would be a head whose
+/// degrees mean nothing. Either way the fix is in the `.qxf`, and a missing `Position` is
+/// what sends whoever hits it there.
+fn aims(fixture: &Patched) -> bool {
+    let pair = |name: &str| {
+        fixture
+            .fields
+            .iter()
+            .any(|field| matches!(field, Field::Pair { .. }) && field.name() == name)
+    };
+    fixture.focus.is_some() && pair("pan") && pair("tilt")
+}
+
+/// The expression reaching each of a mode's channels, in mode order, through `receiver`.
+///
+/// The generated file's one view of a fixture's addressing is the instance constant; every
+/// other listing of its channels is written as a path into that constant rather than as the
+/// slot again, so there is nothing for a second copy to disagree with.
+fn channel_paths(fixture: &Patched, receiver: &str) -> Vec<String> {
+    let mut paths = vec![String::new(); fixture.resolved.len()];
+    for field in &fixture.fields {
+        match field {
+            Field::Single { index, name } => paths[*index] = format!("{receiver}.{name}"),
+            Field::Pair { coarse, fine, name } => {
+                paths[*coarse] = format!("{receiver}.{name}.coarse");
+                paths[*fine] = format!("{receiver}.{name}.fine");
+            }
+        }
+    }
+    paths
+}
+
+/// The constant holding each channel's capability table, indexed in mode order. `None` where
+/// the definition declares no bands for that channel.
+///
+/// Named after the struct field rather than the channel, because field names are already
+/// checked unique within a type while two channel names punctuating down to one identifier
+/// would quietly generate two constants with the same name.
+fn capability_tables(shape: &Patched) -> Vec<Option<String>> {
+    let mut labels = vec![String::new(); shape.resolved.len()];
+    for field in &shape.fields {
+        match field {
+            Field::Single { index, name } => labels[*index] = name.clone(),
+            Field::Pair { coarse, fine, name } => {
+                labels[*coarse] = name.clone();
+                labels[*fine] = format!("{name}_fine");
+            }
+        }
+    }
+    labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let declared = !shape.resolved[index].capabilities.is_empty();
+            declared.then(|| format!("CAPS_{}_{}", ident_of(&shape.type_name), ident_of(label)))
+        })
+        .collect()
+}
+
+/// Writes the values a type's channels are worth knowing by name.
+///
+/// Two kinds, answering two different questions. A **capability** constant names a band the
+/// definition spells out, so the show can say which one it means and let the compiler check
+/// that the fixture still has it — that is the vocabulary the wheels are selected from. A
+/// **speed** constant resolves which end of a speed channel is fast, which the preset states
+/// and no two manufacturers agree on; it is derived here rather than looked up at run time
+/// because the answer cannot change while the binary runs.
+fn write_value_constants(out: &mut String, shape: &Patched) {
+    let tables = capability_tables(shape);
+
+    // Every constant this type could carry, gathered before any is written, because whether
+    // a name is usable depends on what else claims it. Repeated capability labels are real —
+    // a shutter with four "shutter open" gaps between its strobe speeds, a maintenance
+    // channel with six dead bands — and so are distinct labels that punctuate down to one
+    // identifier. A name landing on more than one band would silently mean a particular one
+    // of them, so the whole group goes unnamed and the table stays there to be read. The
+    // check spans the type rather than the channel, since that is where the names collide.
+    let mut constants: Vec<(usize, String, String, String)> = Vec::new();
+    for field in &shape.fields {
+        let index = field.head();
+        let channel = &shape.resolved[index];
+        let prefix = field.name().to_ascii_uppercase();
+
+        // Which end of a speed channel is fast. QLC+ spells the direction into the preset
+        // name, which is the only reason this transfers to a fixture nobody has measured.
+        if let Some(preset) = channel.preset.as_deref().filter(|p| p.starts_with("Speed")) {
+            let ends = if preset.ends_with("FastSlow") {
+                Some((0, 255))
+            } else if preset.ends_with("SlowFast") {
+                Some((255, 0))
+            } else {
+                None
+            };
+            if let Some((fastest, slowest)) = ends {
+                let doc = format!("{} at its fastest ({preset}).", channel.name);
+                let value = format!("u8 = {fastest}");
+                constants.push((index, format!("{prefix}_FASTEST"), doc, value));
+                let doc = format!("{} at its slowest.", channel.name);
+                let value = format!("u8 = {slowest}");
+                constants.push((index, format!("{prefix}_SLOWEST"), doc, value));
+            }
+        }
+
+        let Some(table) = &tables[index] else {
+            continue;
+        };
+        for (position, capability) in channel.capabilities.iter().enumerate() {
+            let ident = ident_of(&capability.name);
+            if ident.is_empty() {
+                continue;
+            }
+            let doc = format!(
+                "{} — {} ({}–{}).",
+                channel.name, capability.name, capability.min, capability.max
+            );
+            let value = format!("Capability = {table}[{position}]");
+            constants.push((index, format!("{prefix}_{ident}"), doc, value));
+        }
+    }
+
+    let mut claims: BTreeMap<&str, usize> = BTreeMap::new();
+    for (_, name, ..) in &constants {
+        *claims.entry(name).or_default() += 1;
+    }
+
+    let mut previous: Option<usize> = None;
+    for (index, name, doc, value) in &constants {
+        if claims[name.as_str()] > 1 {
+            continue;
+        }
+        // A blank line between channels, so the block reads as one group per channel.
+        if previous != Some(*index) {
+            writeln!(out).unwrap();
+            previous = Some(*index);
+        }
+        writeln!(out, "    /// {doc}").unwrap();
+        writeln!(out, "    pub const {name}: {value};").unwrap();
+    }
+}
+
 /// Renders the fixture table: one named constant per fixture in the QLC+ patch, a struct per
 /// fixture *type* with a named field per channel, and the width of the frame they span.
 ///
@@ -809,7 +1164,7 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
     let implements = |field: &str| {
         fixtures
             .iter()
-            .any(|fixture| fixture.resolved.iter().any(|c| c.field == field))
+            .any(|fixture| fixture.fields.iter().any(|f| f.name() == field))
     };
     let mut imports = vec!["Channel", "PatchEntry"];
     if implements("red") && implements("green") && implements("blue") {
@@ -820,6 +1175,19 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
     }
     if implements("dimmer") {
         imports.push("Dimmer");
+    }
+    let pairs = |fixture: &Patched| fixture.fields.iter().any(|f| matches!(f, Field::Pair { .. }));
+    if fixtures.iter().any(|fixture| pairs(fixture)) {
+        imports.push("Channel16");
+    }
+    if fixtures.iter().any(|fixture| aims(fixture)) {
+        imports.push("Position");
+    }
+    if fixtures
+        .iter()
+        .any(|fixture| fixture.resolved.iter().any(|c| !c.capabilities.is_empty()))
+    {
+        imports.push("Capability");
     }
     imports.sort_unstable();
     writeln!(out, "use cortex::qlc_plus::{{{}}};", imports.join(", ")).unwrap();
@@ -848,9 +1216,22 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         )
         .unwrap();
         writeln!(out, "pub struct {type_name} {{").unwrap();
-        for channel in &shape.resolved {
-            writeln!(out, "    /// {}.", channel.name).unwrap();
-            writeln!(out, "    pub {}: Channel,", channel.field).unwrap();
+        for field in &shape.fields {
+            match field {
+                Field::Single { index, name } => {
+                    writeln!(out, "    /// {}.", shape.resolved[*index].name).unwrap();
+                    writeln!(out, "    pub {name}: Channel,").unwrap();
+                }
+                Field::Pair { coarse, fine, name } => {
+                    writeln!(
+                        out,
+                        "    /// {} and {}, as one 16-bit value.",
+                        shape.resolved[*coarse].name, shape.resolved[*fine].name,
+                    )
+                    .unwrap();
+                    writeln!(out, "    pub {name}: Channel16,").unwrap();
+                }
+            }
         }
         writeln!(out, "}}").unwrap();
         writeln!(out).unwrap();
@@ -867,13 +1248,9 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         writeln!(out).unwrap();
         writeln!(out, "    /// Every channel, in mode order.").unwrap();
         writeln!(out, "    pub fn all(&self) -> [Channel; Self::CHANNELS] {{").unwrap();
-        writeln!(
-            out,
-            "        [{}]",
-            shape.resolved.iter().map(|c| format!("self.{}", c.field)).collect::<Vec<_>>().join(", ")
-        )
-        .unwrap();
+        writeln!(out, "        [{}]", channel_paths(shape, "self").join(", ")).unwrap();
         writeln!(out, "    }}").unwrap();
+        write_value_constants(&mut out, shape);
         writeln!(out, "}}").unwrap();
         writeln!(out).unwrap();
 
@@ -881,7 +1258,26 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         // This is the type-safety the whole exercise is for: a fixture patched into a mode
         // without colour cannot be handed to code that mixes colour. One impl per type, so
         // it covers every instance.
-        let has = |field: &str| shape.resolved.iter().any(|c| c.field == field);
+        let has = |field: &str| shape.fields.iter().any(|f| f.name() == field);
+        if aims(shape) {
+            let focus = shape.focus.as_ref().expect("aims() checked the focus");
+            writeln!(out, "impl Position for {type_name} {{").unwrap();
+            writeln!(
+                out,
+                "    const PAN_RANGE_DEG: f64 = {:?};",
+                focus.pan_max_deg
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    const TILT_RANGE_DEG: f64 = {:?};",
+                focus.tilt_max_deg
+            )
+            .unwrap();
+            writeln!(out, "    fn pan(&self) -> Channel16 {{ self.pan }}").unwrap();
+            writeln!(out, "    fn tilt(&self) -> Channel16 {{ self.tilt }}").unwrap();
+            writeln!(out, "}}").unwrap();
+        }
         if has("red") && has("green") && has("blue") {
             writeln!(out, "impl Rgb for {type_name} {{").unwrap();
             for colour in ["red", "green", "blue"] {
@@ -900,6 +1296,45 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
             writeln!(out, "}}").unwrap();
         }
         writeln!(out).unwrap();
+    }
+
+    // The bands each channel of each *type* declares, hoisted out of the instances: four
+    // heads of one model say the same thing about their colour wheel, and one table they all
+    // point at is both smaller and impossible to have four opinions about.
+    for instances in types.values() {
+        let shape = instances[0];
+        for (index, table) in capability_tables(shape).iter().enumerate() {
+            let Some(table) = table else { continue };
+            let channel = &shape.resolved[index];
+            writeln!(
+                out,
+                "/// {} {} — the bands its definition declares.",
+                shape.model, channel.name,
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "const {table}: [Capability; {}] = [",
+                channel.capabilities.len(),
+            )
+            .unwrap();
+            for capability in &channel.capabilities {
+                writeln!(
+                    out,
+                    "    Capability {{ min: {}, max: {}, preset: {}, name: {:?} }},",
+                    capability.min,
+                    capability.max,
+                    match &capability.preset {
+                        Some(preset) => format!("Some({preset:?})"),
+                        None => "None".to_string(),
+                    },
+                    capability.name,
+                )
+                .unwrap();
+            }
+            writeln!(out, "];").unwrap();
+            writeln!(out).unwrap();
+        }
     }
 
     // The instances: one constant per fixture in the workspace, each an instance of its
@@ -922,8 +1357,29 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
             fixture.type_name,
         )
         .unwrap();
-        for channel in &fixture.resolved {
-            writeln!(out, "    {}: Channel::at({}),", channel.field, channel.slot).unwrap();
+        let tables = capability_tables(fixture);
+        let channel = |index: usize| {
+            let capabilities = match &tables[index] {
+                Some(table) => format!("&{table}"),
+                None => "&[]".to_string(),
+            };
+            format!("Channel::at({}, {capabilities})", fixture.resolved[index].slot)
+        };
+        for field in &fixture.fields {
+            match field {
+                Field::Single { index, name } => {
+                    writeln!(out, "    {name}: {},", channel(*index)).unwrap();
+                }
+                Field::Pair { coarse, fine, name } => {
+                    writeln!(
+                        out,
+                        "    {name}: Channel16::pair({}, {}),",
+                        channel(*coarse),
+                        channel(*fine),
+                    )
+                    .unwrap();
+                }
+            }
         }
         writeln!(out, "}};").unwrap();
         writeln!(out).unwrap();
@@ -957,12 +1413,7 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
         writeln!(
             out,
             "        channels: &[{}],",
-            fixture
-                .resolved
-                .iter()
-                .map(|c| format!("{}.{}", ident_of(&fixture.name), c.field))
-                .collect::<Vec<_>>()
-                .join(", ")
+            channel_paths(fixture, &ident_of(&fixture.name)).join(", ")
         )
         .unwrap();
         writeln!(out, "    }},").unwrap();

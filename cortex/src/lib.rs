@@ -11,6 +11,7 @@
 pub mod audio_features;
 pub mod clock;
 pub mod config;
+pub mod moving_head;
 pub mod perlin;
 pub mod qlc_plus;
 pub mod scenes;
