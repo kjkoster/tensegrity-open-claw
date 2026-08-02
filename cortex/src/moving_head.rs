@@ -88,6 +88,15 @@ impl Slew {
         Self { pose: start, rate }
     }
 
+    /// Where the head points now.
+    ///
+    /// The one copy of it. Anything choosing where to send the head next has to judge from
+    /// where it actually is, and a second copy kept by the chooser would go stale the moment
+    /// something else moved the head.
+    pub fn pose(&self) -> Pose {
+        self.pose
+    }
+
     /// Advances one frame toward `target` and returns where the head now points.
     pub fn step(&mut self, target: Pose, dt: f64) -> Pose {
         let step = self.rate.deg_s() * dt;
@@ -119,4 +128,18 @@ pub fn aim<F: Position>(fixture: &F, slots: &mut [u8], pose: Pose) {
     fixture
         .tilt()
         .set_unit(slots, pose.tilt_deg / F::TILT_RANGE_DEG);
+}
+
+/// Where a fixture's slots say it is pointing — the exact inverse of [`aim`].
+///
+/// Calibration is a look driven by hand from a console and saved, so the recorded pose has to
+/// come back out through the same travel constants it would have gone in through. Written as
+/// the inverse of `aim` rather than as its own conversion for that reason: a wrong range is
+/// then wrong in both directions and shows up as a fit that will not close, instead of
+/// cancelling itself out on the way round and leaving the error to appear on the field.
+pub fn pose_of<F: Position>(fixture: &F, slots: &[u8]) -> Pose {
+    Pose::new(
+        fixture.pan().get_unit(slots) * F::PAN_RANGE_DEG,
+        fixture.tilt().get_unit(slots) * F::TILT_RANGE_DEG,
+    )
 }

@@ -69,6 +69,16 @@ impl Channel {
         slots[self.slot as usize] = value;
     }
 
+    /// What this channel is carrying.
+    ///
+    /// The one thing that reads rather than writes: a look driven by hand from a console and
+    /// saved as a scene is a measurement, and getting it back out means asking the same
+    /// channel that would have written it. Kept beside [`Self::set`] so the two stay each
+    /// other's inverse where a reader can see both at once.
+    pub fn get(self, slots: &[u8]) -> u8 {
+        slots[self.slot as usize]
+    }
+
     /// Writes a 0..1 value as a DMX byte. Rounds rather than truncates, to match the
     /// scaling fixtures apply on the way back out.
     pub fn set_unit(self, slots: &mut [u8], value: f64) {
@@ -123,6 +133,19 @@ impl Channel16 {
     /// Writes a 0..1 value across the pair.
     pub fn set_unit(self, slots: &mut [u8], value: f64) {
         self.set(slots, (value.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16);
+    }
+
+    pub fn get(self, slots: &[u8]) -> u16 {
+        ((self.coarse.get(slots) as u16) << 8) | self.fine.get(slots) as u16
+    }
+
+    /// Reads the pair back as a 0..1 value.
+    ///
+    /// Round-tripping through [`Self::set_unit`] returns the value to within half a step of
+    /// the pair — the rounding on the way out is the only loss — which is some thousandths of
+    /// a degree on a head, far below anything its mechanism will place.
+    pub fn get_unit(self, slots: &[u8]) -> f64 {
+        self.get(slots) as f64 / 65535.0
     }
 }
 

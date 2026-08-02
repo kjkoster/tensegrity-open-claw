@@ -31,7 +31,7 @@
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>1</ID>
    <Name>snake 1</Name>
@@ -41,7 +41,7 @@
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>2</ID>
    <Name>snake 2</Name>
@@ -51,7 +51,7 @@
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>3</ID>
    <Name>snake 3</Name>
@@ -61,7 +61,7 @@
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>4</ID>
    <Name>snake 4</Name>

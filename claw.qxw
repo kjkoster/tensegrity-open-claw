@@ -31,30 +31,30 @@
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>1</ID>
-   <Name>ZQ-B243 leg A</Name>
+   <Name>ZQ02015 leg A</Name>
    <Universe>0</Universe>
    <Address>9</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>2</ID>
-   <Name>ZQ-B243 leg B</Name>
+   <Name>ZQ02015 leg B</Name>
    <Universe>0</Universe>
    <Address>21</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ-B243</Model>
+   <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>3</ID>
-   <Name>ZQ-B243 leg C</Name>
+   <Name>ZQ02015 leg C</Name>
    <Universe>0</Universe>
    <Address>33</Address>
    <Channels>12</Channels>

@@ -78,7 +78,7 @@ records is *how* you set them on each model, which does not change.
 | Alesis io\|2 USB audio | USB (`plughw:CARD=io2,DEV=0`) | ALSA capture; confirm with `arecord -L`. VID:PID `0x13b2:0x0008`. Set in `cortex/src/config.rs`. |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
-| 3× UKing ZQ-B243 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
+| 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
 | HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Mode *and* address are DIP switches, not a menu — set the binary pattern from the datasheet in `reference/`. |
 
 ## OS configuration (once)
@@ -294,6 +294,25 @@ the rig is what says which workspace this came from, since a rig has exactly one
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
+
+---
+
+# Front-panel settings on the moving heads
+
+State that lives in each head rather than in this repo, and survives nothing: a head swapped,
+reset or borrowed comes back with its own idea of these. Recorded here because a wrong one
+does not look like a wrong setting — it looks like broken software.
+
+| Menu | Setting | Why |
+|---|---|---|
+| `SLnd` | `Auto` | Follows the console. Verified on our ZQ02015s: they track DMX in this mode. |
+| `rPAN` | `no` | Axis not reversed. |
+| `rTiL` | `no` | Axis not reversed. |
+
+`rPAN` and `rTiL` may be either way round, but **every head must agree**, and the geometry has
+to be told which way. A head with one axis reversed tracks DMX perfectly and lands nowhere
+near where the geometry says — which reads as a broken solver, not as a menu. The mage rig's
+`geometry.rs` carries a `Sense` per axis for exactly this, seeded to match the table above.
 
 ---
 

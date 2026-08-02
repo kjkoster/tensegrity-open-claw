@@ -23,3 +23,18 @@ pub struct Scene {
     /// the difference away.
     pub values: &'static [(u32, u8)],
 }
+
+impl Scene {
+    /// Lays the scene's values into a slot buffer.
+    ///
+    /// Into a buffer the caller owns rather than into one returned, because the sparseness
+    /// above is the whole point: the slots this scene never mentions keep whatever they were
+    /// carrying, which is what lets a scene be a statement about a few fixtures instead of
+    /// about the universe. Reading a fixture's channels out of the result is then the same
+    /// operation whether the values arrived from a scene or from the running show.
+    pub fn apply(&self, slots: &mut [u8]) {
+        for (slot, value) in self.values {
+            slots[*slot as usize] = *value;
+        }
+    }
+}

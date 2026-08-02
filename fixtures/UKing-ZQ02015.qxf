@@ -7,7 +7,7 @@
   <Author>Yestalgia</Author>
  </Creator>
  <Manufacturer>UKing</Manufacturer>
- <Model>ZQ-B243</Model>
+ <Model>ZQ02015</Model>
  <Type>Moving Head</Type>
  <Channel Name="Pan" Preset="PositionPan"/>
  <Channel Name="Pan Fine" Preset="PositionPanFine"/>
@@ -104,8 +104,8 @@
  <Physical>
   <Bulb Type="LED" Lumens="5" ColourTemperature="3000"/>
   <Dimensions Weight="2.92" Width="81" Height="57" Depth="113"/>
-  <Lens Name="Other" DegreesMin="0" DegreesMax="0"/>
-  <Focus Type="Head" PanMax="540" TiltMax="270"/>
+  <Lens Name="Other" DegreesMin="11" DegreesMax="11"/>
+  <Focus Type="Head" PanMax="540" TiltMax="180"/>
   <Technical PowerConsumption="50" DmxConnector="3-pin"/>
  </Physical>
 </FixtureDefinition>
