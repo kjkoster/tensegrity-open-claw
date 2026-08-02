@@ -67,11 +67,32 @@ CAMERA_FPS = os.environ.get("EYEBALL_CAMERA_FPS", "10")
 # The values differ between firmware generations, so they are overridable wholesale — and every
 # one is read back afterwards, because a camera that silently clamps or ignores a setting looks
 # exactly like one that accepted it.
-CAMERA_SETTINGS_DEFAULT = (
-    "ImageSource.I0.DayNight.IrCutFilter=yes,"
-    "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
-    "ImageSource.I0.Sensor.Exposure=hold"
-)
+# Two presets rather than one, because the rig runs in two lighting regimes and the camera has
+# to be told which. `day` locks a colour sensor against a scene the show keeps changing. `night`
+# takes the IR-cut filter out so the sensor sees 850 nm, and turns on the camera's own
+# illuminator — at which point the picture is monochrome and lit by something the show's LEDs
+# emit almost none of, which is the whole appeal.
+#
+# Exposure is held in day and left automatic at night, deliberately. Holding it means freezing
+# whatever value was current when the daemon started, which is right for a scene whose base
+# illumination is constant and wrong for one that has just been handed a different light source.
+# Once the IR exposure that works is known, it becomes a number and gets locked like the rest.
+CAMERA_MODES = {
+    "day": (
+        "ImageSource.I0.DayNight.IrCutFilter=yes,"
+        "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
+        "ImageSource.I0.Sensor.Exposure=hold"
+    ),
+    "night": (
+        "ImageSource.I0.DayNight.IrCutFilter=no,"
+        "ImageSource.I0.Sensor.Exposure=auto,"
+        "Light.L0.Enabled=yes"
+    ),
+}
+#
+# `night` is the default because the show is a night show and because infrared measurably beats
+# visible light here — see the reasoning in EYEBALL.md, which is where that finding lives.
+CAMERA_MODE = os.environ.get("EYEBALL_CAMERA_MODE", "night")
 
 # sysexits.h EX_CONFIG. Named in the unit's RestartPreventExitStatus, so a misconfigured daemon
 # stops with one legible error rather than restarting into the same one every five seconds.
@@ -91,6 +112,14 @@ CROP = tuple(float(v) for v in os.environ.get("EYEBALL_CROP", "0,0,1,1").split("
 # Bayer sensor overlap, so a bright red beam still leaks some green.
 CHANNELS = {"blue": 0, "green": 1, "red": 2}
 CHANNEL = CHANNELS.get(os.environ.get("EYEBALL_CHANNEL", "colour"))
+
+# Local contrast equalisation before inference. Off by default and worth having under infrared,
+# where a scene lit by one lamp at one point arrives flat and dim at its edges — the mage is
+# there in the pixels, spread over forty grey levels instead of two hundred. CLAHE is local
+# rather than global, so it lifts the subject without blowing out whatever the illuminator is
+# closest to.
+ENHANCE = os.environ.get("EYEBALL_ENHANCE", "none")
+CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 BRAIN_HOST = os.environ.get("EYEBALL_BRAIN_HOST", "127.0.0.1")
 BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
@@ -169,7 +198,7 @@ def parse_settings(text):
 
 
 CAMERA_SETTINGS = parse_settings(
-    os.environ.get("EYEBALL_CAMERA_SETTINGS", CAMERA_SETTINGS_DEFAULT)
+    os.environ.get("EYEBALL_CAMERA_SETTINGS", CAMERA_MODES.get(CAMERA_MODE, ""))
 )
 
 
@@ -216,7 +245,11 @@ MOVENET_BONES = [
     ("right_hip", "right_knee"), ("right_knee", "right_ankle"),
 ]
 
-MOVENET_MIN_CONFIDENCE = 0.3
+# Tunable, because infrared is out of distribution for a model trained on daylight photographs
+# and the first thing that gives way is confidence rather than position. A skeleton that is
+# roughly right at 0.15 is evidence the approach works; nothing at all at 0.3 is not evidence
+# that it does not.
+MOVENET_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_MIN_CONFIDENCE", "0.3"))
 
 
 def movenet_tensor(frame, size, dtype):
@@ -690,15 +723,56 @@ def encode(frame):
 
 # ── HTTP preview ─────────────────────────────────────────────────────────────
 
+# The page reconnects itself.
+#
+# An MJPEG stream is one long response, so it dies with the connection and a browser will not
+# retry it — after a daemon restart the tab holds a broken image until somebody reloads, which
+# during a tuning session is every thirty seconds. So the page polls a cheap endpoint, and on
+# seeing the daemon come back it re-requests the stream with a fresh query string, because a
+# browser will otherwise serve the dead one from cache.
 PAGE = b"""<!doctype html>
 <title>eyeball</title>
-<style>body{background:#111;color:#ccc;font:14px system-ui;margin:0;padding:1rem}
-img{max-width:100%;display:block;border:1px solid #333}a{color:#6cf}</style>
+<style>
+body{background:#111;color:#ccc;font:14px system-ui;margin:0;padding:1rem}
+img{max-width:100%;display:block;border:1px solid #333}
+a{color:#6cf}
+#state{margin:.6rem 0;color:#7a7}
+#state.down{color:#fc6}
+</style>
 <h1>eyeball</h1>
-<img src="/annotated.mjpg">
+<img id="view" src="/annotated.mjpg">
+<p id="state">live</p>
 <p><a href="/raw.jpg">raw frame</a> &middot;
 <a href="/annotated.jpg">annotated frame</a> &middot;
 <a href="/pose.json">pose</a></p>
+<script>
+const view = document.getElementById('view');
+const state = document.getElementById('state');
+let live = true;
+
+function down(message) {
+  if (!live) return;
+  live = false;
+  state.textContent = message;
+  state.className = 'down';
+}
+
+function up() {
+  live = true;
+  state.textContent = 'live';
+  state.className = '';
+  view.src = '/annotated.mjpg?t=' + Date.now();
+}
+
+view.onerror = () => down('stream lost, retrying');
+
+setInterval(() => {
+  fetch('/pose.json', {cache: 'no-store'})
+    .then(response => { if (!response.ok) throw new Error(response.status); })
+    .then(() => { if (!live) up(); })
+    .catch(() => down('daemon down, retrying'));
+}, 2000);
+</script>
 """
 
 
@@ -1093,7 +1167,9 @@ def main():
     # for a daemon that runs but sees nothing, and `EnvironmentFile=-` means a missing
     # configuration file starts the daemon on defaults rather than failing where it would show.
     log(f"camera: {CAMERA_HOST} — {CAMERA_TRANSPORT} {CAMERA_RESOLUTION} at {CAMERA_FPS} fps")
-    log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}")
+    log(f"mode: {CAMERA_MODE}")
+    log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}, enhance: {ENHANCE}")
+    log(f"confidence: {MOVENET_MIN_CONFIDENCE}")
     log(f"estimator: {estimator.name}")
     log(f"crop: {CROP}")
 
@@ -1113,7 +1189,10 @@ def main():
     # Never the password: the telemetry tree is the one part of the rig anyone on the AP reads.
     telemetry.publish("identity", {
         "estimator": estimator.name,
+        "mode": CAMERA_MODE,
         "channel": os.environ.get("EYEBALL_CHANNEL", "colour"),
+        "enhance": ENHANCE,
+        "min_confidence": MOVENET_MIN_CONFIDENCE,
         "camera": CAMERA_HOST,
         "transport": CAMERA_TRANSPORT,
         "resolution": CAMERA_RESOLUTION,
@@ -1155,6 +1234,12 @@ def main():
             # Back to three channels because the models want three. The information is one
             # plane's worth either way; this only stops the show's colours being part of it.
             region = cv2.cvtColor(region[:, :, CHANNEL], cv2.COLOR_GRAY2BGR)
+        if ENHANCE == "clahe":
+            # An infrared frame is already grey in all three channels, so flattening and
+            # re-expanding costs nothing and keeps this one path for both regimes.
+            region = cv2.cvtColor(
+                CLAHE.apply(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)), cv2.COLOR_GRAY2BGR
+            )
         # Timed on its own, because the alternative is arguing about whether the cost is the
         # estimator or the decode when one number separates them.
         started = time.monotonic()
