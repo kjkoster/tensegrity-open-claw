@@ -126,7 +126,50 @@ else
     echo "WARNING: stem did not start — journalctl -u stem -n 40"
 fi
 
-# --- 6. eyeball daemon -----------------------------------------------------
+# --- 6. eyeball's pose model -----------------------------------------------
+# MoveNet SinglePose Lightning, int8, from the TF Hub lite-model store — the same model the
+# TensorFlow Hub MoveNet tutorial uses. Fetched once and then left alone: it is a few megabytes
+# over a 4G modem, and it never changes.
+#
+# Not committed to the repository. It is a binary blob with its own licence that is reproducible
+# from a URL, which is the definition of something a checkout should not carry.
+MODEL_DIR=/usr/local/share/eyeball
+MODEL_TFLITE="$MODEL_DIR/movenet.tflite"
+# The URL the TF Hub MoveNet tutorial itself uses. tfhub.dev now redirects into Kaggle Models,
+# which is why this follows redirects and then checks what actually arrived — a redirect that
+# lands on a sign-in page returns HTTP 200 and an HTML document.
+#
+# Overridable, because this is the one line here most likely to rot: Google has moved this file
+# once already and the daemon does not care where it came from.
+MODEL_URL="${EYEBALL_MODEL_URL:-https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4?lite-format=tflite}"
+
+step "eyeball pose model"
+if [ -f "$MODEL_TFLITE" ]; then
+    echo "already present: $MODEL_TFLITE ($(stat -c %s "$MODEL_TFLITE") bytes)"
+else
+    sudo mkdir -p "$MODEL_DIR"
+    echo "fetching MoveNet SinglePose Lightning int8"
+    sudo curl -fSL --retry 3 --connect-timeout 20 -o "$MODEL_TFLITE.part" "$MODEL_URL"
+
+    # A TFLite flatbuffer carries the identifier "TFL3" at offset 4. Checking it is what turns
+    # "that URL now redirects to a sign-in page" into one legible line here, rather than into a
+    # daemon that loads an HTML document as a model and fails somewhere less obvious.
+    if [ "$(sudo head -c 8 "$MODEL_TFLITE.part" | tail -c 4)" = "TFL3" ]; then
+        sudo mv "$MODEL_TFLITE.part" "$MODEL_TFLITE"
+        echo "installed: $MODEL_TFLITE ($(stat -c %s "$MODEL_TFLITE") bytes)"
+    else
+        sudo rm -f "$MODEL_TFLITE.part"
+        echo "ERROR: what came back from $MODEL_URL is not a TFLite model." >&2
+        echo "       Google moved TF Hub to Kaggle, so this URL may have gone with it." >&2
+        echo "       Either point EYEBALL_MODEL_URL at a working one and re-run:" >&2
+        echo "         EYEBALL_MODEL_URL=... ./deploy.sh" >&2
+        echo "       or fetch MoveNet SinglePose Lightning (int8 tflite) by hand and put it at" >&2
+        echo "       $MODEL_TFLITE — the deploy then leaves it alone." >&2
+        exit 1
+    fi
+fi
+
+# --- 7. eyeball daemon -----------------------------------------------------
 # Installed and restarted alongside the brain, but never coupled to it: no ordering, no
 # dependency, in either direction. A dead eyeball is a staleness timeout the show already
 # handles, and a unit dependency would turn that degraded show into a stopped one.

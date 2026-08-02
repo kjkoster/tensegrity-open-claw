@@ -14,7 +14,11 @@ opencv-python-headless
 numpy
 paho-mqtt
 
-# The TFLite runtime that the movenet estimator needs is deliberately absent. Which
-# distribution provides it is unresolved — tflite-runtime's last wheels were cp311, its
-# successor is ai-edge-litert, and neither is confirmed for this Pi's Python. Until that is
-# settled the daemon runs the silhouette estimator, which needs nothing beyond OpenCV.
+# The runtime that reads the .tflite model the deploy fetches. Required rather than optional:
+# without it that model is a file nothing can open, and the daemon refuses to start over a
+# missing skeleton — which is a symptom two steps from its cause.
+#
+# If no wheel exists for this Pi's Python, pip fails here. That is the right place to find out.
+# The alternative to installing it is supplying a MoveNet .onnx by hand, which OpenCV's own DNN
+# module reads with no runtime at all, at the cost of float arithmetic instead of int8.
+ai-edge-litert
