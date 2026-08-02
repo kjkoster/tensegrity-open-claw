@@ -54,6 +54,17 @@ BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
 
 HTTP_PORT = int(os.environ.get("EYEBALL_HTTP_PORT", "8080"))
 PREVIEW_QUALITY = int(os.environ.get("EYEBALL_PREVIEW_QUALITY", "70"))
+# The preview is downscaled before it is drawn on and encoded. It is watched by a person, on a
+# laptop, over a link that may be 4G — none of which wants sensor resolution — and every pixel
+# above this is one the Pi draws and JPEG-encodes for nothing.
+PREVIEW_MAX_WIDTH = int(os.environ.get("EYEBALL_PREVIEW_WIDTH", "640"))
+# How long after the last request the daemon keeps drawing. Nothing is annotated or encoded
+# unless somebody is looking: the preview is the single most expensive thing here per frame, and
+# for almost all of the show's life nobody has the page open.
+PREVIEW_IDLE_S = 10.0
+# How long a single-frame request waits for a frame newer than itself, so a page opened after a
+# quiet spell does not serve whatever was last drawn whenever somebody last looked.
+PREVIEW_WAIT_S = 1.0
 
 SERVICE = "eyeball"
 TELEMETRY_INTERVAL_S = 5.0
@@ -136,11 +147,18 @@ class MoveNet:
                 break
             except (ImportError, AttributeError):
                 continue
+        # Both misses are spelled out rather than noted. The skeleton is what the preview is
+        # for — it is the picture that explains the rig to somebody being shown it — so falling
+        # back to the silhouette is a degraded mode worth a paragraph, not a shrug.
         if interpreter_class is None:
-            log("no TFLite runtime installed")
+            log("no TFLite runtime — falling back to the silhouette estimator, no skeleton")
+            log("  to get one:  sudo /opt/eyeball/venv/bin/pip install ai-edge-litert")
+            log("  or add ai-edge-litert to eyeball/requirements.txt and deploy")
             return None
         if not os.path.exists(MODEL):
-            log(f"no model at {MODEL}")
+            log(f"no model at {MODEL} — falling back to the silhouette estimator, no skeleton")
+            log("  MoveNet SinglePose Lightning, int8 tflite, put at the path above")
+            log("  EYEBALL_MODEL moves it elsewhere")
             return None
 
         interpreter = interpreter_class(model_path=MODEL, num_threads=MODEL_THREADS)
@@ -296,37 +314,89 @@ def capture_thread(frames, stats):
 
 # ── Annotation ───────────────────────────────────────────────────────────────
 
-COLOUR_BONE = (0, 255, 255)
-COLOUR_POINT = (0, 128, 255)
-COLOUR_CROP = (0, 255, 0)
+COLOUR_BONE = (80, 255, 255)
+COLOUR_POINT = (60, 180, 255)
+COLOUR_CROP = (0, 220, 0)
 COLOUR_TEXT = (255, 255, 255)
+# Everything is drawn twice, this colour underneath and one size wider. A skeleton in a single
+# colour disappears wherever the image happens to match it, and this preview is shown to
+# children against whatever a field looks like that afternoon — the outline is what makes it
+# read on a bright shirt and on dark grass alike.
+COLOUR_OUTLINE = (16, 16, 16)
+
+# One definition each, because the status text is measured with one call and drawn with
+# another: a font or scale that differed between them would size the backing box wrongly, and
+# the mismatch would look like the text had moved rather than like the box was wrong.
+FONT = cv2.FONT_HERSHEY_SIMPLEX
+FONT_SCALE = 0.5
+FONT_THICKNESS = 1
+TEXT_LINE_HEIGHT = 18
+TEXT_PADDING = 4
+
+
+def downscale(frame):
+    """Shrinks to the preview width, or returns the frame untouched if it is already small."""
+    height, width = frame.shape[:2]
+    if width <= PREVIEW_MAX_WIDTH:
+        return frame
+    scale = PREVIEW_MAX_WIDTH / width
+    return cv2.resize(
+        frame, (PREVIEW_MAX_WIDTH, max(1, int(height * scale))), interpolation=cv2.INTER_AREA
+    )
 
 
 def annotate(frame, stool, keypoints, estimator, status):
-    """Draws the crop, the pose and the running numbers onto a copy of the full frame."""
+    """Draws the crop, the skeleton and the running numbers onto a copy of the frame.
+
+    The skeleton is the point of this picture, not a debugging overlay on it — it is what makes
+    the rig legible to somebody being shown how it works. So it is drawn to be seen from across
+    a field on a laptop screen: outlined, thick enough to survive JPEG, and joints on top of
+    bones so a limb reads as jointed rather than as a bent stick.
+    """
     canvas = frame.copy()
     x, y, w, h = stool
     cv2.rectangle(canvas, (x, y), (x + w, y + h), COLOUR_CROP, 1)
 
     if keypoints:
-        # Keypoints are normalised within the crop, so the crop origin puts them back on the
-        # full frame — the preview shows where the mage is in the room, not in the tensor.
+        # Keypoints are normalised within the crop, so the crop origin puts them back into the
+        # picture — the preview shows where the mage is in the room, not in the tensor.
         placed = {
             name: (int(x + px * w), int(y + py * h))
             for name, (px, py, confidence) in keypoints.items()
             if confidence >= MOVENET_MIN_CONFIDENCE
         }
-        for first, second in estimator.bones:
-            if first in placed and second in placed:
-                cv2.line(canvas, placed[first], placed[second], COLOUR_BONE, 2)
+        bones = [
+            (placed[first], placed[second])
+            for first, second in estimator.bones
+            if first in placed and second in placed
+        ]
+        # Every outline first, then every fill: drawing each bone's outline immediately before
+        # its own fill would let the next bone's outline cut a dark notch through the last
+        # bone's body wherever two limbs cross.
+        for start, end in bones:
+            cv2.line(canvas, start, end, COLOUR_OUTLINE, 6, cv2.LINE_AA)
+        for start, end in bones:
+            cv2.line(canvas, start, end, COLOUR_BONE, 3, cv2.LINE_AA)
         for point in placed.values():
-            cv2.circle(canvas, point, 4, COLOUR_POINT, -1)
+            cv2.circle(canvas, point, 6, COLOUR_OUTLINE, -1, cv2.LINE_AA)
+        for point in placed.values():
+            cv2.circle(canvas, point, 4, COLOUR_POINT, -1, cv2.LINE_AA)
 
+    # A filled box behind the text rather than an outline around it. Drawing the same string
+    # twice at two thicknesses does not produce concentric glyphs — the thick pass sits beside
+    # the thin one rather than under it — and a box needs no such alignment to hold.
     for line, text in enumerate(status):
-        cv2.putText(
-            canvas, text, (8, 20 + line * 18),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOUR_TEXT, 1, cv2.LINE_AA,
+        origin = (8, 20 + line * TEXT_LINE_HEIGHT)
+        (width, height), baseline = cv2.getTextSize(text, FONT, FONT_SCALE, FONT_THICKNESS)
+        cv2.rectangle(
+            canvas,
+            (origin[0] - TEXT_PADDING, origin[1] - height - TEXT_PADDING),
+            (origin[0] + width + TEXT_PADDING, origin[1] + baseline),
+            COLOUR_OUTLINE,
+            -1,
         )
+        cv2.putText(canvas, text, origin, FONT, FONT_SCALE,
+                    COLOUR_TEXT, FONT_THICKNESS, cv2.LINE_AA)
     return canvas
 
 
@@ -355,11 +425,22 @@ class Preview(BaseHTTPRequestHandler):
     raw = None
     annotated = None
     pose = None
+    # When somebody last asked for a picture. The frame loop reads it to decide whether drawing
+    # and encoding are worth doing at all.
+    last_request = 0.0
 
     protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         """Silenced: a browser holding an MJPEG stream open would otherwise fill the journal."""
+
+    @classmethod
+    def touch(cls):
+        cls.last_request = time.monotonic()
+
+    @classmethod
+    def watching(cls):
+        return time.monotonic() - cls.last_request < PREVIEW_IDLE_S
 
     def _send(self, body, content_type):
         self.send_response(200)
@@ -368,6 +449,23 @@ class Preview(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _image(self, slot):
+        """Serves one frame, waiting briefly for one drawn since this request arrived.
+
+        Without the wait, a page opened after a quiet spell would show whatever was last drawn
+        whenever somebody last looked — which could be hours old and would look like a frozen
+        camera rather than a preview that had been switched off.
+        """
+        before = slot.get()
+        self.touch()
+        deadline = time.monotonic() + PREVIEW_WAIT_S
+        while time.monotonic() < deadline:
+            current = slot.get()
+            if current is not None and current is not before:
+                return current
+            time.sleep(0.02)
+        return slot.get() or b""
 
     def _stream(self, slot):
         boundary = b"--eyeballframe"
@@ -381,6 +479,10 @@ class Preview(BaseHTTPRequestHandler):
         last = None
         try:
             while True:
+                # Every pass, not only on a new frame: this is what keeps the frame loop drawing
+                # for as long as a browser holds the stream open, and lets it stop within
+                # PREVIEW_IDLE_S of the browser going away.
+                self.touch()
                 frame = slot.get()
                 if frame is None or frame is last:
                     time.sleep(0.02)
@@ -398,9 +500,9 @@ class Preview(BaseHTTPRequestHandler):
         if path == "/":
             self._send(PAGE, "text/html; charset=utf-8")
         elif path == "/raw.jpg":
-            self._send(self.raw.get() or b"", "image/jpeg")
+            self._send(self._image(self.raw), "image/jpeg")
         elif path == "/annotated.jpg":
-            self._send(self.annotated.get() or b"", "image/jpeg")
+            self._send(self._image(self.annotated), "image/jpeg")
         elif path == "/annotated.mjpg":
             self._stream(self.annotated)
         elif path == "/pose.json":
@@ -636,8 +738,13 @@ def main():
     sequence = 0
     last_frame = None
     fps = 0.0
+    estimate_ms = 0.0
     last_tick = time.monotonic()
     last_telemetry = 0.0
+    # Where the camera's own delivery rate is measured, against which the processing rate above
+    # is read: the two together say whether frames are being decoded and thrown away.
+    last_captured = 0
+    last_captured_at = time.monotonic()
 
     while True:
         frame = frames.get()
@@ -648,7 +755,11 @@ def main():
 
         box = crop_box(frame)
         x, y, w, h = box
+        # Timed on its own, because the alternative is arguing about whether the cost is the
+        # estimator or the decode when one number separates them.
+        started = time.monotonic()
         keypoints = estimator(frame[y:y + h, x:x + w])
+        estimate_ms = 0.9 * estimate_ms + 0.1 * (time.monotonic() - started) * 1000
 
         sequence += 1
         now = time.monotonic()
@@ -672,17 +783,44 @@ def main():
         to_brain.sendto(payload, (BRAIN_HOST, BRAIN_PORT))
         Preview.pose.put(payload)
 
-        status = [
-            f"{estimator.name}  {fps:4.1f} Hz  seq {sequence}",
-            "mage: yes" if keypoints else "mage: no",
-        ]
-        Preview.raw.put(encode(frame))
-        Preview.annotated.put(encode(annotate(frame, box, keypoints, estimator, status)))
+        # Drawing and encoding only while somebody is looking. This is by far the most expensive
+        # thing in the loop — a full-frame copy and two JPEG encodes — and for almost all of the
+        # rig's life nobody has the page open. The landmark stream and the telemetry above are
+        # unaffected: the show never depended on the preview being produced.
+        if Preview.watching():
+            small = downscale(frame)
+            # The crop box is in full-frame pixels and the preview may be smaller, so it is
+            # scaled to match. Keypoints need no such treatment: they are normalised within the
+            # crop and land correctly wherever the crop itself is drawn.
+            ratio = small.shape[1] / frame.shape[1]
+            scaled = tuple(int(value * ratio) for value in box)
+            status = [
+                f"{estimator.name}  {fps:4.1f} Hz  seq {sequence}",
+                "mage: yes" if keypoints else "mage: no",
+            ]
+            Preview.raw.put(encode(small))
+            Preview.annotated.put(
+                encode(annotate(small, scaled, keypoints, estimator, status))
+            )
 
         if time.time() - last_telemetry >= TELEMETRY_INTERVAL_S:
             last_telemetry = time.time()
+            now = time.monotonic()
+            captured_fps = (stats["captured"] - last_captured) / max(now - last_captured_at, 1e-6)
+            last_captured, last_captured_at = stats["captured"], now
             telemetry.publish("status", {
                 "fps": round(fps, 2),
+                # What the camera is actually delivering. Below the requested rate means the
+                # camera or the link is the limit; above the processing rate means frames are
+                # being decoded and dropped, and the request should come down to meet it.
+                "captured_fps": round(captured_fps, 2),
+                # What the camera is actually sending, which is the only way to know whether it
+                # honoured the resolution the URL asked for.
+                "width": frame.shape[1],
+                "height": frame.shape[0],
+                # Splits the cost: a small number here with a busy process means the expense is
+                # decode, and a large one means it is the estimator.
+                "estimate_ms": round(estimate_ms, 1),
                 "seq": sequence,
                 "captured": stats["captured"],
                 "present": keypoints is not None,
