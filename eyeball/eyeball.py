@@ -16,6 +16,7 @@ the runtime question stay open while the plumbing gets finished.
 """
 
 import json
+import math
 import os
 import socket
 import sys
@@ -56,6 +57,9 @@ CAMERA_PASSWORD = os.environ.get("EYEBALL_CAMERA_PASSWORD", "")
 CAMERA_TRANSPORT = os.environ.get("EYEBALL_CAMERA_TRANSPORT", "rtsp")
 CAMERA_RESOLUTION = os.environ.get("EYEBALL_CAMERA_RESOLUTION", "640x360")
 CAMERA_FPS = os.environ.get("EYEBALL_CAMERA_FPS", "10")
+# Which of the camera's view areas to stream. It reports eight, each a separately croppable
+# window onto the same sensor, addressed as `camera=N` on every stream URL and every PTZ call.
+CAMERA_VIEW = os.environ.get("EYEBALL_CAMERA_VIEW", "1")
 
 # What the daemon insists the camera is set to, written at startup and read back.
 #
@@ -83,10 +87,15 @@ CAMERA_MODES = {
         "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
         "ImageSource.I0.Sensor.Exposure=hold"
     ),
+    # The illuminator is not commanded here. `Light.L0.Enabled` does not exist on this camera —
+    # the write is refused and the read-back returns nothing — and the lamp evidently follows
+    # the IR-cut filter on its own, since infrared works without ever being asked for. A setting
+    # that fails on every startup is noise that teaches you to skip past error lines, which is
+    # worse than not having it. The real key, if one is wanted, is in `eyeball/camera/Light/`.
     "night": (
         "ImageSource.I0.DayNight.IrCutFilter=no,"
-        "ImageSource.I0.Sensor.Exposure=auto,"
-        "Light.L0.Enabled=yes"
+        "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
+        "ImageSource.I0.Sensor.Exposure=auto"
     ),
 }
 #
@@ -120,6 +129,33 @@ CHANNEL = CHANNELS.get(os.environ.get("EYEBALL_CHANNEL", "colour"))
 # closest to.
 ENHANCE = os.environ.get("EYEBALL_ENHANCE", "none")
 CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+# One Euro smoothing on the landmarks.
+#
+# A neural estimator's output wobbles by a pixel or two per frame even when nothing moves, and
+# at this pose rate that wobble reaches the heads as a target that will not sit still. A plain
+# low-pass fixes it and adds lag to every movement, which is the wrong trade for a show where
+# the interesting gestures are the fast ones.
+#
+# One Euro varies its cutoff with speed: heavy smoothing when the landmark is nearly still,
+# opening up as it moves, so a held pose is rock steady and a thrown arm is barely delayed.
+#
+# `min_cutoff` sets the stillness case — lower is steadier and laggier. `beta` sets how fast the
+# filter gets out of the way — higher is more responsive and lets more jitter through while
+# moving. The pair below was chosen against this rig's pose rate rather than taken from the
+# paper, whose defaults assume something nearer 60 Hz and barely smooth anything at seven: it
+# cuts a still landmark's wander to about a third while a half-frame arm sweep still settles as
+# quickly as the looser settings manage. Coordinates are normalised, so `beta` is scaled for a
+# brisk wrist covering perhaps half a frame per second.
+#
+# Both are a starting point for tuning on a person, not a result.
+SMOOTHING = os.environ.get("EYEBALL_SMOOTHING", "on") != "off"
+SMOOTH_MIN_CUTOFF = float(os.environ.get("EYEBALL_SMOOTH_MIN_CUTOFF", "0.2"))
+SMOOTH_BETA = float(os.environ.get("EYEBALL_SMOOTH_BETA", "2.0"))
+SMOOTH_D_CUTOFF = float(os.environ.get("EYEBALL_SMOOTH_D_CUTOFF", "1.0"))
+# How long a landmark may be missing before its filter starts fresh. Without this, an arm that
+# leaves the frame and returns elsewhere slides across the picture from where it used to be.
+SMOOTH_RESET_S = float(os.environ.get("EYEBALL_SMOOTH_RESET_S", "0.5"))
 
 BRAIN_HOST = os.environ.get("EYEBALL_BRAIN_HOST", "127.0.0.1")
 BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
@@ -173,6 +209,12 @@ MODEL_INPUT = int(os.environ.get("EYEBALL_MODEL_INPUT", "192"))
 # rather than a measurement, and the fourth core is worth trying against a slow head move.
 MODEL_THREADS = int(os.environ.get("EYEBALL_MODEL_THREADS", "3"))
 
+# How the crop is shrunk to the model's input. INTER_AREA is the right answer for quality on a
+# large downscale and it is not cheap — 720×720 to 192×192 is a factor of nearly four, and that
+# work is charged to the estimator. INTER_LINEAR trades some aliasing for speed, which a model
+# this tolerant may not notice.
+RESIZE = cv2.INTER_LINEAR if os.environ.get("EYEBALL_RESIZE") == "linear" else cv2.INTER_AREA
+
 # Which estimator to run. `movenet` is the intended one and the only one that draws a skeleton,
 # so a missing model is a refusal to start rather than a quiet demotion — the silhouette is a
 # deliberate choice, available by naming it, and never something the daemon slides into on its
@@ -211,7 +253,7 @@ def stream_url():
     if CAMERA_HOST.isdigit():
         return CAMERA_HOST
     credentials = f"{CAMERA_USER}:{CAMERA_PASSWORD}@" if CAMERA_USER else ""
-    size = f"resolution={CAMERA_RESOLUTION}&fps={CAMERA_FPS}"
+    size = f"camera={CAMERA_VIEW}&resolution={CAMERA_RESOLUTION}&fps={CAMERA_FPS}"
     if CAMERA_TRANSPORT == "mjpeg":
         return f"http://{credentials}{CAMERA_HOST}/axis-cgi/mjpg/video.cgi?{size}"
     return f"rtsp://{credentials}{CAMERA_HOST}/axis-media/media.amp?videocodec=h264&{size}"
@@ -253,9 +295,10 @@ MOVENET_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_MIN_CONFIDENCE", "0.3"))
 
 
 def movenet_tensor(frame, size, dtype):
-    """The one preprocessing every backend needs: square, RGB, batched, cast."""
-    resized = cv2.resize(frame, (size, size), interpolation=cv2.INTER_AREA)
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    """RGB, batched, cast. The frame arrives already square and already the right size."""
+    if frame.shape[0] != size or frame.shape[1] != size:
+        frame = cv2.resize(frame, (size, size), interpolation=cv2.INTER_AREA)
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     return np.expand_dims(rgb, axis=0).astype(dtype)
 
 
@@ -383,6 +426,10 @@ class MoveNet:
 
     def __init__(self, backend):
         self.backend = backend
+        # The model's own cost, apart from the preprocessing charged to it. The two together are
+        # what the loop pays; only one of them is helped by threads, and only the other is helped
+        # by a cheaper resize, so they are worth telling apart before tuning either.
+        self.infer_ms = 0.0
 
     @staticmethod
     def load():
@@ -400,29 +447,40 @@ class MoveNet:
         return None
 
     def __call__(self, frame):
-        # Padded to square before it is resized, never stretched to it.
+        # Fitted to square, never stretched to it.
         #
         # The model takes a square and the crop is whatever shape the stool wants, so something
         # has to give. Stretching hands the model a person of the wrong proportions — a third of
         # the frame's width at its full height arrives 1.7 times too tall — and a pose model's
-        # whole prior is what human proportions look like. Padding costs some of the input to
-        # blank borders and keeps the person themselves honest.
+        # whole prior is what human proportions look like.
+        #
+        # Shrunk first and padded second, in that order. Padding a 1280×720 crop to 1280×1280
+        # before shrinking it means allocating and filling five megabytes per frame to throw
+        # nearly all of it away at the resize — which cost this loop most of its frame rate. The
+        # arithmetic is identical either way; only the size of the intermediate differs.
+        size = self.backend.size
         height, width = frame.shape[:2]
-        side = max(width, height)
-        pad_x, pad_y = (side - width) // 2, (side - height) // 2
+        scale = size / max(width, height)
+        fitted_w = max(1, min(size, round(width * scale)))
+        fitted_h = max(1, min(size, round(height * scale)))
+        pad_x, pad_y = (size - fitted_w) // 2, (size - fitted_h) // 2
+
+        fitted = cv2.resize(frame, (fitted_w, fitted_h), interpolation=RESIZE)
         square = cv2.copyMakeBorder(
-            frame, pad_y, side - height - pad_y, pad_x, side - width - pad_x,
+            fitted, pad_y, size - fitted_h - pad_y, pad_x, size - fitted_w - pad_x,
             cv2.BORDER_CONSTANT, value=(0, 0, 0),
         )
 
         # MoveNet returns (1, 1, 17, 3) as y, x, confidence — y before x — normalised against
         # the padded square, so the padding comes back out here and every consumer downstream
         # keeps seeing coordinates normalised within the crop.
+        started = time.monotonic()
         raw = self.backend.infer(square)
+        self.infer_ms = 0.9 * self.infer_ms + 0.1 * (time.monotonic() - started) * 1000
         keypoints = {
             name: (
-                float((x * side - pad_x) / width),
-                float((y * side - pad_y) / height),
+                float((x * size - pad_x) / fitted_w),
+                float((y * size - pad_y) / fitted_h),
                 float(confidence),
             )
             for name, (y, x, confidence) in zip(MOVENET_KEYPOINTS, raw)
@@ -495,6 +553,92 @@ class Silhouette:
             name: (float(point[0] / width), float(point[1] / height), 1.0)
             for name, point in found.items()
         }
+
+
+# ── Smoothing ────────────────────────────────────────────────────────────────
+
+
+class OneEuro:
+    """One scalar, low-passed with a cutoff that rises as the value moves.
+
+    Casiez, Roussel and Vogel's filter, and the one the build order asks for by name. The whole
+    of it is that the smoothing factor is recomputed each sample from a cutoff frequency which
+    is itself a function of the signal's own speed — so it is not a compromise between steady
+    and responsive, it is both, at the moments each is wanted.
+
+    Rate-adaptive by construction: every sample carries its own timestamp, which matters here
+    because the pose rate is neither fixed nor fast.
+    """
+
+    def __init__(self, min_cutoff, beta, d_cutoff):
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.value = None
+        self.derivative = 0.0
+        self.at = None
+
+    @staticmethod
+    def alpha(cutoff, dt):
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def reset(self):
+        self.value = None
+        self.derivative = 0.0
+        self.at = None
+
+    def __call__(self, value, now):
+        if self.value is None:
+            self.value, self.at = value, now
+            return value
+        # Floored, because two samples from one frame would otherwise divide by nearly zero and
+        # hand the derivative an enormous number.
+        dt = max(now - self.at, 1e-3)
+        self.at = now
+
+        # The derivative is low-passed too, at a fixed cutoff. Raw frame-to-frame difference is
+        # almost entirely jitter, and feeding that to the cutoff would make the filter open up
+        # for noise — which is exactly what it exists to close down on.
+        derivative = (value - self.value) / dt
+        self.derivative += self.alpha(self.d_cutoff, dt) * (derivative - self.derivative)
+
+        cutoff = self.min_cutoff + self.beta * abs(self.derivative)
+        self.value += self.alpha(cutoff, dt) * (value - self.value)
+        return self.value
+
+
+class Smoother:
+    """A pair of One Euro filters per landmark, and the bookkeeping to keep them honest."""
+
+    def __init__(self):
+        self.filters = {}
+        self.seen = {}
+
+    def __call__(self, keypoints, now):
+        smoothed = {}
+        for name, (x, y, confidence) in keypoints.items():
+            # Landmarks the model is unsure of are passed through untouched and not fed to the
+            # filter. A low-confidence keypoint is usually somewhere arbitrary, and letting one
+            # into the filter drags the smoothed position after it for several frames — the
+            # estimate would be corrupted by exactly the samples worth ignoring.
+            if confidence < MOVENET_MIN_CONFIDENCE:
+                smoothed[name] = (x, y, confidence)
+                continue
+
+            axes = self.filters.get(name)
+            if axes is None:
+                axes = self.filters[name] = (
+                    OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
+                    OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
+                )
+            elif now - self.seen.get(name, now) > SMOOTH_RESET_S:
+                for axis in axes:
+                    axis.reset()
+
+            self.seen[name] = now
+            smoothed[name] = (axes[0](x, now), axes[1](y, now), confidence)
+        return smoothed
 
 
 # ── Latest-frame slot ────────────────────────────────────────────────────────
@@ -925,6 +1069,33 @@ def vapix_parameters(opener, host, groups):
     return found
 
 
+def vapix_ptz(opener, host, view):
+    """The view area's digital pan, tilt and zoom, as the camera currently has them.
+
+    A second reader, because this does not live in the parameter tree: `root.PTZ` does not
+    exist on this camera and asking for it is an error, while `Properties.PTZ.DigitalPTZ` says
+    yes. The position is runtime state behind `ptz.cgi` rather than a stored setting, so §5's
+    rule — nothing written that is not read back — needs this endpoint polled alongside the
+    parameter groups before anything commands a crop through it.
+
+    The reply is `pan=0.0` per line, the same shape as the parameter tree, so it flattens the
+    same way. An older firmware without the endpoint costs one logged line and nothing else.
+    """
+    url = f"http://{host}/axis-cgi/com/ptz.cgi?query=position&camera={view}"
+    try:
+        with opener.open(url, timeout=CAMERA_HTTP_TIMEOUT_S) as response:
+            body = response.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as e:
+        log(f"camera ptz position unavailable ({e})")
+        return {}
+    found = {}
+    for line in body.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            found[f"ptz.{view}.{key.strip()}"] = value.strip()
+    return found
+
+
 def vapix_update(opener, host, settings):
     """Writes parameters. Returns the camera's reply, which is `OK` when it took them."""
     query = "&".join(
@@ -1058,6 +1229,7 @@ def camera_thread(telemetry, camera):
             configured = configure_camera(telemetry, opener, camera.hostname, published)
 
         live = vapix_parameters(opener, camera.hostname, CAMERA_LIVE_GROUPS)
+        live.update(vapix_ptz(opener, camera.hostname, CAMERA_VIEW))
         publish_parameters(telemetry, live, published)
         time.sleep(CAMERA_POLL_S)
 
@@ -1170,6 +1342,10 @@ def main():
     log(f"mode: {CAMERA_MODE}")
     log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}, enhance: {ENHANCE}")
     log(f"confidence: {MOVENET_MIN_CONFIDENCE}")
+    if SMOOTHING:
+        log(f"smoothing: one euro, min_cutoff {SMOOTH_MIN_CUTOFF}, beta {SMOOTH_BETA}")
+    else:
+        log("smoothing: off")
     log(f"estimator: {estimator.name}")
     log(f"crop: {CROP}")
 
@@ -1194,6 +1370,7 @@ def main():
         "enhance": ENHANCE,
         "min_confidence": MOVENET_MIN_CONFIDENCE,
         "camera": CAMERA_HOST,
+        "view": CAMERA_VIEW,
         "transport": CAMERA_TRANSPORT,
         "resolution": CAMERA_RESOLUTION,
         "fps": CAMERA_FPS,
@@ -1207,6 +1384,7 @@ def main():
         daemon=True,
     ).start()
 
+    smoother = Smoother()
     to_brain = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     sequence = 0
@@ -1252,6 +1430,11 @@ def main():
         # holds, and a single slow frame answers nothing.
         fps = 0.9 * fps + 0.1 / max(now - last_tick, 1e-6)
         last_tick = now
+
+        # After the timing, so `estimate_ms` stays the model's cost alone, and before everything
+        # downstream, so the wire, the preview and the show all see the same smoothed landmarks.
+        if SMOOTHING and keypoints:
+            keypoints = smoother(keypoints, now)
 
         sighting = {
             "seq": sequence,
@@ -1306,6 +1489,14 @@ def main():
                 # Splits the cost: a small number here with a busy process means the expense is
                 # decode, and a large one means it is the estimator.
                 "estimate_ms": round(estimate_ms, 1),
+                # The model alone. Whatever `estimate_ms` has above this is the shrink to the
+                # model's input — a different problem with a different fix.
+                "infer_ms": round(getattr(estimator, "infer_ms", 0.0), 1),
+                # How much of the model's square input the crop actually covers. The rest is the
+                # black the letterbox padded it with — real input resolution spent on nothing.
+                # A square crop reads 1.0; a 16:9 frame reads 0.56, and that missing 44% is
+                # detail on the mage that was available and thrown away.
+                "input_fill": round(min(w, h) / max(w, h), 2),
                 # Whether the preview was being drawn while the rest of this was measured. A
                 # frame rate taken with a browser open is a different number, and this is what
                 # says which one you are looking at.

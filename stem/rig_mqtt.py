@@ -153,7 +153,15 @@ class Telemetry:
 
     def on_signal(self, *_):
         self.close()
-        sys.exit(0)
+        # `os._exit`, not `sys.exit`. Raising SystemExit here starts an orderly interpreter
+        # shutdown while daemon threads are parked inside C calls — a blocking frame decode, an
+        # HTTP handler, a socket read — and tearing those down mid-call aborts the process with
+        # `FATAL: exception not rethrown`, which systemd then records as a failed unit for what
+        # was an ordinary `systemctl stop`.
+        #
+        # Nothing is lost by leaving abruptly: the goodbye above has already been published and
+        # waited for, and every log line is written unbuffered.
+        os._exit(0)
 
     def publish(self, topic, value, retain=False):
         """Publishes under the service's own prefix, one topic per scalar field."""
