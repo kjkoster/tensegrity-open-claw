@@ -59,6 +59,62 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 // Fixture addressing is not here: it is generated from each rig's QLC+ workspace into that
 // rig's own `patch` module, the single source of truth for what is patched where.
 
+// ── Telemetry (the broker) ───────────────────────────────────────────────────
+// Stem owns the broker; every daemon holds its own client and announces itself under
+// `health/`. Loopback, because the publishers are all on this Pi — what reaches the tunnel
+// and the AP is the broker's own listener, which is Stem's configuration to make, not this
+// process's to decide.
+pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
+pub const MQTT_PORT: u16 = 1883;
+
+// The broker drops a client that has been silent for 1.5× this. The client pings twice per
+// interval, so one lost ping is not a disconnection and a genuinely dead brain is declared
+// gone inside a minute.
+pub const MQTT_KEEPALIVE_S: u64 = 30;
+
+// How long to wait for the CONNACK before treating the broker as unusable. Generous: it is a
+// loopback handshake, and the only thing that makes it slow is a broker still starting up.
+pub const MQTT_CONNACK_TIMEOUT_S: u64 = 5;
+
+// Messages that may sit queued for the telemetry thread. Deliberately shallow — the queue
+// exists so the frame loop never waits on a socket, not so telemetry survives an outage, and
+// past this depth the newest reading is worth more than the backlog behind it.
+pub const MQTT_QUEUE_DEPTH: usize = 64;
+
+// Reconnect backoff, matching the other receivers': a broker that comes back is picked up
+// without anything being restarted.
+pub const MQTT_RETRY_MAX_S: u64 = 30;
+
+// How long a shutdown waits for the goodbye to actually leave. The alternative to waiting is
+// the will firing and an orderly stop being recorded as a crash, so it is worth a moment — but
+// only a moment, because a wedged broker must never be able to hold up a shutdown.
+pub const MQTT_FAREWELL_MS: u64 = 500;
+
+// ── Eyeball (the vision sidecar) ─────────────────────────────────────────────
+// The landmark stream from the camera daemon. Cabinet-level like the audio device: one Pi,
+// one camera, one loopback port, whichever rig is live.
+//
+// Loopback, not the wildcard: the daemon and the brain are the same machine by construction,
+// and a wildcard bind would accept pose frames from anything that reached the Pi on any
+// interface — including the WiFi the fixtures join.
+pub const EYEBALL_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
+pub const EYEBALL_PORT: u16 = 9001;
+
+// How long a sighting stays actionable. Past this the show degrades to plain attentive and
+// holds, which is the same answer for a dead daemon, a wedged one, and a lost camera — the
+// three failures are indistinguishable from here and want identical handling. Long enough to
+// ride out several missed frames at a pose rate that may only be 4–7 Hz, short enough that a
+// dead camera does not leave heads pointing at where someone used to be.
+pub const EYEBALL_STALE_US: u64 = 1_000_000;
+
+// Rebind backoff for the listener, matching the sACN receiver's: retrying rather than dying
+// means vision reappears whenever the daemon does, and the show keeps running meanwhile.
+pub const EYEBALL_BIND_RETRY_MAX_S: u64 = 30;
+
+// How often the landmark stream is logged while it is being brought up. Slower than the audio
+// status line because a pose frame is a paragraph, not a number.
+pub const EYEBALL_LOG_INTERVAL_S: f64 = 2.0;
+
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe
 // mirrors the wireless one — one universe, two transports. Framing (BREAK/MAB timing,

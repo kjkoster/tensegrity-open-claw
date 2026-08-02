@@ -14,6 +14,19 @@ RestartSec=5
 # busy-spin in the break code can't lock the box.
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=50
+# Deliberately no CPUAffinity. It belongs in the code, not here.
+#
+# What the design wants is one core kept clear for the DMX loop — a statement about one thread.
+# A unit-file affinity is a statement about the whole process, and this process runs five
+# threads: the frame loop, audio capture, the sACN receiver, the eyeball listener and the
+# telemetry client. Confining all five to one core, all at the same real-time priority, starves
+# the ALSA capture thread of the moments it needs to drain a 512-frame period, and the
+# interface overruns — which is an xrun on the claw, the rig that actually listens.
+#
+# Vision is held to cores 0-2 by eyeball.service, so core 3 is already preferentially clear,
+# and real-time priority means this daemon preempts vision wherever the scheduler puts it.
+# Pinning only the DMX thread, from inside the process where the thread exists, is the version
+# of this that is worth having.
 
 [Install]
 WantedBy=multi-user.target

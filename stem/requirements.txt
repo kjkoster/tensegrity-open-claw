@@ -1,0 +1,9 @@
+# Python dependencies for Stem and the shared rig_mqtt module, pip-installed into
+# /opt/stem/venv by the deploy.
+#
+# Stem's own venv rather than eyeball's, deliberately: it must keep reporting when another
+# daemon is exactly what has gone wrong, and it cannot do that while sharing that daemon's
+# dependency tree. Everything else it needs — /proc, /sys, ip, vcgencmd — is the operating
+# system, which is why this list is one line long and should stay that way.
+
+paho-mqtt

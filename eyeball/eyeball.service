@@ -1,0 +1,32 @@
+[Unit]
+Description=Tensegrity Eyeball Vision Daemon
+After=network.target
+# Wanted, not Required: a broker that is down must leave the daemon running and the landmark
+# stream flowing. Telemetry is how the vision half is watched, never a condition of it going.
+Wants=mosquitto.service
+After=mosquitto.service
+
+[Service]
+# The camera URL carries credentials, so it lives on the Pi at 0600 and never in the repo.
+# Missing file is not a failure: the daemon falls back to a local device and still comes up,
+# which is what makes a fresh Pi debuggable through the preview page.
+EnvironmentFile=-/etc/default/eyeball
+# Its own venv, which the deploy fills from eyeball/requirements.txt. Own, not shared: Stem
+# runs from its own, so neither daemon can break the other by resolving a dependency.
+ExecStart=/opt/eyeball/venv/bin/python3 /usr/local/bin/eyeball.py
+Restart=always
+RestartSec=5
+# EX_CONFIG from sysexits.h, which the daemon exits with when EYEBALL_CAMERA is not set. A
+# missing configuration is not something a restart can fix, so restarting into it every five
+# seconds would bury the one legible explanation under a thousand copies of itself. The unit
+# stops instead, and `systemctl status eyeball` points straight at the reason.
+RestartPreventExitStatus=78
+# Three of the four cores. The fourth is the one brain runs its DMX loop on at real-time
+# priority, and inference landing there shows up as visible stutter in slow head moves.
+CPUAffinity=0 1 2
+# Deliberately no ordering or dependency against brain.service, in either direction. The show
+# survives a dead eyeball by its own staleness timeout, and coupling the units would turn a
+# degraded show into a stopped one.
+
+[Install]
+WantedBy=multi-user.target

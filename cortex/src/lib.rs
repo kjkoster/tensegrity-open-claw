@@ -11,16 +11,18 @@
 pub mod audio_features;
 pub mod clock;
 pub mod config;
+pub mod eyeball;
 pub mod geometry;
+pub mod latest;
 pub mod moving_head;
 pub mod perlin;
 pub mod qlc_plus;
 pub mod scenes;
 pub mod sparkle;
+pub mod telemetry;
 
 mod capture;
 mod dmx;
-mod latest;
 mod orchestrator;
 mod sacn_in;
 
@@ -31,6 +33,10 @@ use qlc_plus::PatchEntry;
 use scenes::Scene;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
 use std::net::UdpSocket;
+
+/// The name the brain wears on the broker: its health topic and the prefix on everything else
+/// it publishes. Not the binary's name — see where it is used.
+const TELEMETRY_SERVICE: &str = "brain";
 
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
 ///
@@ -119,6 +125,17 @@ pub fn run(rig: Rig) -> ! {
         eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
     }
 
+    // The brain's own client. `brain` rather than the binary's name: only one rig runs at a
+    // time, and a subscriber asking whether the brain is alive should not have to know which
+    // sculpture is standing. Which one it is goes on `brain/identity`, retained, so that
+    // arrives with the answer rather than instead of it.
+    let (_telemetry, publisher, farewell) = telemetry::spawn(TELEMETRY_SERVICE);
+    publisher.publish("identity/rig", name, true);
+    publisher.publish("identity/universe", UNIVERSE.to_string(), true);
+    publisher.publish("identity/frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
+    publisher.publish("identity/fixtures", rig.patch.len().to_string(), true);
+    publisher.publish("identity/scenes", rig.scenes.len().to_string(), true);
+
     // systemd stops the brain with SIGTERM. Catch it to release the sACN source — a burst of
     // terminate frames — so a higher-priority console or the fixtures' fallback takes over at
     // once instead of waiting out the 2.5 s data-loss timeout. signal_hook's iterator runs on
@@ -134,6 +151,11 @@ pub fn run(rig: Rig) -> ! {
                 let packet = dmx::encode_release(UNIVERSE, sequence, SACN_PRIORITY, &cid, dmx_slots);
                 dmx::send_multicast(&shutdown_socket, UNIVERSE, SACN_PORT, &packet);
             }
+            // After the fixtures are handed back, because they are what the delay would cost.
+            // Without this every ordinary restart would look like a crash: the will fires
+            // whenever the connection dies without a goodbye, and `systemctl restart` is the
+            // most common way for that to happen.
+            farewell.say();
             std::process::exit(0);
         }
     });

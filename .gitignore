@@ -2,3 +2,4 @@ Cargo.lock
 *.autosave.qxw
 target
 .DS_Store
+__pycache__

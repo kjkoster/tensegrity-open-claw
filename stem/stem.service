@@ -1,0 +1,27 @@
+[Unit]
+Description=Tensegrity Stem Health Daemon
+After=network.target
+# Wanted, not Required: a broker that is down must leave Stem running and publishing nothing,
+# because a health daemon that exits when the transport fails is silent in precisely the
+# situation it exists for.
+Wants=mosquitto.service
+After=mosquitto.service
+
+[Service]
+# Its own venv, not eyeball's. Stem must not inherit another daemon's dependencies — it has to
+# keep reporting when that daemon is exactly what has gone wrong.
+ExecStart=/opt/stem/venv/bin/python3 /usr/local/bin/stem.py
+Restart=always
+RestartSec=5
+# No WatchdogSec, and Stem pets nothing. Its death costs telemetry and must never cost uptime,
+# so it is given no mechanism that could take anything else down with it.
+#
+# No real-time scheduling either, and a positive Nice on top: everything this daemon reads is
+# slow-moving, and none of it is worth a single late DMX frame.
+Nice=10
+# The three cores eyeball uses. Core 3 is brain's, and a health daemon waking every thirty
+# seconds has no business on it.
+CPUAffinity=0 1 2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# Python dependencies for the eyeball daemon, pip-installed into /opt/eyeball/venv by the
+# deploy. This file is the only statement of what the daemon needs.
+#
+# The venv is created with --system-site-packages, so anything the Pi already carries from apt
+# stays visible as a floor under whatever pip resolves here.
+#
+# headless, not plain opencv-python. The desktop build links against OpenGL and GTK for its
+# imshow window, so on a Pi with no display it fails at import with a missing libGL.so.1 — and
+# the fix is not to install a graphics stack on a headless rig, it is to stop asking for one.
+# This daemon opens no windows: the preview it serves is JPEG over HTTP, and everything it
+# calls lives in core and imgproc, which the headless wheel carries in full.
+
+opencv-python-headless
+numpy
+paho-mqtt
+
+# The TFLite runtime that the movenet estimator needs is deliberately absent. Which
+# distribution provides it is unresolved — tflite-runtime's last wheels were cp311, its
+# successor is ai-edge-litert, and neither is confirmed for this Pi's Python. Until that is
+# settled the daemon runs the silhouette estimator, which needs nothing beyond OpenCV.

@@ -21,7 +21,9 @@ mod geometry;
 use cortex::Rig;
 use cortex::audio_features::AudioFeatures;
 use cortex::config as cfg;
+use cortex::eyeball::{self, Sighting};
 use cortex::geometry::{Chooser, Point};
+use cortex::latest;
 use cortex::moving_head::{Pose, Slew, SlewRate, aim};
 use std::f64::consts::TAU;
 use std::io::BufRead;
@@ -182,6 +184,14 @@ fn main() {
     // came up on its own.
     let mut target: Option<Point> = None;
 
+    // The landmark stream, read but not yet acted on: nothing here decides where to go from a
+    // pose, and will not until the limits clamp exists. Logging it is how the vision half gets
+    // proved end to end — camera, daemon, socket, schema — while the show stays a metronome.
+    let (sightings_tx, sightings) = latest::latest(Sighting::default());
+    let _eyeball = eyeball::spawn_receiver(sightings_tx);
+    let mut since_sighting_log_s = 0.0f64;
+    let mut had_vision = false;
+
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
         patch: &patch::PATCH,
@@ -231,6 +241,31 @@ fn main() {
                         }
                         Ok(Command::Metronome) => target = None,
                         Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                    }
+                }
+
+                // The landmark stream, reported and nowhere else consumed. Crossing into or out
+                // of freshness is logged the moment it happens rather than at the next tick,
+                // because the interesting question during bring-up is *when* vision went away.
+                let sighting = sightings.snapshot();
+                let has_vision = sighting.fresh();
+                since_sighting_log_s += dt;
+                if has_vision != had_vision || since_sighting_log_s >= cfg::EYEBALL_LOG_INTERVAL_S {
+                    since_sighting_log_s = 0.0;
+                    had_vision = has_vision;
+                    if has_vision {
+                        eprintln!(
+                            "eyeball: seq {} — {} @ {:.1} Hz, mage {}",
+                            sighting.seq,
+                            sighting.source,
+                            sighting.fps,
+                            if sighting.present { "seen" } else { "not seen" },
+                        );
+                        for (name, [x, y, confidence]) in &sighting.keypoints {
+                            eprintln!("eyeball:   {name} {x:.3} {y:.3} ({confidence:.2})");
+                        }
+                    } else {
+                        eprintln!("eyeball: no sightings — show holds without vision");
                     }
                 }
 
