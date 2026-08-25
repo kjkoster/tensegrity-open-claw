@@ -179,6 +179,15 @@ fi
 step "install and restart eyeball daemon"
 sudo install -m 0755 "$REPO/eyeball/eyeball.py" /usr/local/bin/eyeball.py
 sudo install -m 0644 "$REPO/eyeball/eyeball.service" /etc/systemd/system/eyeball.service
+# Seeded once, never updated. The camera's whole configuration lives in this file, including the
+# password and the crop that gets retuned on site against the live preview — so a deploy that
+# copied over it would undo an evening's tuning and put a placeholder password back. A fresh card
+# gets a working file; every card after that keeps its own, and changes worth having are carried
+# back into the repository by hand.
+if [ ! -e /etc/default/eyeball ]; then
+    sudo install -m 0600 "$REPO/eyeball/eyeball.default" /etc/default/eyeball
+    echo "seeded /etc/default/eyeball — set EYEBALL_CAMERA_PASSWORD before the camera will answer"
+fi
 python_daemon /opt/eyeball/venv "$REPO/eyeball/requirements.txt"
 sudo systemctl daemon-reload
 sudo systemctl enable eyeball

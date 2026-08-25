@@ -61,47 +61,24 @@ CAMERA_FPS = os.environ.get("EYEBALL_CAMERA_FPS", "10")
 # window onto the same sensor, addressed as `camera=N` on every stream URL and every PTZ call.
 CAMERA_VIEW = os.environ.get("EYEBALL_CAMERA_VIEW", "1")
 
-# What the daemon insists the camera is set to, written at startup and read back.
+# What the daemon insists the camera is set to lives in `/etc/default/eyeball`, not here.
 #
-# Every one of these is a thing the design requires and the camera will otherwise decide for
-# itself, badly, from a scene the show is actively changing: an auto IR-cut filter oscillating
-# between day and night as beams sweep across the mage, an auto white balance chasing a wash
-# that has no green in it, an auto exposure re-metering every time a head moves.
+# Every setting is a thing the show requires and the camera will otherwise decide for itself,
+# badly, from a scene the show is actively changing: an auto IR-cut filter oscillating between
+# day and night as beams sweep across the mage, an auto white balance chasing a wash that has no
+# green in it, an auto exposure re-metering every time a head moves.
 #
-# The values differ between firmware generations, so they are overridable wholesale — and every
-# one is read back afterwards, because a camera that silently clamps or ignores a setting looks
-# exactly like one that accepted it.
-# Two presets rather than one, because the rig runs in two lighting regimes and the camera has
-# to be told which. `day` locks a colour sensor against a scene the show keeps changing. `night`
-# takes the IR-cut filter out so the sensor sees 850 nm, and turns on the camera's own
-# illuminator — at which point the picture is monochrome and lit by something the show's LEDs
-# emit almost none of, which is the whole appeal.
+# None of it is in this file, because a value here and a value on the Pi is two places to change
+# one setting and one of them will lose. The values are firmware-specific, they are retuned on
+# site against a live picture, and the only machine that can say whether one took is the camera
+# itself — all of which describes configuration rather than code. `eyeball/eyeball.default` in
+# the repository is the known-good list, installed by the deploy only when the Pi has no file of
+# its own, so a fresh card comes up configured and a tuned one is never overwritten.
 #
-# Exposure is held in day and left automatic at night, deliberately. Holding it means freezing
-# whatever value was current when the daemon started, which is right for a scene whose base
-# illumination is constant and wrong for one that has just been handed a different light source.
-# Once the IR exposure that works is known, it becomes a number and gets locked like the rest.
-CAMERA_MODES = {
-    "day": (
-        "ImageSource.I0.DayNight.IrCutFilter=yes,"
-        "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
-        "ImageSource.I0.Sensor.Exposure=hold"
-    ),
-    # The illuminator is not commanded here. `Light.L0.Enabled` does not exist on this camera —
-    # the write is refused and the read-back returns nothing — and the lamp evidently follows
-    # the IR-cut filter on its own, since infrared works without ever being asked for. A setting
-    # that fails on every startup is noise that teaches you to skip past error lines, which is
-    # worse than not having it. The real key, if one is wanted, is in `eyeball/camera/Light/`.
-    "night": (
-        "ImageSource.I0.DayNight.IrCutFilter=no,"
-        "ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,"
-        "ImageSource.I0.Sensor.Exposure=auto"
-    ),
-}
-#
-# `night` is the default because the show is a night show and because infrared measurably beats
-# visible light here — see the reasoning in EYEBALL.md, which is where that finding lives.
-CAMERA_MODE = os.environ.get("EYEBALL_CAMERA_MODE", "night")
+# The whole list is written on every start and read back afterwards, because a camera that
+# silently clamps or ignores a setting looks exactly like one that accepted it. Nothing re-writes
+# between starts: the deploy restarts this daemon whether or not it changed, so a start is the
+# moment the file's contents reach the camera.
 
 # sysexits.h EX_CONFIG. Named in the unit's RestartPreventExitStatus, so a misconfigured daemon
 # stops with one legible error rather than restarting into the same one every five seconds.
@@ -163,9 +140,11 @@ BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
 HTTP_PORT = int(os.environ.get("EYEBALL_HTTP_PORT", "8080"))
 PREVIEW_QUALITY = int(os.environ.get("EYEBALL_PREVIEW_QUALITY", "70"))
 # The preview is downscaled before it is drawn on and encoded. It is watched by a person, on a
-# laptop, over a link that may be 4G — none of which wants sensor resolution — and every pixel
-# above this is one the Pi draws and JPEG-encodes for nothing.
-PREVIEW_MAX_WIDTH = int(os.environ.get("EYEBALL_PREVIEW_WIDTH", "640"))
+# laptop, over a link that may be 4G — none of which wants sensor resolution — and both the
+# drawing and the encode are charged to the pose rate, which is the show's own responsiveness.
+# The ceiling is deliberately below the widths worth capturing at, so that raising the camera's
+# resolution to feed the estimator never quietly raises what the preview costs alongside it.
+PREVIEW_MAX_WIDTH = int(os.environ.get("EYEBALL_PREVIEW_WIDTH", "480"))
 # How long after the last request the daemon keeps drawing. Nothing is annotated or encoded
 # unless somebody is looking: the preview is the single most expensive thing here per frame, and
 # for almost all of the show's life nobody has the page open.
@@ -209,11 +188,19 @@ MODEL_INPUT = int(os.environ.get("EYEBALL_MODEL_INPUT", "192"))
 # rather than a measurement, and the fourth core is worth trying against a slow head move.
 MODEL_THREADS = int(os.environ.get("EYEBALL_MODEL_THREADS", "3"))
 
-# How the crop is shrunk to the model's input. INTER_AREA is the right answer for quality on a
-# large downscale and it is not cheap — 720×720 to 192×192 is a factor of nearly four, and that
-# work is charged to the estimator. INTER_LINEAR trades some aliasing for speed, which a model
-# this tolerant may not notice.
-RESIZE = cv2.INTER_LINEAR if os.environ.get("EYEBALL_RESIZE") == "linear" else cv2.INTER_AREA
+# How the crop is shrunk to the model's input.
+#
+# Bilinear, which reverses the original choice along with the reasoning behind it. INTER_AREA is
+# the right answer on a *large* downscale, and this stopped being one when the crop became the
+# box the mage stands in: 270×270 into a 192×192 input is a factor of 1.4, where area-averaging
+# reads barely more than two source pixels per axis and still pays for the general resampler.
+# What it bought was anti-aliasing, which is the artefact a pose model is least troubled by, and
+# what it cost was most of the 13–15 ms this stage takes out of a ~100 ms frame — the rest of
+# that gap being the padding above, which a square crop now skips entirely.
+#
+# `EYEBALL_RESIZE=area` goes back, and is the setting to reach for if the crop is ever widened
+# far enough to make the downscale steep again.
+RESIZE = cv2.INTER_AREA if os.environ.get("EYEBALL_RESIZE") == "area" else cv2.INTER_LINEAR
 
 # Which estimator to run. `movenet` is the intended one and the only one that draws a skeleton,
 # so a missing model is a refusal to start rather than a quiet demotion — the silhouette is a
@@ -239,9 +226,9 @@ def parse_settings(text):
     return settings
 
 
-CAMERA_SETTINGS = parse_settings(
-    os.environ.get("EYEBALL_CAMERA_SETTINGS", CAMERA_MODES.get(CAMERA_MODE, ""))
-)
+# Empty is a real answer rather than a missing one: `EYEBALL_CAMERA_HOST=0` opens a local video
+# device for desk testing, and a webcam has no parameter tree to write to.
+CAMERA_SETTINGS = parse_settings(os.environ.get("EYEBALL_CAMERA_SETTINGS", ""))
 
 
 def stream_url():
@@ -273,12 +260,10 @@ MOVENET_KEYPOINTS = [
 ]
 
 MOVENET_BONES = [
-    # The face, which the model reports and nothing consumed until now. Drawn because a
-    # skeleton with a head reads as a person and one without reads as a diagram, and this
-    # picture has to explain the rig to a child.
-    ("nose", "left_eye"), ("nose", "right_eye"),
-    ("left_eye", "left_ear"), ("right_eye", "right_ear"),
-
+    # No bones across the face. The five landmarks up there are not a skeleton — joining them
+    # draws a small angular cage where a head should be — so they are used to place an oval
+    # instead, and only the nose is left as a point, because which way it sits inside the oval
+    # is how you see where the mage is looking.
     ("left_shoulder", "right_shoulder"), ("left_shoulder", "left_elbow"),
     ("left_elbow", "left_wrist"), ("right_shoulder", "right_elbow"),
     ("right_elbow", "right_wrist"), ("left_shoulder", "left_hip"),
@@ -313,6 +298,7 @@ class TfliteBackend:
         self.input = interpreter.get_input_details()[0]
         self.output = interpreter.get_output_details()[0]
         self.size = self.input["shape"][1]
+        self.dtype = self.input["dtype"]
 
     @staticmethod
     def load():
@@ -392,6 +378,7 @@ class OpenCvBackend:
     def __init__(self, net):
         self.net = net
         self.size = MODEL_INPUT
+        self.dtype = np.float32
 
     @staticmethod
     def load():
@@ -442,7 +429,14 @@ class MoveNet:
         for candidate in MoveNet.BACKENDS:
             backend = candidate.load()
             if backend is not None:
-                log(f"pose model on {backend.name}, {backend.size}px input, {MODEL_THREADS} threads")
+                # The input dtype is reported because it is the difference between the model the
+                # design costed and a model that merely loaded. A float tensor here says the file
+                # on disk is not the quantised one, whatever the runtime underneath it is, and
+                # that is worth several times more than anything else in this loop can be tuned.
+                log(
+                    f"pose model on {backend.name}, {backend.size}px "
+                    f"{np.dtype(backend.dtype).name} input, {MODEL_THREADS} threads"
+                )
                 return MoveNet(backend)
         return None
 
@@ -465,11 +459,15 @@ class MoveNet:
         fitted_h = max(1, min(size, round(height * scale)))
         pad_x, pad_y = (size - fitted_w) // 2, (size - fitted_h) // 2
 
-        fitted = cv2.resize(frame, (fitted_w, fitted_h), interpolation=RESIZE)
-        square = cv2.copyMakeBorder(
-            fitted, pad_y, size - fitted_h - pad_y, pad_x, size - fitted_w - pad_x,
-            cv2.BORDER_CONSTANT, value=(0, 0, 0),
-        )
+        square = cv2.resize(frame, (fitted_w, fitted_h), interpolation=RESIZE)
+        # Skipped outright when the crop is already square, which is the case worth having: the
+        # crop is calibrated by hand against the mage and squaring it there is free, where padding
+        # here allocates and fills a whole tensor to write nothing into the margins.
+        if fitted_w != size or fitted_h != size:
+            square = cv2.copyMakeBorder(
+                square, pad_y, size - fitted_h - pad_y, pad_x, size - fitted_w - pad_x,
+                cv2.BORDER_CONSTANT, value=(0, 0, 0),
+            )
 
         # MoveNet returns (1, 1, 17, 3) as y, x, confidence — y before x — normalised against
         # the padded square, so the padding comes back out here and every consumer downstream
@@ -660,6 +658,29 @@ class Latest:
             return self.value
 
 
+class Watched(Latest):
+    """A slot that also knows when somebody last asked for what is in it.
+
+    On the slot rather than on the request handler, because not everything the handler serves is
+    a picture that costs anything to produce: the page polls the pose for liveness every two
+    seconds, and a flag shared with that poll would mean an open tab forever paying to draw a
+    preview it is not showing.
+
+    No lock: the timestamp is one float written by request threads and read by the frame loop,
+    where a read landing either side of a write is a decision made a frame early or a frame late.
+    """
+
+    def __init__(self, value=None):
+        super().__init__(value)
+        self.last_request = 0.0
+
+    def touch(self):
+        self.last_request = time.monotonic()
+
+    def watching(self):
+        return time.monotonic() - self.last_request < PREVIEW_IDLE_S
+
+
 # ── Capture ──────────────────────────────────────────────────────────────────
 
 
@@ -723,7 +744,6 @@ COLOUR_RIGHT = (255, 200, 0)
 COLOUR_CENTRE = (240, 240, 240)
 # Hard yellow, and nothing else in the picture is.
 COLOUR_CROP = (0, 255, 255)
-COLOUR_DETECTION = (255, 0, 255)
 COLOUR_TEXT = (255, 255, 255)
 # Everything is drawn twice, this colour underneath and one size wider. A skeleton in a single
 # colour disappears wherever the image happens to match it, and this preview is shown to
@@ -734,6 +754,22 @@ COLOUR_OUTLINE = (16, 16, 16)
 # One definition each, because the status text is measured with one call and drawn with
 # another: a font or scale that differed between them would size the backing box wrongly, and
 # the mismatch would look like the text had moved rather than like the box was wrong.
+# The face landmarks, which the oval replaces. The nose survives as a drawn point; the eyes and
+# ears do their work by defining the oval and are not drawn themselves.
+FACE_POINTS = ("left_eye", "right_eye", "left_ear", "right_ear")
+
+# A head against the distance between the ears. Biauricular breadth is very nearly the widest
+# part of a skull, so the width is barely more than that span; height runs about a third again,
+# chin to crown. Both are anthropometry rather than taste, and neither is worth tuning.
+HEAD_WIDTH_FROM_EARS = 1.05
+HEAD_ASPECT = 1.35
+# Interpupillary distance against head width, for the profile case where an ear is hidden.
+HEAD_WIDTH_FROM_EYES = 2.4
+# The ears sit below the middle of a head, so an oval centred on them rides low. Shifted up by
+# this much of its own height — "up" taken from the shoulders, which is the only direction in
+# the picture that reliably knows which way a body is standing.
+HEAD_RISE = 0.18
+
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.5
 FONT_THICKNESS = 1
@@ -759,6 +795,75 @@ def bone_colour(first, second):
     """A limb takes its side's colour; anything spanning the middle is white."""
     start, end = side_colour(first), side_colour(second)
     return start if start == end else COLOUR_CENTRE
+
+
+def confidence_line(keypoints):
+    """How sure the model is, as the one number worth watching while tuning the picture.
+
+    The mean across every landmark tracks image quality — it is what rises when the crop
+    tightens, the exposure stops blurring, or the illuminator reaches. The two wrists are called
+    out beside it because they are the hardest landmarks to hold and the ones the show is
+    actually built on: a mean that looks healthy while a wrist sits at 0.2 is a mage whose
+    pointing will not work.
+    """
+    if not keypoints:
+        return "conf —"
+    values = [confidence for _, _, confidence in keypoints.values()]
+    mean = sum(values) / len(values)
+
+    def wrist(name):
+        found = keypoints.get(name)
+        return f"{found[2]:.2f}" if found else "—"
+
+    return f"conf {mean:.2f}   wrist L {wrist('left_wrist')} R {wrist('right_wrist')}"
+
+
+def head_oval(placed):
+    """The head as a rotated ellipse, or None when too little of the face was found.
+
+    Built from the ears where both are visible, because the span between them is the head's
+    width and the line between them is its roll. In profile one ear disappears, so the eyes are
+    the fallback — a worse estimate of width, but the only one left that still carries an angle.
+
+    Returns what `cv2.ellipse` takes: centre, half-axes along and across that angle, degrees.
+    """
+    left_ear, right_ear = placed.get("left_ear"), placed.get("right_ear")
+    left_eye, right_eye = placed.get("left_eye"), placed.get("right_eye")
+
+    if left_ear and right_ear:
+        across, span = (left_ear, right_ear), HEAD_WIDTH_FROM_EARS
+    elif left_eye and right_eye:
+        across, span = (left_eye, right_eye), HEAD_WIDTH_FROM_EYES
+    else:
+        return None
+
+    (x1, y1), (x2, y2) = across
+    separation = math.hypot(x2 - x1, y2 - y1)
+    if separation < 2:
+        return None
+
+    width = separation * span
+    height = width * HEAD_ASPECT
+    angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+    centre = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+
+    # Lifted off the ear line toward the crown. Which way that is cannot be read from the face —
+    # a head tilted back has its nose above its ears — so it comes from the shoulders, the one
+    # pair of landmarks that always knows which end of the body is up.
+    shoulders = [placed.get("left_shoulder"), placed.get("right_shoulder")]
+    if all(shoulders):
+        (sx1, sy1), (sx2, sy2) = shoulders
+        up = (centre[0] - (sx1 + sx2) / 2.0, centre[1] - (sy1 + sy2) / 2.0)
+        reach = math.hypot(*up)
+        if reach > 1:
+            rise = height * HEAD_RISE
+            centre = (centre[0] + up[0] / reach * rise, centre[1] + up[1] / reach * rise)
+
+    return (
+        (int(round(centre[0])), int(round(centre[1]))),
+        (max(2, int(round(width / 2))), max(2, int(round(height / 2)))),
+        angle,
+    )
 
 
 def downscale(frame):
@@ -813,38 +918,32 @@ def annotate(frame, stool, keypoints, estimator, status):
             for first, second in estimator.bones
             if first in placed and second in placed
         ]
+        # The eyes and ears place the head and are not drawn; the nose stays, because where it
+        # sits inside the oval is how you read which way the mage is facing.
+        head = head_oval(placed)
+        drawn = {
+            name: point for name, point in placed.items()
+            if name not in FACE_POINTS or (head is None and name != "nose")
+        }
+
         # Every outline first, then every fill: drawing each bone's outline immediately before
         # its own fill would let the next bone's outline cut a dark notch through the last
         # bone's body wherever two limbs cross.
         for start, end, _ in bones:
             cv2.line(canvas, start, end, COLOUR_OUTLINE, 6, cv2.LINE_AA)
+        if head:
+            centre, axes, angle = head
+            cv2.ellipse(canvas, centre, axes, angle, 0, 360, COLOUR_OUTLINE, 6, cv2.LINE_AA)
         for start, end, colour in bones:
             cv2.line(canvas, start, end, colour, 3, cv2.LINE_AA)
-        for point in placed.values():
+        if head:
+            cv2.ellipse(canvas, centre, axes, angle, 0, 360, COLOUR_CENTRE, 3, cv2.LINE_AA)
+        for point in drawn.values():
             cv2.circle(canvas, point, 6, COLOUR_OUTLINE, -1, cv2.LINE_AA)
-        for name, point in placed.items():
+        for name, point in drawn.items():
             cv2.circle(canvas, point, 4, side_colour(name), -1, cv2.LINE_AA)
 
-        # The detection: where the confident landmarks actually reached. Reported as fractions
-        # of the whole frame and in the order EYEBALL_CROP takes, because tightening the crop
-        # around the stool is otherwise a matter of guessing at numbers — stand on it, read the
-        # line off the preview, paste it into the configuration.
-        if placed:
-            xs = [point[0] for point in placed.values()]
-            ys = [point[1] for point in placed.values()]
-            left, right = min(xs), max(xs)
-            top, bottom = min(ys), max(ys)
-            cv2.rectangle(canvas, (left, top), (right, bottom), COLOUR_DETECTION, 1, cv2.LINE_AA)
-            status.append(
-                "pose {:.2f},{:.2f},{:.2f},{:.2f}".format(
-                    left / width, top / height,
-                    (right - left) / width, (bottom - top) / height,
-                )
-            )
 
-    # A filled box behind the text rather than an outline around it. Drawing the same string
-    # twice at two thicknesses does not produce concentric glyphs — the thick pass sits beside
-    # the thin one rather than under it — and a box needs no such alignment to hold.
     for line, text in enumerate(status):
         origin = (8, 20 + line * TEXT_LINE_HEIGHT)
         (width, height), baseline = cv2.getTextSize(text, FONT, FONT_SCALE, FONT_THICKNESS)
@@ -862,7 +961,11 @@ def annotate(frame, stool, keypoints, estimator, status):
 
 def encode(frame):
     ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, PREVIEW_QUALITY])
-    return buffer.tobytes() if ok else None
+    if not ok:
+        # A `None` here would be published into the preview slot and served to a browser as a
+        # zero-length JPEG, which reads as a broken camera rather than as a failed encode.
+        raise RuntimeError(f"cannot JPEG-encode a {frame.shape} frame")
+    return buffer.tobytes()
 
 
 # ── HTTP preview ─────────────────────────────────────────────────────────────
@@ -874,20 +977,36 @@ def encode(frame):
 # during a tuning session is every thirty seconds. So the page polls a cheap endpoint, and on
 # seeing the daemon come back it re-requests the stream with a fresh query string, because a
 # browser will otherwise serve the dead one from cache.
+#
+# The picture takes the whole viewport that the text around it does not, because full-screening
+# this tab is how the rig gets shown to the kids and a small image pinned to a corner of a large
+# dark page is a poor thing to gather round. A column flex with the stage as the only growing row
+# is what makes that hold at any window shape; the `min-` zeroes on it stop a flex item refusing
+# to shrink below its content and pushing the footer off-screen.
+#
+# The image is sized rather than merely capped, because the frame arrives far smaller than the
+# screen it is shown on and a maximum only ever shrinks. `object-fit` is then what keeps a
+# stretched box from stretching the picture inside it: the element fills the stage, the frame
+# sits centred within it at its own proportions, and the border belongs to the stage for that
+# reason — it is the edge of the viewing area rather than of the picture.
 PAGE = b"""<!doctype html>
 <title>eyeball</title>
 <style>
-body{background:#111;color:#ccc;font:14px system-ui;margin:0;padding:1rem}
-img{max-width:100%;display:block;border:1px solid #333}
+html,body{height:100%}
+body{background:#111;color:#ccc;font:14px system-ui;margin:0;padding:1rem;
+     box-sizing:border-box;display:flex;flex-direction:column;gap:.6rem}
+h1{margin:0;font-size:1.1rem}
+#stage{flex:1;min-height:0;min-width:0;border:1px solid #333}
+#view{display:block;width:100%;height:100%;object-fit:contain}
 a{color:#6cf}
-#state{margin:.6rem 0;color:#7a7}
+p{margin:0}
+#state{color:#7a7}
 #state.down{color:#fc6}
 </style>
 <h1>eyeball</h1>
-<img id="view" src="/annotated.mjpg">
+<div id="stage"><img id="view" src="/annotated.mjpg"></div>
 <p id="state">live</p>
-<p><a href="/raw.jpg">raw frame</a> &middot;
-<a href="/annotated.jpg">annotated frame</a> &middot;
+<p><a href="/annotated.jpg">annotated frame</a> &middot;
 <a href="/pose.json">pose</a></p>
 <script>
 const view = document.getElementById('view');
@@ -923,25 +1042,13 @@ setInterval(() => {
 class Preview(BaseHTTPRequestHandler):
     """The human end. Single frames for aiming, a stream for watching, JSON for reading."""
 
-    raw = None
     annotated = None
     pose = None
-    # When somebody last asked for a picture. The frame loop reads it to decide whether drawing
-    # and encoding are worth doing at all.
-    last_request = 0.0
 
     protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         """Silenced: a browser holding an MJPEG stream open would otherwise fill the journal."""
-
-    @classmethod
-    def touch(cls):
-        cls.last_request = time.monotonic()
-
-    @classmethod
-    def watching(cls):
-        return time.monotonic() - cls.last_request < PREVIEW_IDLE_S
 
     def _send(self, body, content_type):
         self.send_response(200)
@@ -959,7 +1066,7 @@ class Preview(BaseHTTPRequestHandler):
         camera rather than a preview that had been switched off.
         """
         before = slot.get()
-        self.touch()
+        slot.touch()
         deadline = time.monotonic() + PREVIEW_WAIT_S
         while time.monotonic() < deadline:
             current = slot.get()
@@ -983,7 +1090,7 @@ class Preview(BaseHTTPRequestHandler):
                 # Every pass, not only on a new frame: this is what keeps the frame loop drawing
                 # for as long as a browser holds the stream open, and lets it stop within
                 # PREVIEW_IDLE_S of the browser going away.
-                self.touch()
+                slot.touch()
                 frame = slot.get()
                 if frame is None or frame is last:
                     time.sleep(0.02)
@@ -1000,8 +1107,6 @@ class Preview(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/":
             self._send(PAGE, "text/html; charset=utf-8")
-        elif path == "/raw.jpg":
-            self._send(self._image(self.raw), "image/jpeg")
         elif path == "/annotated.jpg":
             self._send(self._image(self.annotated), "image/jpeg")
         elif path == "/annotated.mjpg":
@@ -1118,18 +1223,31 @@ def configure_camera(telemetry, opener, host, published):
     Both halves reach the broker: `camera/requested/…` is what was asked for, and the ordinary
     parameter tree is what the camera says it is. A disagreement between the two subtrees is
     the whole diagnosis, visible without logging into anything.
+
+    A setting the camera refuses outright shows up here as a mismatch on every start, which is
+    the intended outcome: it is a wrong line in `/etc/default/eyeball` and it stays visible until
+    somebody takes it out. Nothing retries between starts — the camera is written once, when the
+    file's contents are known to be fresh, and the deploy restarts this daemon regardless.
+
+    Raises whatever the HTTP layer raises. Reaching the camera is either possible or it is not,
+    and a caller handed a `False` has to remember to look at it — which is the failure that hides,
+    because the code that forgets looks exactly like the code that succeeded. The retry policy
+    belongs to the caller, which is the only place that knows a camera may still be booting.
+
+    A mismatch is not an error and does not raise. The camera answered, the read-back is honest,
+    and the disagreement is a line in a config file for a person to fix.
     """
+    if not CAMERA_SETTINGS:
+        return
+
     for key, value in CAMERA_SETTINGS.items():
         telemetry.publish(f"camera/requested/{key.replace('.', '/')}", value, retain=True)
 
-    try:
-        reply = vapix_update(opener, host, CAMERA_SETTINGS)
-    except (urllib.error.URLError, OSError) as e:
-        log(f"camera configuration failed: {e}")
-        return False
+    reply = vapix_update(opener, host, CAMERA_SETTINGS)
     if reply.upper() != "OK":
-        # Not a return. A rejected parameter is worth knowing about, and the read-back below is
-        # a better account of what actually happened than this reply is.
+        # Logged rather than raised, because the read-back below is a better account of what
+        # happened than this reply is: it names which settings are wrong instead of saying that
+        # some were.
         log(f"camera did not accept every setting: {reply}")
 
     actual = vapix_parameters(opener, host, CAMERA_LIVE_GROUPS)
@@ -1140,7 +1258,6 @@ def configure_camera(telemetry, opener, host, published):
             log(f"camera {key} = {got}")
         else:
             log(f"camera {key}: asked for {wanted!r}, reads {got!r}")
-    return True
 
 
 def link_state(camera):
@@ -1222,11 +1339,19 @@ def camera_thread(telemetry, camera):
                 announced = True
                 log(f"camera is {static.get('Brand.ProdFullName', 'an unidentified model')}")
 
-        # After the camera has answered once, and retried until it takes: a camera still booting
-        # will refuse the write, and a daemon that tried once would leave the sensor on auto for
-        # the rest of the evening without ever saying so.
+        # After the camera has answered once, and retried until the write goes through: a camera
+        # still booting will refuse it, and a daemon that tried once would leave the sensor on
+        # auto for the rest of the evening without ever saying so.
+        #
+        # This is the one place that knows a failure is worth another attempt, which is why it is
+        # the one place that catches. `configured` is set only on the far side of the call, so a
+        # write that raised leaves it false and comes round again next poll.
         if not configured and link["reachable"]:
-            configured = configure_camera(telemetry, opener, camera.hostname, published)
+            try:
+                configure_camera(telemetry, opener, camera.hostname, published)
+                configured = True
+            except (urllib.error.URLError, OSError) as e:
+                log(f"camera configuration failed, retrying in {CAMERA_POLL_S:.0f}s: {e}")
 
         live = vapix_parameters(opener, camera.hostname, CAMERA_LIVE_GROUPS)
         live.update(vapix_ptz(opener, camera.hostname, CAMERA_VIEW))
@@ -1339,7 +1464,14 @@ def main():
     # for a daemon that runs but sees nothing, and `EnvironmentFile=-` means a missing
     # configuration file starts the daemon on defaults rather than failing where it would show.
     log(f"camera: {CAMERA_HOST} — {CAMERA_TRANSPORT} {CAMERA_RESOLUTION} at {CAMERA_FPS} fps")
-    log(f"mode: {CAMERA_MODE}")
+    # Listed rather than counted, and before the camera is touched. What the daemon is about to
+    # force is the thing a journal is read for after a picture comes out wrong, and reading it
+    # back off a label would be inferring the answer instead of seeing it.
+    if CAMERA_SETTINGS:
+        for key, value in CAMERA_SETTINGS.items():
+            log(f"camera setting: {key}={value}")
+    else:
+        log("camera settings: none configured, the camera keeps whatever it decided for itself")
     log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}, enhance: {ENHANCE}")
     log(f"confidence: {MOVENET_MIN_CONFIDENCE}")
     if SMOOTHING:
@@ -1353,8 +1485,10 @@ def main():
     stats = {"captured": 0}
     threading.Thread(target=capture_thread, args=(frames, stats), daemon=True).start()
 
-    Preview.raw = Latest()
-    Preview.annotated = Latest()
+    Preview.annotated = Watched()
+    # Not watched: it is served to the page's own two-second liveness poll, which asks whether
+    # the daemon is up rather than for a picture. Keeping the drawing alive on the strength of
+    # that poll would mean an open tab never stops paying for a preview it is not showing.
     Preview.pose = Latest()
     server = ThreadingHTTPServer(("0.0.0.0", HTTP_PORT), Preview)
     server.daemon_threads = True
@@ -1365,7 +1499,9 @@ def main():
     # Never the password: the telemetry tree is the one part of the rig anyone on the AP reads.
     telemetry.publish("identity", {
         "estimator": estimator.name,
-        "mode": CAMERA_MODE,
+        # No mode. What the camera was told is under `camera/requested/`, one topic per setting,
+        # beside the parameter tree saying what it actually is — and a label summarising those
+        # would be a second answer to the same question, free to disagree with the first.
         "channel": os.environ.get("EYEBALL_CHANNEL", "colour"),
         "enhance": ENHANCE,
         "min_confidence": MOVENET_MIN_CONFIDENCE,
@@ -1452,10 +1588,11 @@ def main():
         Preview.pose.put(payload)
 
         # Drawing and encoding only while somebody is looking. This is by far the most expensive
-        # thing in the loop — a full-frame copy and two JPEG encodes — and for almost all of the
-        # rig's life nobody has the page open. The landmark stream and the telemetry above are
-        # unaffected: the show never depended on the preview being produced.
-        if Preview.watching():
+        # thing in the loop — a frame copy, the annotation, and a JPEG encode — and it is charged
+        # straight to the pose rate. The landmark stream and the telemetry above are unaffected:
+        # the show never depended on the preview being produced.
+        drawing = Preview.annotated.watching()
+        if drawing:
             small = downscale(frame)
             # The crop box is in full-frame pixels and the preview may be smaller, so it is
             # scaled to match. Keypoints need no such treatment: they are normalised within the
@@ -1463,10 +1600,10 @@ def main():
             ratio = small.shape[1] / frame.shape[1]
             scaled = tuple(int(value * ratio) for value in box)
             status = [
-                f"{estimator.name}  {fps:4.1f} Hz  seq {sequence}",
+                f"{estimator.name}  {fps:4.1f} Hz",
                 "mage: yes" if keypoints else "mage: no",
+                confidence_line(keypoints),
             ]
-            Preview.raw.put(encode(small))
             Preview.annotated.put(
                 encode(annotate(small, scaled, keypoints, estimator, status))
             )
@@ -1500,7 +1637,7 @@ def main():
                 # Whether the preview was being drawn while the rest of this was measured. A
                 # frame rate taken with a browser open is a different number, and this is what
                 # says which one you are looking at.
-                "previewing": Preview.watching(),
+                "previewing": drawing,
                 "seq": sequence,
                 "captured": stats["captured"],
                 "present": keypoints is not None,

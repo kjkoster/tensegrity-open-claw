@@ -1,0 +1,61 @@
+# eyeball's configuration, installed to /etc/default/eyeball.
+#
+# The deploy copies this file only when the Pi does not already have one, so a fresh card comes
+# up configured and a file tuned on site is never overwritten. That makes this the reference
+# copy and the Pi's the operative one: edit the Pi's during a session, then bring the changes
+# back here so the next card starts where this one left off.
+#
+# It holds a password, so the deploy installs it 0600 and it is the reason no camera settings
+# live in the repository's Python. Change the password here and this file stops being safe to
+# commit — keep the placeholder, and set the real one on the Pi.
+
+EYEBALL_CAMERA_HOST=192.168.0.90
+EYEBALL_CAMERA_USER=root
+EYEBALL_CAMERA_PASSWORD=changeme
+
+# The box the mage stands in, as fractions of the frame: x,y,w,h. The region the estimator runs
+# on and the anchor everything else is judged against. Square is worth arranging — the model takes
+# a square input, and a crop that is not one arrives letterboxed with the margins spending real
+# input resolution on black. 0.5625 of a 16:9 frame is exactly its own height.
+EYEBALL_CROP=0.21875,0,0.5625,1
+
+EYEBALL_CAMERA_RESOLUTION=480x270
+
+# What the camera is asked to send, which has to sit a little above what the estimator achieves.
+# Below it and the stream becomes the ceiling — the loop runs at the camera's rate and no amount
+# of tuning downstream shows any effect at all, which is exactly what a request of 10 did once
+# pose reached 10. Far above it and the capture thread decodes frames that are dropped unread,
+# on the same three cores the model is using.
+#
+# eyeball/status/captured_fps against eyeball/status/fps is the readout: the first should stay a
+# little ahead of the second, and the gap between them is decode being thrown away.
+# Pi 3B can do ~15 fps
+EYEBALL_CAMERA_FPS=15
+
+# How the crop is shrunk to the model's input, and left to the daemon on purpose. Bilinear is
+# right while the crop is near the model's input size, area-averaging is right if it is ever
+# widened enough for the downscale to get steep — so the correct value follows the crop above,
+# and the default already knows it. Uncomment only to overrule that, never to restate it.
+#EYEBALL_RESIZE=area
+
+# What the camera is forced to on every start of the daemon, comma-separated key=value, in VAPIX
+# parameter names. Each is read back afterwards and any disagreement is logged by name and
+# published under eyeball/camera/requested/ beside what the camera says it actually is.
+#
+# A setting this firmware refuses reappears as a mismatch on every start until it is deleted from
+# here — MaxSlowShutter is one such on the M3105-LVE, kept for now because firmware generations
+# disagree about which of the two exposure ceilings binds and the other one takes.
+#
+# The list below is the night configuration, which is the one the show runs. Infrared beats
+# visible light on this rig by a wide margin, so there is no day list any more; the reasoning is
+# in EYEBALL.md §5.
+#
+#   IrCutFilter=no          the sensor sees 850 nm, lit by the camera's own illuminator
+#   WhiteBalance            locked, so a wash with no green in it cannot be chased
+#   Exposure=auto           bounded rather than locked, by the two ceilings below
+#   CaptureFrequency=50Hz   the mains here; 60Hz buys banding and a wrong quantisation
+#   MaxExposureTime=10000   10 ms, the shortest a 50 Hz flicker quantisation offers, and the
+#                           difference between a landmark on a moving wrist and a streak
+#   ExposurePriority=0      spend light on a short shutter rather than on low noise: a pose
+#                           model tolerates noise far better than it tolerates blur
+EYEBALL_CAMERA_SETTINGS=ImageSource.I0.DayNight.IrCutFilter=no,ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,ImageSource.I0.Sensor.Exposure=auto,ImageSource.I0.CaptureFrequency=50Hz,ImageSource.I0.Sensor.MaxExposureTime=10000,ImageSource.I0.Sensor.MaxSlowShutter=10000,ImageSource.I0.Sensor.ExposurePriority=0,ImageSource.I0.Sensor.ExposurePriorityLowlight=0
