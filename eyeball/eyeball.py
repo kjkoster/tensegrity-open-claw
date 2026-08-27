@@ -107,32 +107,14 @@ CHANNEL = CHANNELS.get(os.environ.get("EYEBALL_CHANNEL", "colour"))
 ENHANCE = os.environ.get("EYEBALL_ENHANCE", "none")
 CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-# One Euro smoothing on the landmarks.
+# How long the preview holds the worst each landmark has been.
 #
-# A neural estimator's output wobbles by a pixel or two per frame even when nothing moves, and
-# at this pose rate that wobble reaches the heads as a target that will not sit still. A plain
-# low-pass fixes it and adds lag to every movement, which is the wrong trade for a show where
-# the interesting gestures are the fast ones.
-#
-# One Euro varies its cutoff with speed: heavy smoothing when the landmark is nearly still,
-# opening up as it moves, so a held pose is rock steady and a thrown arm is barely delayed.
-#
-# `min_cutoff` sets the stillness case — lower is steadier and laggier. `beta` sets how fast the
-# filter gets out of the way — higher is more responsive and lets more jitter through while
-# moving. The pair below was chosen against this rig's pose rate rather than taken from the
-# paper, whose defaults assume something nearer 60 Hz and barely smooth anything at seven: it
-# cuts a still landmark's wander to about a third while a half-frame arm sweep still settles as
-# quickly as the looser settings manage. Coordinates are normalised, so `beta` is scaled for a
-# brisk wrist covering perhaps half a frame per second.
-#
-# Both are a starting point for tuning on a person, not a result.
-SMOOTHING = os.environ.get("EYEBALL_SMOOTHING", "on") != "off"
-SMOOTH_MIN_CUTOFF = float(os.environ.get("EYEBALL_SMOOTH_MIN_CUTOFF", "0.2"))
-SMOOTH_BETA = float(os.environ.get("EYEBALL_SMOOTH_BETA", "2.0"))
-SMOOTH_D_CUTOFF = float(os.environ.get("EYEBALL_SMOOTH_D_CUTOFF", "1.0"))
-# How long a landmark may be missing before its filter starts fresh. Without this, an arm that
-# leaves the frame and returns elsewhere slides across the picture from where it used to be.
-SMOOTH_RESET_S = float(os.environ.get("EYEBALL_SMOOTH_RESET_S", "0.5"))
+# The instantaneous confidence is the wrong instrument for the question the arm mappings need
+# answered. An elbow that lets go for two frames of a fast sweep is back before an eye watching
+# a 9 Hz preview can register that it went, and the person best placed to notice is the one
+# waving their own arm about and therefore not reading the screen. A floor held for a couple of
+# seconds turns a blink into something that is still there when they look.
+CONFIDENCE_FLOOR_S = float(os.environ.get("EYEBALL_CONFIDENCE_FLOOR_S", "2.0"))
 
 BRAIN_HOST = os.environ.get("EYEBALL_BRAIN_HOST", "127.0.0.1")
 BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
@@ -553,93 +535,37 @@ class Silhouette:
         }
 
 
-# ── Smoothing ────────────────────────────────────────────────────────────────
+# ── Latest-frame slot ────────────────────────────────────────────────────────
 
 
-class OneEuro:
-    """One scalar, low-passed with a cutoff that rises as the value moves.
+class Floors:
+    """The worst each landmark has been over the last few seconds.
 
-    Casiez, Roussel and Vogel's filter, and the one the build order asks for by name. The whole
-    of it is that the smoothing factor is recomputed each sample from a cutoff frequency which
-    is itself a function of the signal's own speed — so it is not a compromise between steady
-    and responsive, it is both, at the moments each is wanted.
+    A mean across the skeleton is a picture-quality number and it stays healthy through exactly
+    the failure the arm mappings care about: the elbow sits between two landmarks the model
+    finds easily, so a shoulder at 0.9 and a wrist at 0.8 will carry an elbow at 0.1 without the
+    average moving enough to notice.
 
-    Rate-adaptive by construction: every sample carries its own timestamp, which matters here
-    because the pose rate is neither fixed nor fast.
+    A gap in the sightings is left as a gap rather than pushed in as a zero. Somebody stepping
+    out of frame is not a landmark coming loose, and a floor that read zero for two seconds
+    after every exit would say it was.
     """
 
-    def __init__(self, min_cutoff, beta, d_cutoff):
-        self.min_cutoff = min_cutoff
-        self.beta = beta
-        self.d_cutoff = d_cutoff
-        self.value = None
-        self.derivative = 0.0
-        self.at = None
-
-    @staticmethod
-    def alpha(cutoff, dt):
-        tau = 1.0 / (2.0 * math.pi * cutoff)
-        return 1.0 / (1.0 + tau / dt)
-
-    def reset(self):
-        self.value = None
-        self.derivative = 0.0
-        self.at = None
-
-    def __call__(self, value, now):
-        if self.value is None:
-            self.value, self.at = value, now
-            return value
-        # Floored, because two samples from one frame would otherwise divide by nearly zero and
-        # hand the derivative an enormous number.
-        dt = max(now - self.at, 1e-3)
-        self.at = now
-
-        # The derivative is low-passed too, at a fixed cutoff. Raw frame-to-frame difference is
-        # almost entirely jitter, and feeding that to the cutoff would make the filter open up
-        # for noise — which is exactly what it exists to close down on.
-        derivative = (value - self.value) / dt
-        self.derivative += self.alpha(self.d_cutoff, dt) * (derivative - self.derivative)
-
-        cutoff = self.min_cutoff + self.beta * abs(self.derivative)
-        self.value += self.alpha(cutoff, dt) * (value - self.value)
-        return self.value
-
-
-class Smoother:
-    """A pair of One Euro filters per landmark, and the bookkeeping to keep them honest."""
-
     def __init__(self):
-        self.filters = {}
-        self.seen = {}
+        self.history = {}
 
     def __call__(self, keypoints, now):
-        smoothed = {}
-        for name, (x, y, confidence) in keypoints.items():
-            # Landmarks the model is unsure of are passed through untouched and not fed to the
-            # filter. A low-confidence keypoint is usually somewhere arbitrary, and letting one
-            # into the filter drags the smoothed position after it for several frames — the
-            # estimate would be corrupted by exactly the samples worth ignoring.
-            if confidence < MOVENET_MIN_CONFIDENCE:
-                smoothed[name] = (x, y, confidence)
-                continue
+        for name, (_, _, confidence) in (keypoints or {}).items():
+            self.history.setdefault(name, []).append((now, confidence))
 
-            axes = self.filters.get(name)
-            if axes is None:
-                axes = self.filters[name] = (
-                    OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
-                    OneEuro(SMOOTH_MIN_CUTOFF, SMOOTH_BETA, SMOOTH_D_CUTOFF),
-                )
-            elif now - self.seen.get(name, now) > SMOOTH_RESET_S:
-                for axis in axes:
-                    axis.reset()
-
-            self.seen[name] = now
-            smoothed[name] = (axes[0](x, now), axes[1](y, now), confidence)
-        return smoothed
-
-
-# ── Latest-frame slot ────────────────────────────────────────────────────────
+        cutoff = now - CONFIDENCE_FLOOR_S
+        floors = {}
+        for name, samples in self.history.items():
+            fresh = [sample for sample in samples if sample[0] >= cutoff]
+            self.history[name] = fresh
+            if fresh:
+                floors[name] = min(confidence for _, confidence in fresh)
+        return floors
 
 
 class Latest:
@@ -775,6 +701,35 @@ FONT_SCALE = 0.5
 FONT_THICKNESS = 1
 TEXT_LINE_HEIGHT = 18
 TEXT_PADDING = 4
+# How far a column sits from the edge it is aligned against.
+TEXT_MARGIN = 8
+
+
+# What the skeleton is drawn at, by whether the show reads it.
+#
+# The arms carry the whole of the control — the upper segment aims a pair of heads and the lower
+# one swings them — so they keep their side's colour and the full weight. The torso, the legs
+# and the head are there to say that the shape in the picture is a person and which way it is
+# facing, which is a job that is done just as well thin and white, and done worse at a weight
+# that competes with the two limbs somebody is actually watching.
+ARM_WIDTH, ARM_OUTLINE = 3, 6
+# Half, as near as an integer line width gets to it.
+QUIET_WIDTH, QUIET_OUTLINE = 2, 4
+
+# Which landmarks belong to an arm. `tip` is the silhouette's word for the same thing.
+ARM_LANDMARKS = ("shoulder", "elbow", "wrist", "tip")
+# Which of them make a bone one of an arm's segments. The shoulder is left out here and kept
+# above, because the span between the two shoulders is a torso bone with a shoulder at each end.
+ARM_SEGMENT_ENDS = ("elbow", "wrist", "tip")
+
+
+class Stroke:
+    """How one bone is drawn: its colour, and the two widths of the pass that lays it down."""
+
+    def __init__(self, colour, width, outline):
+        self.colour = colour
+        self.width = width
+        self.outline = outline
 
 
 def side_colour(name):
@@ -791,31 +746,77 @@ def side_colour(name):
     return COLOUR_CENTRE
 
 
-def bone_colour(first, second):
-    """A limb takes its side's colour; anything spanning the middle is white."""
-    start, end = side_colour(first), side_colour(second)
-    return start if start == end else COLOUR_CENTRE
+def landmark_colour(name):
+    """A joint takes its side's colour only if it is part of an arm. Everything else is white."""
+    if name.endswith(ARM_LANDMARKS):
+        return side_colour(name)
+    return COLOUR_CENTRE
 
 
-def confidence_line(keypoints):
-    """How sure the model is, as the one number worth watching while tuning the picture.
+def bone_stroke(first, second):
+    """An arm segment in its side's colour at full weight; every other bone thin and white."""
+    if first.endswith(ARM_SEGMENT_ENDS) or second.endswith(ARM_SEGMENT_ENDS):
+        start, end = side_colour(first), side_colour(second)
+        colour = start if start == end else COLOUR_CENTRE
+        return Stroke(colour, ARM_WIDTH, ARM_OUTLINE)
+    return Stroke(COLOUR_CENTRE, QUIET_WIDTH, QUIET_OUTLINE)
+
+
+ARM_CHAIN = ("shoulder", "elbow", "wrist")
+
+
+def confidence_mean(keypoints):
+    """How sure the model is overall, as the number worth watching while tuning the picture.
 
     The mean across every landmark tracks image quality — it is what rises when the crop
-    tightens, the exposure stops blurring, or the illuminator reaches. The two wrists are called
-    out beside it because they are the hardest landmarks to hold and the ones the show is
-    actually built on: a mean that looks healthy while a wrist sits at 0.2 is a mage whose
-    pointing will not work.
+    tightens, the exposure stops blurring, or the illuminator reaches. What it does not track is
+    whether any particular joint is usable, which is what the two arm lines are for.
     """
     if not keypoints:
         return "conf —"
     values = [confidence for _, _, confidence in keypoints.values()]
-    mean = sum(values) / len(values)
+    return f"conf {sum(values) / len(values):.2f}"
 
-    def wrist(name):
-        found = keypoints.get(name)
-        return f"{found[2]:.2f}" if found else "—"
 
-    return f"conf {mean:.2f}   wrist L {wrist('left_wrist')} R {wrist('right_wrist')}"
+def arm_lines(keypoints, floors, side):
+    """One arm's chain — shoulder, elbow, wrist — as it is now over the worst it has just been.
+
+    This arm is what the show is built on: its upper segment aims a pair of heads and its lower
+    one swings them, so the whole of the pointing rests on three landmarks of which the middle
+    one is by far the least certain. Two numbers each: the first says whether the joint is
+    there, the second whether it stayed there while somebody moved.
+
+    A line per joint, and no side written on any of them. Which arm these belong to is said by
+    which edge of the picture they are drawn against, which is a thing the eye reads without
+    being asked to.
+    """
+    lines = []
+    for joint in ARM_CHAIN:
+        name = f"{side}_{joint}"
+        found = keypoints.get(name) if keypoints else None
+        now = f"{found[2]:.2f}" if found else "—"
+        floor = f"{floors[name]:.2f}" if name in floors else "—"
+        lines.append(f"{joint[:3]} {now}/{floor}")
+    return lines
+
+
+class Readout:
+    """What the preview prints, and which edge of the picture each part goes against.
+
+    Two columns rather than a block in the corner, because the numbers were crossing the mage.
+    Splitting them to the margins leaves the middle of the frame — which is the only part of it
+    anybody is actually looking at — clear.
+
+    Which arm goes on which side is not a layout choice. This camera faces the mage, so the
+    picture is mirrored: their left arm appears on the right of the frame. Printing an arm's
+    numbers on the side the limb is drawn means nobody has to hold the mirror in their head
+    while they are also the one waving the arm about.
+    """
+
+    def __init__(self, header, image_left, image_right):
+        self.header = header
+        self.image_left = image_left
+        self.image_right = image_right
 
 
 def head_oval(placed):
@@ -877,7 +878,7 @@ def downscale(frame):
     )
 
 
-def annotate(frame, stool, keypoints, estimator, status):
+def annotate(frame, stool, keypoints, estimator, readout):
     """Draws the crop, the skeleton and the running numbers onto a copy of the frame.
 
     The skeleton is the point of this picture, not a debugging overlay on it — it is what makes
@@ -914,7 +915,7 @@ def annotate(frame, stool, keypoints, estimator, status):
             if confidence >= MOVENET_MIN_CONFIDENCE
         }
         bones = [
-            (placed[first], placed[second], bone_colour(first, second))
+            (placed[first], placed[second], bone_stroke(first, second))
             for first, second in estimator.bones
             if first in placed and second in placed
         ]
@@ -929,33 +930,46 @@ def annotate(frame, stool, keypoints, estimator, status):
         # Every outline first, then every fill: drawing each bone's outline immediately before
         # its own fill would let the next bone's outline cut a dark notch through the last
         # bone's body wherever two limbs cross.
-        for start, end, _ in bones:
-            cv2.line(canvas, start, end, COLOUR_OUTLINE, 6, cv2.LINE_AA)
+        for start, end, stroke in bones:
+            cv2.line(canvas, start, end, COLOUR_OUTLINE, stroke.outline, cv2.LINE_AA)
         if head:
             centre, axes, angle = head
-            cv2.ellipse(canvas, centre, axes, angle, 0, 360, COLOUR_OUTLINE, 6, cv2.LINE_AA)
-        for start, end, colour in bones:
-            cv2.line(canvas, start, end, colour, 3, cv2.LINE_AA)
+            cv2.ellipse(canvas, centre, axes, angle, 0, 360,
+                        COLOUR_OUTLINE, QUIET_OUTLINE, cv2.LINE_AA)
+        for start, end, stroke in bones:
+            cv2.line(canvas, start, end, stroke.colour, stroke.width, cv2.LINE_AA)
         if head:
-            cv2.ellipse(canvas, centre, axes, angle, 0, 360, COLOUR_CENTRE, 3, cv2.LINE_AA)
+            cv2.ellipse(canvas, centre, axes, angle, 0, 360,
+                        COLOUR_CENTRE, QUIET_WIDTH, cv2.LINE_AA)
         for point in drawn.values():
             cv2.circle(canvas, point, 6, COLOUR_OUTLINE, -1, cv2.LINE_AA)
         for name, point in drawn.items():
-            cv2.circle(canvas, point, 4, side_colour(name), -1, cv2.LINE_AA)
+            cv2.circle(canvas, point, 4, landmark_colour(name), -1, cv2.LINE_AA)
 
-
-    for line, text in enumerate(status):
-        origin = (8, 20 + line * TEXT_LINE_HEIGHT)
-        (width, height), baseline = cv2.getTextSize(text, FONT, FONT_SCALE, FONT_THICKNESS)
+    def label(text, row, align_right):
+        # Measured rather than estimated, because the right-hand column is positioned from its
+        # own width and a guess there walks off the edge as soon as a number gains a digit.
+        (text_w, text_h), baseline = cv2.getTextSize(text, FONT, FONT_SCALE, FONT_THICKNESS)
+        left = width - TEXT_MARGIN - text_w if align_right else TEXT_MARGIN
+        base = 20 + row * TEXT_LINE_HEIGHT
         cv2.rectangle(
             canvas,
-            (origin[0] - TEXT_PADDING, origin[1] - height - TEXT_PADDING),
-            (origin[0] + width + TEXT_PADDING, origin[1] + baseline),
+            (left - TEXT_PADDING, base - text_h - TEXT_PADDING),
+            (left + text_w + TEXT_PADDING, base + baseline),
             COLOUR_OUTLINE,
             -1,
         )
-        cv2.putText(canvas, text, origin, FONT, FONT_SCALE,
+        cv2.putText(canvas, text, (left, base), FONT, FONT_SCALE,
                     COLOUR_TEXT, FONT_THICKNESS, cv2.LINE_AA)
+
+    for row, text in enumerate(readout.header):
+        label(text, row, False)
+    # Both arms start on the same row, under the header, so the two chains read as a pair and
+    # a joint can be compared across sides by looking straight across the picture.
+    for row, text in enumerate(readout.image_left):
+        label(text, len(readout.header) + row, False)
+    for row, text in enumerate(readout.image_right):
+        label(text, len(readout.header) + row, True)
     return canvas
 
 
@@ -1474,10 +1488,6 @@ def main():
         log("camera settings: none configured, the camera keeps whatever it decided for itself")
     log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}, enhance: {ENHANCE}")
     log(f"confidence: {MOVENET_MIN_CONFIDENCE}")
-    if SMOOTHING:
-        log(f"smoothing: one euro, min_cutoff {SMOOTH_MIN_CUTOFF}, beta {SMOOTH_BETA}")
-    else:
-        log("smoothing: off")
     log(f"estimator: {estimator.name}")
     log(f"crop: {CROP}")
 
@@ -1520,7 +1530,7 @@ def main():
         daemon=True,
     ).start()
 
-    smoother = Smoother()
+    floors = Floors()
     to_brain = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     sequence = 0
@@ -1567,10 +1577,7 @@ def main():
         fps = 0.9 * fps + 0.1 / max(now - last_tick, 1e-6)
         last_tick = now
 
-        # After the timing, so `estimate_ms` stays the model's cost alone, and before everything
-        # downstream, so the wire, the preview and the show all see the same smoothed landmarks.
-        if SMOOTHING and keypoints:
-            keypoints = smoother(keypoints, now)
+        held = floors(keypoints, now)
 
         sighting = {
             "seq": sequence,
@@ -1599,13 +1606,15 @@ def main():
             # crop and land correctly wherever the crop itself is drawn.
             ratio = small.shape[1] / frame.shape[1]
             scaled = tuple(int(value * ratio) for value in box)
-            status = [
-                f"{estimator.name}  {fps:4.1f} Hz",
-                "mage: yes" if keypoints else "mage: no",
-                confidence_line(keypoints),
-            ]
+            readout = Readout(
+                header=[estimator.name, f"{fps:4.1f} Hz", confidence_mean(keypoints)],
+                # Mirrored on purpose: the camera faces the mage, so their right arm is the one
+                # drawn on the left of the picture.
+                image_left=arm_lines(keypoints, held, "right"),
+                image_right=arm_lines(keypoints, held, "left"),
+            )
             Preview.annotated.put(
-                encode(annotate(small, scaled, keypoints, estimator, status))
+                encode(annotate(small, scaled, keypoints, estimator, readout))
             )
 
         if time.time() - last_telemetry >= TELEMETRY_INTERVAL_S:
@@ -1642,6 +1651,16 @@ def main():
                 "captured": stats["captured"],
                 "present": keypoints is not None,
                 "estimator": estimator.name,
+                # The same floors the preview draws, for the sittings where nobody has a browser
+                # pointed at the rig. Six landmarks rather than seventeen: these are the ones the
+                # arm mappings are built on, and a status payload that carries the whole skeleton
+                # every five seconds buries them.
+                "arm_floor": {
+                    f"{side}_{joint}": round(held[f"{side}_{joint}"], 2)
+                    for side in ("left", "right")
+                    for joint in ARM_CHAIN
+                    if f"{side}_{joint}" in held
+                },
             }, retain=True)
 
 

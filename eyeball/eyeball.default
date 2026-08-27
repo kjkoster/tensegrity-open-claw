@@ -58,4 +58,13 @@ EYEBALL_CAMERA_FPS=15
 #                           difference between a landmark on a moving wrist and a streak
 #   ExposurePriority=0      spend light on a short shutter rather than on low noise: a pose
 #                           model tolerates noise far better than it tolerates blur
+#
+# Bounded is not locked, and the show now moves the thing the bound is metering. The heads stand
+# beside the camera and light the mage from the camera's own viewpoint, and the movement envelope
+# modulates that light with how much the child is moving — so an auto exposure, however tightly
+# ceilinged, re-meters against the show and the landmarks shift with the brightness rather than
+# with the person. ImageSource.I0.Sensor.Exposure=hold is the lock, and it is left commented
+# because `hold` freezes the sensor at whatever it was metering the instant the daemon started:
+# on a rig whose beams come up afterwards, that is a lock onto a dark field. It wants setting
+# with the show already lit, and confirming in the start-up log like everything else here.
 EYEBALL_CAMERA_SETTINGS=ImageSource.I0.DayNight.IrCutFilter=no,ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,ImageSource.I0.Sensor.Exposure=auto,ImageSource.I0.CaptureFrequency=50Hz,ImageSource.I0.Sensor.MaxExposureTime=10000,ImageSource.I0.Sensor.MaxSlowShutter=10000,ImageSource.I0.Sensor.ExposurePriority=0,ImageSource.I0.Sensor.ExposurePriorityLowlight=0
