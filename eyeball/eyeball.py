@@ -116,6 +116,34 @@ CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 # seconds turns a blink into something that is still there when they look.
 CONFIDENCE_FLOOR_S = float(os.environ.get("EYEBALL_CONFIDENCE_FLOOR_S", "2.0"))
 
+# How long a limb has to look, against the body it belongs to, before its angle is believed.
+#
+# A limb pointed near the lens projects to almost nothing, and the angle of almost nothing is
+# noise — it spins. Below this fraction of the body's own scale the segment reports no angle at
+# all, which is a thing a consumer can hold the last value through, where a spinning number is a
+# thing it cannot.
+#
+# The fraction is smaller than it looks, because the scale it is measured against is usually the
+# torso rather than the shoulders. An arm fully out in the picture plane runs around 0.6 of that,
+# not 1.0 — so a floor of 0.2 gives up at roughly seventy degrees out of plane, where 0.35 was
+# already giving up at sixty and taking a usable angle with it. Held wide, because an angle that
+# is coarse but still moving the right way is worth more to a child than a number that vanishes.
+#
+# A starting point for tuning on a child, not a result.
+ARM_MIN_LENGTH = float(os.environ.get("EYEBALL_ARM_MIN_LENGTH", "0.20"))
+
+# How sure the model has to be about a joint before an angle is taken through it.
+#
+# Its own threshold rather than `MOVENET_MIN_CONFIDENCE`, which is doing two other jobs: it
+# decides whether there is a mage in the frame at all, and it decides what gets drawn. Loosening
+# those to buy a steadier angle would quietly change what counts as a person and put ghost limbs
+# on a picture shown to children — a large blast radius for a small tuning move.
+#
+# Lower than the drawing threshold on purpose. A landmark the model is only somewhat sure of
+# still points the right way most of the time, and the arm mappings hold their last value
+# through a gap anyway, so a marginal joint is better used than discarded.
+ARM_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_ARM_MIN_CONFIDENCE", "0.20"))
+
 BRAIN_HOST = os.environ.get("EYEBALL_BRAIN_HOST", "127.0.0.1")
 BRAIN_PORT = int(os.environ.get("EYEBALL_BRAIN_PORT", "9001"))
 
@@ -652,6 +680,134 @@ def capture_thread(frames, stats):
         camera.release()
 
 
+# ── Arm geometry ─────────────────────────────────────────────────────────────
+
+# Straight down in the picture, which is where y increases.
+DOWN = (0.0, 1.0)
+
+
+def signed_angle(reference, vector):
+    """The angle from one vector to another, in degrees, positive towards the picture's right.
+
+    One function for both of the angles below, so the two cannot drift into disagreeing about
+    which way is positive — which is the kind of sign error that survives every desk test and
+    then sends a head the wrong way in front of an audience.
+    """
+    rx, ry = reference
+    vx, vy = vector
+    return math.degrees(math.atan2(ry * vx - rx * vy, rx * vx + ry * vy))
+
+
+def landmark(keypoints, name):
+    """One landmark's position, or None where the model is not sure enough to be worth using."""
+    found = keypoints.get(name) if keypoints else None
+    if found is None or found[2] < ARM_MIN_CONFIDENCE:
+        return None
+    return found[0], found[1]
+
+
+def span(first, second, box):
+    """The vector between two landmarks, in the crop's own pixels.
+
+    In pixels rather than in the normalised coordinates the landmarks arrive as, because those
+    are normalised per axis: on a crop that is not square, a degree of x and a degree of y are
+    different distances and every angle taken from them is wrong by the crop's aspect. The crop
+    is square today and this does not depend on it staying that way.
+    """
+    if first is None or second is None:
+        return None
+    _, _, width, height = box
+    return ((second[0] - first[0]) * width, (second[1] - first[1]) * height)
+
+
+def body_scale(keypoints, box):
+    """A length in the picture to judge a limb's projection against, or None.
+
+    Shoulder width is the obvious choice and it is the one that fails: a mage turning to face
+    along the camera's axis collapses it towards zero, and every gate resting on it goes at the
+    same moment — precisely when the arms are hardest to read and most need the gate. The torso
+    does not shorten in that direction, so the larger of the two is what survives whichever way
+    somebody happens to be standing.
+    """
+    shoulders = (landmark(keypoints, "left_shoulder"), landmark(keypoints, "right_shoulder"))
+    hips = (landmark(keypoints, "left_hip"), landmark(keypoints, "right_hip"))
+
+    def middle(pair):
+        first, second = pair
+        if first is None or second is None:
+            return None
+        return ((first[0] + second[0]) / 2, (first[1] + second[1]) / 2)
+
+    def length(vector):
+        return math.hypot(*vector) if vector else 0.0
+
+    across = length(span(shoulders[0], shoulders[1], box))
+    down = length(span(middle(shoulders), middle(hips), box))
+    return max(across, down) or None
+
+
+class Arm:
+    """One arm reduced to what will eventually fly a pair of heads.
+
+    `upper` is the shoulder-to-elbow segment and it is unsigned, running 0° with the arm hanging
+    straight down to 180° with it straight up. Unsigned because that is the sweep the tilt
+    channel makes — pointing at the mage, through vertical, out to the audience — and which side
+    of the body the arm swings out to says nothing about where along that sweep it is.
+
+    The forearm is given twice, and on purpose. `fore` is its angle in the picture, signed from
+    straight down; `bend` is the elbow's own bend, the same segment measured against the upper
+    arm, which reads 0 on a straight arm and ±90 on a square one. Which of the two makes the
+    better pan is a question about how a child moves rather than about geometry, and carrying
+    both means it is answered by reading two numbers on one screen rather than by a rebuild.
+
+    Any angle is None where the picture cannot say: a landmark the model is unsure of, or a
+    segment pointed near enough at the lens that its projection is too short to have a direction.
+    The lengths are kept beside the angles because they are what says which of those it was.
+    """
+
+    def __init__(self, upper, fore, bend, upper_length, fore_length):
+        self.upper = upper
+        self.fore = fore
+        self.bend = bend
+        self.upper_length = upper_length
+        self.fore_length = fore_length
+
+    def published(self):
+        return {
+            "upper": None if self.upper is None else round(self.upper, 1),
+            "fore": None if self.fore is None else round(self.fore, 1),
+            "bend": None if self.bend is None else round(self.bend, 1),
+            "upper_length": None if self.upper_length is None else round(self.upper_length, 2),
+            "fore_length": None if self.fore_length is None else round(self.fore_length, 2),
+        }
+
+
+def read_arm(keypoints, side, scale, box):
+    """One side's two segments, gated on confidence and on how long they look."""
+    shoulder = landmark(keypoints, f"{side}_shoulder")
+    elbow = landmark(keypoints, f"{side}_elbow")
+    wrist = landmark(keypoints, f"{side}_wrist")
+
+    def segment(first, second):
+        vector = span(first, second, box)
+        if vector is None or not scale:
+            return None, None
+        ratio = math.hypot(*vector) / scale
+        return (vector if ratio >= ARM_MIN_LENGTH else None), ratio
+
+    upper, upper_length = segment(shoulder, elbow)
+    fore, fore_length = segment(elbow, wrist)
+    return Arm(
+        upper=None if upper is None else abs(signed_angle(DOWN, upper)),
+        fore=None if fore is None else signed_angle(DOWN, fore),
+        # Both segments, because a bend measured against an upper arm that is itself unreadable
+        # is two unknowns dressed as one number.
+        bend=None if fore is None or upper is None else signed_angle(upper, fore),
+        upper_length=upper_length,
+        fore_length=fore_length,
+    )
+
+
 # ── Annotation ───────────────────────────────────────────────────────────────
 
 # Left, right, and neither, rather than one colour for everything.
@@ -778,7 +934,7 @@ def confidence_mean(keypoints):
     return f"conf {sum(values) / len(values):.2f}"
 
 
-def arm_lines(keypoints, floors, side):
+def arm_lines(keypoints, floors, arm, side):
     """One arm's chain — shoulder, elbow, wrist — as it is now over the worst it has just been.
 
     This arm is what the show is built on: its upper segment aims a pair of heads and its lower
@@ -786,7 +942,10 @@ def arm_lines(keypoints, floors, side):
     one is by far the least certain. Two numbers each: the first says whether the joint is
     there, the second whether it stayed there while somebody moved.
 
-    A line per joint, and no side written on any of them. Which arm these belong to is said by
+    Under them the two segments as angles, which is what the show will actually fly a pair of
+    heads from and therefore the thing worth watching settle while somebody moves.
+
+    A line per row, and no side written on any of them. Which arm these belong to is said by
     which edge of the picture they are drawn against, which is a thing the eye reads without
     being asked to.
     """
@@ -797,7 +956,15 @@ def arm_lines(keypoints, floors, side):
         now = f"{found[2]:.2f}" if found else "—"
         floor = f"{floors[name]:.2f}" if name in floors else "—"
         lines.append(f"{joint[:3]} {now}/{floor}")
+    lines.append(f"upper {degrees_or_dash(arm.upper)}")
+    lines.append(f"fore  {degrees_or_dash(arm.fore)}")
+    lines.append(f"bend  {degrees_or_dash(arm.bend)}")
     return lines
+
+
+def degrees_or_dash(value):
+    """An angle at whole degrees, or a dash the same width so the column does not jump."""
+    return f"{value:5.0f}°" if value is not None else "    —"
 
 
 class Readout:
@@ -1488,6 +1655,7 @@ def main():
         log("camera settings: none configured, the camera keeps whatever it decided for itself")
     log(f"channel: {os.environ.get('EYEBALL_CHANNEL', 'colour')}, enhance: {ENHANCE}")
     log(f"confidence: {MOVENET_MIN_CONFIDENCE}")
+    log(f"arm gates: confidence {ARM_MIN_CONFIDENCE}, length {ARM_MIN_LENGTH}")
     log(f"estimator: {estimator.name}")
     log(f"crop: {CROP}")
 
@@ -1515,6 +1683,8 @@ def main():
         "channel": os.environ.get("EYEBALL_CHANNEL", "colour"),
         "enhance": ENHANCE,
         "min_confidence": MOVENET_MIN_CONFIDENCE,
+        "arm_min_confidence": ARM_MIN_CONFIDENCE,
+        "arm_min_length": ARM_MIN_LENGTH,
         "camera": CAMERA_HOST,
         "view": CAMERA_VIEW,
         "transport": CAMERA_TRANSPORT,
@@ -1578,6 +1748,8 @@ def main():
         last_tick = now
 
         held = floors(keypoints, now)
+        scale = body_scale(keypoints, box)
+        arms = {side: read_arm(keypoints, side, scale, box) for side in ("left", "right")}
 
         sighting = {
             "seq": sequence,
@@ -1589,6 +1761,11 @@ def main():
                 name: [round(px, 4), round(py, 4), round(confidence, 3)]
                 for name, (px, py, confidence) in (keypoints or {}).items()
             },
+            # Computed here rather than in `brain`, because the preview has to draw them and
+            # the preview lives on this side of the wire. What is here is geometry; what the
+            # angles are eventually worth in pan and tilt is the show's business, not this
+            # daemon's.
+            "arms": {side: arm.published() for side, arm in arms.items()},
         }
         payload = json.dumps(sighting).encode()
         to_brain.sendto(payload, (BRAIN_HOST, BRAIN_PORT))
@@ -1610,8 +1787,8 @@ def main():
                 header=[estimator.name, f"{fps:4.1f} Hz", confidence_mean(keypoints)],
                 # Mirrored on purpose: the camera faces the mage, so their right arm is the one
                 # drawn on the left of the picture.
-                image_left=arm_lines(keypoints, held, "right"),
-                image_right=arm_lines(keypoints, held, "left"),
+                image_left=arm_lines(keypoints, held, arms["right"], "right"),
+                image_right=arm_lines(keypoints, held, arms["left"], "left"),
             )
             Preview.annotated.put(
                 encode(annotate(small, scaled, keypoints, estimator, readout))
@@ -1661,6 +1838,12 @@ def main():
                     for joint in ARM_CHAIN
                     if f"{side}_{joint}" in held
                 },
+                # Every five seconds, which is a record rather than an instrument: an angle is
+                # tuned against the preview, where it updates per frame.
+                "arms": {side: arm.published() for side, arm in arms.items()},
+                # What the length gate is measured against, so a segment that reads no angle can
+                # be told from one whose landmarks were simply never found.
+                "body_scale": None if not scale else round(scale, 1),
             }, retain=True)
 
 

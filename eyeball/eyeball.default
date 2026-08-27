@@ -32,6 +32,18 @@ EYEBALL_CAMERA_RESOLUTION=480x270
 # Pi 3B can do ~15 fps
 EYEBALL_CAMERA_FPS=15
 
+# What an arm segment has to look like before its angle is believed: how sure the model is of a
+# joint, and how long the segment looks against the body it belongs to. Both are held wide on
+# purpose — a coarse angle still moving the right way is worth more to a child than a number that
+# blanks — and both are numbers a kid in front of the camera is expected to move.
+#
+# The confidence one is the arms' own and is deliberately below EYEBALL_MIN_CONFIDENCE, which
+# decides what gets drawn and whether there is a mage at all. Loosen this one, not that one.
+#
+# Commented because these are the code's own defaults. Uncomment only to overrule them.
+#EYEBALL_ARM_MIN_CONFIDENCE=0.20
+#EYEBALL_ARM_MIN_LENGTH=0.20
+
 # How the crop is shrunk to the model's input, and left to the daemon on purpose. Bilinear is
 # right while the crop is near the model's input size, area-averaging is right if it is ever
 # widened enough for the downscale to get steep — so the correct value follows the crop above,
