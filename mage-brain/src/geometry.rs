@@ -1,9 +1,9 @@
-//! Where this rig's pieces stand on the field: the stool at the origin, four heads around it,
+//! Where this rig's pieces stand on the field: the mage at the origin, four heads around them,
 //! and the markers the calibration is recorded against.
 //!
 //! **The frame is anchored here.** `cortex::geometry` fixes the conventions every rig shares —
 //! right-handed, metres, degrees, +Z up, bearings counter-clockwise from +X — and leaves the
-//! two choices that are a rig's own. This rig puts the origin at the **stool base on the
+//! two choices that are a rig's own. This rig puts the origin **where the mage stands, on the
 //! ground** and points **+X at the centre of the audience**, which makes +Y the mage's left as
 //! they stand facing out.
 //!
@@ -11,17 +11,18 @@
 //! already stated that way: beams never sweep eye level over the audience, the target surface
 //! hangs above them, a throw travels outward. A frame those have to be re-derived into before
 //! they can be checked is a frame that gets got wrong on a field at four in the afternoon. The
-//! stool base is the origin because it is the one point the show is about, it is physically
-//! markable, and it is what a tape measure is held against while the markers are recorded.
+//! mage's own footprint is the origin because it is the one point the show is about, it is
+//! physically markable, and it is what a tape measure is held against while the markers are
+//! recorded.
 //! Turning the rig around on the field re-measures markers; it never re-derives the frame.
 //!
 //! Numbers rather than machinery. The arithmetic that turns any of this into a pose is shared,
 //! because the other rig gets the same workflow the moment it wants aimed heads; what is here
-//! is only true of a stool on a field, and would be dead weight in the shared half.
+//! is only true of this rig on a field, and would be dead weight in the shared half.
 //!
 //! **Everything below is the lighting plan's, not a solve's.** Setup imposes most of this
 //! geometry rather than discovering it — a base flat at a known height with its connectors
-//! turned toward the stool — and these constants are that intent written down. They are good
+//! turned toward the mage — and these constants are that intent written down. They are good
 //! enough to aim with, badly, before a marker has been recorded, and that is their job: they
 //! seed the fit and they are what the fit is checked against. The solver prints their
 //! replacements, which are pasted over them.
@@ -38,21 +39,17 @@
 use crate::patch;
 use cortex::geometry::{Direction, HeadMount, Point, Sense, Travel};
 
-/// A kid stands on this, and the show is about what happens on top of it.
+/// Chest height on a standing child, and where the attentive beams land.
 ///
-/// Chair height rather than the knee height the plan first asked for, and the reason is
-/// [`HEAD_Z`]: the heads cannot aim below their own lens, so a stool shorter than that is a
-/// stool whose occupant stands in a place no beam can be pointed at. The assertion below is
-/// what keeps that from being rediscovered on a field.
-pub const STOOL_HEIGHT_M: f64 = 0.55;
+/// The show wanted the mage's feet and cannot have them: the ground at the origin is below
+/// [`HEAD_Z`] and no beam reaches it. This is the better target anyway — a beam on a torso is a
+/// beam the audience sees land on a person rather than on grass.
+pub const MAGE_CHEST_M: f64 = 1.10;
 
-/// The mage's feet, which is where the attentive pool lands.
-pub const STOOL_TOP: Point = Point::new(0.0, 0.0, STOOL_HEIGHT_M);
-
-/// A child's face above the surface they are standing on. Only used to place a marker, and
-/// only ever approximately: the fit wants a point off the ground far more than it wants that
-/// point to be any particular height.
-const FACE_ABOVE_STOOL_M: f64 = 1.20;
+/// A standing child's face. Only used to place a marker, and only ever approximately: the fit
+/// wants a second point well above the first far more than it wants either at a particular
+/// height, and the gap between this and [`MAGE_CHEST_M`] is the whole of what it wants.
+const MAGE_FACE_M: f64 = 1.45;
 
 /// Where the beams meet in magic mode: a plane at this height over the audience side.
 ///
@@ -66,17 +63,8 @@ pub const TARGET_SURFACE_HEIGHT_M: f64 = 3.50;
 /// Measured with a tape against the head rather than taken from the declared dimensions, which
 /// describe a shipping box. That the base stands on nothing is load-bearing rather than lazy:
 /// these heads cannot aim below their own lens, so every centimetre of plinth is a centimetre
-/// of the world that stops being lightable — including the stool the whole show is about.
+/// of the world that stops being lightable — starting with the ground the mage stands on.
 const HEAD_Z: f64 = 0.45;
-
-/// The show needs a beam it can point at the mage's feet, and a head cannot point below its
-/// own lens. Everything about the rig can be retuned on a field except how tall the stool is,
-/// which is a thing somebody has to have brought, so the conflict is worth catching at the
-/// build rather than at the first show.
-const _: () = assert!(
-    STOOL_HEIGHT_M > HEAD_Z,
-    "the stool must stand taller than the heads' lenses, or nothing can light the mage's feet"
-);
 
 /// How high a calibration target rides on its pole.
 ///
@@ -113,7 +101,7 @@ impl Head {
     }
 }
 
-/// A square around the stool, every base turned inward so its connectors face the mage.
+/// A square around the mage, every base turned inward so its connectors face them.
 ///
 /// The bearings below are that rule already worked out: a head on a corner looks back at the
 /// origin. They are written as numbers rather than computed from the positions because this
@@ -183,17 +171,17 @@ pub struct Marker {
 /// Not one of them is on the ground, because not one of them could be driven onto there. What
 /// the heads cannot reach cost the set nothing, as it turns out: the fit wants points spread
 /// in height as much as in bearing, and a plane of ground markers would have held it weakly in
-/// exactly the direction a head's own height lives in. The two over the stool carry the
+/// exactly the direction a head's own height lives in. The two over the mage carry the
 /// height spread, the three on poles carry the bearing and distance spread, and no three of
 /// them lie on one line.
 pub static MARKERS: [Marker; 5] = [
     Marker {
         scene: "cal_attention_spot",
-        at: STOOL_TOP,
+        at: Point::new(0.0, 0.0, MAGE_CHEST_M),
     },
     Marker {
         scene: "cal_mage_face",
-        at: Point::new(0.0, 0.0, STOOL_HEIGHT_M + FACE_ABOVE_STOOL_M),
+        at: Point::new(0.0, 0.0, MAGE_FACE_M),
     },
     Marker {
         scene: "cal_field_left",

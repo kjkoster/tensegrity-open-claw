@@ -83,8 +83,9 @@ CAMERA_VIEW = os.environ.get("EYEBALL_CAMERA_VIEW", "1")
 # sysexits.h EX_CONFIG. Named in the unit's RestartPreventExitStatus, so a misconfigured daemon
 # stops with one legible error rather than restarting into the same one every five seconds.
 EXIT_CONFIG = 78
-# x,y,w,h as fractions of the frame: the stool box. The estimator sees only this region, which
-# is what keeps other children out of the pose entirely rather than filtered out afterwards.
+# x,y,w,h as fractions of the frame: the box the mage stands in. The estimator sees only this
+# region, which is what keeps other children out of the pose entirely rather than filtered out
+# afterwards.
 CROP = tuple(float(v) for v in os.environ.get("EYEBALL_CROP", "0,0,1,1").split(","))
 
 # Which colour plane the estimator sees. `colour` is the whole image; naming one channel hands
@@ -453,10 +454,10 @@ class MoveNet:
     def __call__(self, frame):
         # Fitted to square, never stretched to it.
         #
-        # The model takes a square and the crop is whatever shape the stool wants, so something
-        # has to give. Stretching hands the model a person of the wrong proportions — a third of
-        # the frame's width at its full height arrives 1.7 times too tall — and a pose model's
-        # whole prior is what human proportions look like.
+        # The model takes a square and the crop is whatever shape the mage's box wants, so
+        # something has to give. Stretching hands the model a person of the wrong proportions —
+        # a third of the frame's width at its full height arrives 1.7 times too tall — and a
+        # pose model's whole prior is what human proportions look like.
         #
         # Shrunk first and padded second, in that order. Padding a 1280×720 crop to 1280×1280
         # before shrinking it means allocating and filling five megabytes per frame to throw
@@ -698,10 +699,10 @@ def signed_angle(reference, vector):
     return math.degrees(math.atan2(ry * vx - rx * vy, rx * vx + ry * vy))
 
 
-def landmark(keypoints, name):
+def landmark(keypoints, name, floor=ARM_MIN_CONFIDENCE):
     """One landmark's position, or None where the model is not sure enough to be worth using."""
     found = keypoints.get(name) if keypoints else None
-    if found is None or found[2] < ARM_MIN_CONFIDENCE:
+    if found is None or found[2] < floor:
         return None
     return found[0], found[1]
 
@@ -728,9 +729,19 @@ def body_scale(keypoints, box):
     same moment — precisely when the arms are hardest to read and most need the gate. The torso
     does not shorten in that direction, so the larger of the two is what survives whichever way
     somebody happens to be standing.
+
+    Held to the stricter confidence floor, and not to the arms' own. A marginal elbow costs its
+    own segment an angle and nothing else, but this number is the denominator every segment's
+    length is judged against — a hip the model has guessed at stretches the torso, inflates the
+    scale, and silently blanks both arms at once. `max` is what keeps that failure conservative:
+    a bad landmark can only make the scale too large, which gives up angles rather than
+    inventing them.
     """
-    shoulders = (landmark(keypoints, "left_shoulder"), landmark(keypoints, "right_shoulder"))
-    hips = (landmark(keypoints, "left_hip"), landmark(keypoints, "right_hip"))
+    def joint(name):
+        return landmark(keypoints, name, MOVENET_MIN_CONFIDENCE)
+
+    shoulders = (joint("left_shoulder"), joint("right_shoulder"))
+    hips = (joint("left_hip"), joint("right_hip"))
 
     def middle(pair):
         first, second = pair
@@ -739,7 +750,7 @@ def body_scale(keypoints, box):
         return ((first[0] + second[0]) / 2, (first[1] + second[1]) / 2)
 
     def length(vector):
-        return math.hypot(*vector) if vector else 0.0
+        return math.hypot(*vector) if vector is not None else 0.0
 
     across = length(span(shoulders[0], shoulders[1], box))
     down = length(span(middle(shoulders), middle(hips), box))
@@ -872,11 +883,17 @@ ARM_WIDTH, ARM_OUTLINE = 3, 6
 # Half, as near as an integer line width gets to it.
 QUIET_WIDTH, QUIET_OUTLINE = 2, 4
 
-# Which landmarks belong to an arm. `tip` is the silhouette's word for the same thing.
-ARM_LANDMARKS = ("shoulder", "elbow", "wrist", "tip")
-# Which of them make a bone one of an arm's segments. The shoulder is left out here and kept
-# above, because the span between the two shoulders is a torso bone with a shoulder at each end.
-ARM_SEGMENT_ENDS = ("elbow", "wrist", "tip")
+# What an arm is, said once. The three below are the same fact for three jobs, so they are
+# derived rather than typed out again: a joint added to one and forgotten in another is a
+# disagreement nothing would report.
+#
+# `ARM_CHAIN` is the readout's order, shoulder outwards, and MoveNet's names.
+# `ARM_LANDMARKS` adds the silhouette's word for a wrist, and is what colours a joint.
+# `ARM_SEGMENT_ENDS` drops the shoulder, and is what makes a *bone* an arm's: the span between
+# the two shoulders is a torso bone with a shoulder at each end, and would otherwise be caught.
+ARM_CHAIN = ("shoulder", "elbow", "wrist")
+ARM_LANDMARKS = ARM_CHAIN + ("tip",)
+ARM_SEGMENT_ENDS = tuple(joint for joint in ARM_LANDMARKS if joint != "shoulder")
 
 
 class Stroke:
@@ -918,9 +935,6 @@ def bone_stroke(first, second):
     return Stroke(COLOUR_CENTRE, QUIET_WIDTH, QUIET_OUTLINE)
 
 
-ARM_CHAIN = ("shoulder", "elbow", "wrist")
-
-
 def confidence_mean(keypoints):
     """How sure the model is overall, as the number worth watching while tuning the picture.
 
@@ -932,6 +946,11 @@ def confidence_mean(keypoints):
         return "conf —"
     values = [confidence for _, _, confidence in keypoints.values()]
     return f"conf {sum(values) / len(values):.2f}"
+
+
+def degrees_or_dash(value):
+    """An angle at whole degrees, or a dash occupying the same six columns."""
+    return f"{value:5.0f}°" if value is not None else f"{'—':>5} "
 
 
 def arm_lines(keypoints, floors, arm, side):
@@ -960,11 +979,6 @@ def arm_lines(keypoints, floors, arm, side):
     lines.append(f"fore  {degrees_or_dash(arm.fore)}")
     lines.append(f"bend  {degrees_or_dash(arm.bend)}")
     return lines
-
-
-def degrees_or_dash(value):
-    """An angle at whole degrees, or a dash the same width so the column does not jump."""
-    return f"{value:5.0f}°" if value is not None else "    —"
 
 
 class Readout:
@@ -1045,7 +1059,7 @@ def downscale(frame):
     )
 
 
-def annotate(frame, stool, keypoints, estimator, readout):
+def annotate(frame, crop, keypoints, estimator, readout):
     """Draws the crop, the skeleton and the running numbers onto a copy of the frame.
 
     The skeleton is the point of this picture, not a debugging overlay on it — it is what makes
@@ -1053,7 +1067,7 @@ def annotate(frame, stool, keypoints, estimator, readout):
     a field on a laptop screen: outlined, thick enough to survive JPEG, and joints on top of
     bones so a limb reads as jointed rather than as a bent stick.
     """
-    x, y, w, h = stool
+    x, y, w, h = crop
     height, width = frame.shape[:2]
 
     # Grey outside the crop, colour inside it. The estimator only ever sees the box, so the
@@ -1544,7 +1558,7 @@ def camera_thread(telemetry, camera):
 
 
 def crop_box(frame):
-    """The stool box in pixels, clamped to the frame so a bad config cannot slice to nothing."""
+    """The mage's box in pixels, clamped to the frame so a bad config cannot slice to nothing."""
     height, width = frame.shape[:2]
     fx, fy, fw, fh = CROP
     x = max(0, min(int(fx * width), width - 1))

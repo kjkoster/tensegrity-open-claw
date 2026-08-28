@@ -46,8 +46,9 @@ pub struct Sighting {
     /// The rate the daemon is achieving, which is the number that says whether the vision
     /// half is healthy long before the show looks wrong.
     pub fps: f32,
-    /// The daemon found a mage this frame. Not occupancy — the stool switch is authoritative
-    /// for that and does not depend on this process being alive.
+    /// The daemon found a mage this frame, and with nothing else on the rig reporting a body,
+    /// this *is* occupancy: presence and vision are the same fact, so a dead eyeball reads as a
+    /// rig with nobody in front of it. The show's own staleness path is what covers that.
     pub present: bool,
     /// Name → `[x, y, confidence]`, normalised `0..1` within the crop. Normalised, so a change
     /// of camera resolution or crop moves nothing downstream.
