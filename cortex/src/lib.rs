@@ -12,7 +12,6 @@ pub mod audio_features;
 pub mod clock;
 pub mod config;
 pub mod eyeball;
-pub mod geometry;
 pub mod latest;
 pub mod moving_head;
 pub mod perlin;

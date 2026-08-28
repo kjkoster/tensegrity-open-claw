@@ -53,10 +53,54 @@ pub struct Sighting {
     /// Name → `[x, y, confidence]`, normalised `0..1` within the crop. Normalised, so a change
     /// of camera resolution or crop moves nothing downstream.
     pub keypoints: BTreeMap<String, [f32; 3]>,
+    /// Both arms, reduced to angles by the daemon. What the show steers on.
+    ///
+    /// Defaulted rather than required, because the two ends restart independently: a daemon
+    /// old enough to send no arms should cost the show its pointing, not its vision. Without
+    /// this the whole datagram fails to parse and the rig reads as blind.
+    #[serde(default)]
+    pub arms: Arms,
 
     /// Arrival on the shared monotonic clock. Filled here, never sent.
     #[serde(skip)]
     pub received_us: u64,
+}
+
+/// Both of the mage's arms, named anatomically.
+///
+/// Anatomical and never side-of-frame: the camera faces the mage, so the picture is mirrored
+/// and a left-of-frame test would bind every arm to the wrong pair of heads.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Arms {
+    pub left: Arm,
+    pub right: Arm,
+}
+
+/// One arm's two segments as angles in the picture, with the lengths that say whether to
+/// believe them.
+///
+/// Every angle is optional and the gate is per segment, not per arm: a forearm pointed at the
+/// lens collapses to a few pixels and its direction becomes noise, while the upper arm above
+/// it still reads fine. Half a readable arm still steers half a pair, so the halves blank
+/// independently and whatever consumes them holds its last value rather than following the
+/// noise.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Arm {
+    /// Shoulder to elbow, unsigned: 0° hanging straight down, 180° straight up. Unsigned
+    /// because which side of the body the arm swings out to says nothing about how far up it
+    /// has come, and up is the whole of what the tilt channel wants.
+    pub upper: Option<f64>,
+    /// Elbow to wrist, in the picture, signed from straight down. Positive toward the
+    /// picture's right, which — the picture being mirrored — is the mage's left.
+    pub fore: Option<f64>,
+    /// The elbow's own bend: the same forearm measured against the upper arm rather than
+    /// against the ground. The other way of reading one limb, carried so the choice between
+    /// the two can be made by watching a child instead of by rebuilding.
+    pub bend: Option<f64>,
+    /// How long each segment looks against the body's own scale. A segment reading no angle
+    /// can be told from one whose landmarks were never found.
+    pub upper_length: Option<f64>,
+    pub fore_length: Option<f64>,
 }
 
 impl Sighting {
@@ -96,7 +140,10 @@ pub fn spawn_receiver(publisher: LatestTx<Sighting>) -> JoinHandle<()> {
 
 /// Binds and runs the receive loop until an unrecoverable socket error.
 fn receive(publisher: &LatestTx<Sighting>) -> Result<(), Box<dyn Error>> {
-    let socket = UdpSocket::bind(SocketAddrV4::new(cfg::EYEBALL_BIND_ADDRESS, cfg::EYEBALL_PORT))?;
+    let socket = UdpSocket::bind(SocketAddrV4::new(
+        cfg::EYEBALL_BIND_ADDRESS,
+        cfg::EYEBALL_PORT,
+    ))?;
     eprintln!(
         "eyeball: listening on {}:{} — stale after {} ms",
         cfg::EYEBALL_BIND_ADDRESS,

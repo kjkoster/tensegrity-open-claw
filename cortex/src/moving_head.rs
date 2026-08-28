@@ -97,6 +97,16 @@ impl Slew {
         self.pose
     }
 
+    /// Changes the ceiling on how fast this head is driven from here on.
+    ///
+    /// A head's slew rate is its personality and normally stands for the run, but pointing is
+    /// the exception: a head that pursues a raised arm slowly does not read as sluggish, it
+    /// reads as broken, because the kid is watching their own arm and the beam at the same
+    /// time. Atmosphere is for the states nobody is steering.
+    pub fn set_rate(&mut self, rate: SlewRate) {
+        self.rate = rate;
+    }
+
     /// Advances one frame toward `target` and returns where the head now points.
     pub fn step(&mut self, target: Pose, dt: f64) -> Pose {
         let step = self.rate.deg_s() * dt;

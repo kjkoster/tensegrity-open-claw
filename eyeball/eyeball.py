@@ -287,7 +287,11 @@ MOVENET_BONES = [
 # and the first thing that gives way is confidence rather than position. A skeleton that is
 # roughly right at 0.15 is evidence the approach works; nothing at all at 0.3 is not evidence
 # that it does not.
-MOVENET_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_MIN_CONFIDENCE", "0.3"))
+#
+# Raised off 0.3 because presence was twitchy there: an empty field scored high enough often
+# enough to keep waking the rig, and a mage who flickers in and out is worse than one the
+# camera takes a moment longer to notice.
+MOVENET_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_MIN_CONFIDENCE", "0.40"))
 
 
 def movenet_tensor(frame, size, dtype):
