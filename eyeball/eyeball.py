@@ -1614,8 +1614,8 @@ def require_estimator():
     connected, and the only symptom would be a picture nobody could read.
 
     Refusing is safe here in a way it would not be in the brain: the show already degrades to
-    plain attentive when this process goes quiet, so a daemon that will not start costs a
-    preview and a landmark stream, never the rig.
+    bored when this process goes quiet, and the heads keep moving, so a daemon that will not
+    start costs a preview and a landmark stream, never the rig.
     """
     if ESTIMATOR == "silhouette":
         log("estimator: silhouette, by request — this draws no skeleton")

@@ -6,20 +6,22 @@
 //! floor and ceiling — one set of numbers in `cortex`, so the two rigs cannot end up
 //! breathing differently by accident.
 //!
-//! The rig runs three states, and they belong to the mage rather than to a head: all four
+//! The rig runs two states, and they belong to the mage rather than to a head: all four
 //! snakes are one creature's attention. **Bored** is nobody in front of the camera — each
 //! head walks between two poses at its own speed, white and dim, which is an attract loop and
-//! also the only way to see whether the position pipeline is smooth. **Attentive** is a mage
-//! seen with both hands below the waist: all four go to their recorded homes and breathe.
-//! **Magic** is a hand raised, and it takes the whole rig.
+//! also the only way to see whether the position pipeline is smooth. **Magic** is a mage in
+//! front of it, and it takes the whole rig.
 //!
-//! Inside magic the arms still work one at a time — the left arm flies snakes 1 and 2 and the
-//! right arm 3 and 4 — so a kid who raises one hand moves that pair and finds the other pair
-//! follows the arm they left hanging.
+//! Being seen is the whole boundary. There is no gesture to get right and nothing to hold
+//! above a line, because the arms drive the heads continuously: a mage standing with their
+//! arms hanging is already flying them, and the beams go where hanging arms send them.
 //!
-//! There is no geometry in any of it. The arms drive pan and tilt as channel values, and the
-//! only thing measured about a head is where it was pointing when somebody drove it onto the
-//! mage by hand.
+//! Inside magic each arm works its own pair — the left arm flies snakes 1 and 2 and the right
+//! arm 3 and 4 — so a kid who moves one arm moves that pair, and finds the other pair has been
+//! following the arm they left hanging all along.
+//!
+//! There is no geometry in any of it, and nothing measured. The arms drive pan and tilt as
+//! channel values, so the rig gets carried out, set down and switched on.
 
 mod geometry;
 
@@ -40,9 +42,7 @@ use std::f64::consts::TAU;
 //
 // Only what is a choice about the show is here. What a head *is* — how far it pans, which
 // end of its speed channel is fast, where its dead bands sit — comes from the fixture
-// definition through the generated patch, so none of it is repeated here to go stale. Where
-// each head points in attentive is in `geometry`, because that is recorded afresh every
-// deployment.
+// definition through the generated patch, so none of it is repeated here to go stale.
 
 /// One head's bored motion: the ceiling on its angular speed, and the two poses it walks
 /// between. One struct per head rather than parallel arrays, so a head is a thing that can be
@@ -98,42 +98,32 @@ const SNAKE_4_WANDER: HeadWander = HeadWander {
 // kid is watching their own arm and the beam at the same time.
 const MAGIC_SLEW: SlewRate = SlewRate::new(120.0);
 
-// How fast a head crosses into attentive. Between the two, on purpose: at a personality rate
-// a head takes twenty seconds to notice somebody walking up, and at the magic rate it snaps,
-// which is the one transition a kid is actually watching for.
-const ATTENTIVE_SLEW: SlewRate = SlewRate::new(40.0);
-
-// The shortest a state is allowed to last. Every boundary here is a continuous quantity
-// crossing a threshold, and the hysteresis bands alone do not cover a hand that hovers or a
-// mage the model keeps losing and refinding — both of which would otherwise re-spin a colour
-// wheel and restage the whole rig several times a second, which reads as a malfunction rather
-// than as a show. A state held for a beat also gives a kid time to notice they caused it.
-const STATE_DWELL_S: f64 = 2.0;
-
 // How long the field has to stay empty before the heads give up and go back to wandering.
 // Long enough to ride out a mage who turns side-on to the camera or steps behind another
 // child, short enough that an empty field stops looking attended.
+//
+// This is the whole of the rig's hysteresis, and it is enough because of how one-sided it is:
+// the counter resets on any frame with a mage in it, so the boundary falls into magic in an
+// instant and back out only after five clear seconds. A boundary that cannot chatter wants no
+// dwell on top of it.
 const BORED_AFTER_S: f64 = 5.0;
 
 // Bored is watched from across a field with nobody in it, so it is lit to be visible rather
 // than to land on anyone.
 const BORED_DIMMER: u8 = 0x40;
 
-// White and an open gate for both of the watching states: attentive is a beam on a person and
-// wants nothing in the way of it.
+// White and an open gate, which is what bored looks like: nothing in the beam at all, so the
+// colour and the pattern belong to magic alone and arrive with it.
 const WHITE: u8 = 0x00;
 const GOBO_OPEN: u8 = 0x00;
 
-// The bottom of attentive's breath. An absolute value rather than a fraction of the peak,
-// because what matters is where this fixture's lamp stops striking, and that is a place on the
-// channel rather than a proportion of whatever the show happened to ask for — a floor written
-// as a fraction of a dim ceiling lands far lower than it reads.
-const ATTENTIVE_DIMMER: u8 = 0x40;
-const ATTENTIVE_DIMMER_FLOOR: u8 = 0x30;
-
 // Magic is the state the show is for, so it is the bright one, and it is the only one with a
-// colour and a pattern in the beam — which is what makes an arm coming up read as a change in
-// kind rather than a change in aim.
+// colour and a pattern in the beam — which is what makes a mage walking up read as a change
+// in kind rather than a change in aim.
+//
+// The floor is an absolute value rather than a fraction of the peak, because what matters is
+// where this fixture's lamp stops striking, and that is a place on the channel rather than a
+// proportion of whatever the show happened to ask for.
 const MAGIC_DIMMER: u8 = 0xc8;
 const MAGIC_DIMMER_FLOOR: u8 = 0x90;
 const MAGIC_COLOR_RED: u8 = 0x10;
@@ -162,17 +152,6 @@ const MAGIC_FORE_FULL_DEG: f64 = 90.0;
 // 180° straight up.
 const UPPER_ARM_RANGE_DEG: f64 = 180.0;
 
-// How far a wrist has to clear its own hip to put the rig into magic, and how far it has to
-// fall back before it leaves. In the picture's own normalised height, and the gap between the
-// two is the hysteresis on that boundary — a hand resting on the line would otherwise restage
-// the whole rig on the model's noise.
-//
-// The camera sits on the ground looking up, so a wrist reaching *toward* the lens projects
-// lower in the image than it really is. That is what the margins are for as much as the
-// chatter is — a kid pointing at the camera would otherwise drop out of magic.
-const MAGIC_WRIST_RISE: f32 = 0.04;
-const MAGIC_WRIST_FALL: f32 = 0.01;
-
 // How far the breath swings the beam either side of where the state put it. The same breath
 // that rides the dimmer rides the aim, so a head that is holding still is never quite still —
 // which is most of what makes four lights read as four creatures rather than four lamps.
@@ -188,12 +167,12 @@ const BREATH_ROVE_DEG: f64 = 3.0;
 // a DMX device and appears in neither.
 include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 
-/// One head with everything that drives it: where it points when watching, how it wanders
-/// when bored, and where it actually is right now.
+/// One head with everything that drives it: how it wanders when bored, and where it actually
+/// is right now.
 ///
 /// Assembled per head and never by index, so a head cannot end up wearing another head's
-/// recorded home — which would send it somewhere nobody looked while every number involved
-/// still looked reasonable.
+/// wander — which would walk it a span nobody chose, at a speed nobody picked for it, while
+/// every number involved still looked reasonable.
 struct Snake {
     head: &'static geometry::Head,
     wander: HeadWander,
@@ -213,13 +192,12 @@ impl Snake {
 /// What the whole rig is doing.
 ///
 /// The mage's state and not a head's: four snakes are one creature's attention, and two of
-/// them watching while the other two fly reads as a rig with a fault rather than as a trick.
+/// them wandering while the other two fly reads as a rig with a fault rather than as a trick.
 /// Which arm moves which pair stays a per-pair question — the state says whether anybody is
 /// flying at all.
 #[derive(Clone, Copy, PartialEq)]
 enum Show {
     Bored,
-    Attentive,
     Magic,
 }
 
@@ -227,8 +205,7 @@ impl Show {
     fn label(self) -> &'static str {
         match self {
             Self::Bored => "bored — no mage",
-            Self::Attentive => "attentive — mage seen, hands down",
-            Self::Magic => "magic — a hand is up",
+            Self::Magic => "magic — a mage is here",
         }
     }
 }
@@ -280,31 +257,6 @@ impl Pair {
             self.aim.pan = lerp(MAGIC_PAN_CENTRE, end, fore.abs() / MAGIC_FORE_FULL_DEG);
         }
     }
-}
-
-/// Whether either hand has cleared its own hip, or `None` when the picture cannot say.
-///
-/// Image coordinates run down the picture, so a wrist above its hip carries the smaller
-/// number. `already` picks which side of the hysteresis band to measure against, so a hand
-/// resting near the line does not flutter the whole rig between two states.
-///
-/// A side whose landmarks are missing simply does not vote. Only when neither side is
-/// readable is the answer `None`, which the caller turns into "whatever it was" — a mage the
-/// model briefly lost is not a mage who put their hands down.
-fn hand_up(sighting: &Sighting, already: bool) -> Option<bool> {
-    let margin = if already {
-        MAGIC_WRIST_FALL
-    } else {
-        MAGIC_WRIST_RISE
-    };
-    let mut answer = None;
-    for side in ["left", "right"] {
-        let landmark = |name: &str| sighting.keypoints.get(&format!("{side}_{name}"));
-        if let (Some(wrist), Some(hip)) = (landmark("wrist"), landmark("hip")) {
-            answer = Some(answer.unwrap_or(false) || hip[1] - wrist[1] > margin);
-        }
-    }
-    answer
 }
 
 /// Walks from one channel value to another, `at` running 0 to 1 and clamped at both ends.
@@ -386,10 +338,9 @@ fn main() {
     // few seconds whether vision died, wedged, or is simply looking at an empty field.
     let mut unseen_s = BORED_AFTER_S;
 
-    // The rig starts bored, and starts already free to leave: the first mage to walk up should
-    // not have to wait out a dwell nobody was there for.
+    // The rig starts bored, which is also what it does if the eyeball never comes up at all:
+    // an empty field and a dead daemon are the same observation from here.
     let mut show = Show::Bored;
-    let mut held_s = STATE_DWELL_S;
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
@@ -456,31 +407,22 @@ fn main() {
                     }
                 }
 
-                // What the picture asks for, which is not always what the rig does: a state
-                // has to have stood for its dwell before another can replace it.
-                let magic = show == Show::Magic;
-                let wanted = if bored {
-                    Show::Bored
-                } else if hand_up(&sighting, magic).unwrap_or(magic) {
-                    Show::Magic
-                } else {
-                    Show::Attentive
-                };
+                // Being seen is the whole of it. Nothing here asks what a mage is doing with
+                // their arms, because the arms are already steering and a mage standing still
+                // steers the heads to where standing still points them.
+                let wanted = if bored { Show::Bored } else { Show::Magic };
 
-                held_s += dt;
-                if wanted != show && held_s >= STATE_DWELL_S {
+                if wanted != show {
                     show = wanted;
-                    held_s = 0.0;
                     // Logged as it happens, because the person best placed to judge whether
-                    // the state changed when they raised their hand is the one waving it, and
+                    // the state changed when they walked up is the one standing there, and
                     // they are therefore not reading a screen. The journal answers it after.
                     eprintln!("show: {}", show.label());
                 }
 
-                // Both arms steer their own pair whenever anything is flying. One hand up puts
-                // the whole rig in magic, and the pair belonging to the hand that stayed down
-                // follows it down — which is the arm doing what it was asked, not a pair left
-                // behind.
+                // Both arms steer their own pair whenever anything is flying, an arm hanging
+                // at a mage's side included: that pair points where a hanging arm points,
+                // which is the arm doing what it was asked rather than a pair left behind.
                 if show == Show::Magic {
                     for pair in &mut pairs {
                         let arm = match pair.side {
@@ -502,9 +444,9 @@ fn main() {
                         let snake = &mut snakes[index];
                         let head = snake.head.fixture;
 
-                        // Bored is the only state that keeps a head's own speed. The two
-                        // watching states are being judged against a kid's own arm, where
-                        // slowness reads as a fault rather than as character.
+                        // Bored keeps a head's own speed and magic does not: a beam under an
+                        // arm is judged against that arm, where slowness reads as a fault
+                        // rather than as character.
                         let (target, dimmer, color, gobo) = match show {
                             Show::Bored => {
                                 snake.slew.set_rate(snake.wander.slew);
@@ -514,15 +456,6 @@ fn main() {
                                     snake.wander.from
                                 };
                                 (pose, BORED_DIMMER, WHITE, GOBO_OPEN)
-                            }
-                            Show::Attentive => {
-                                snake.slew.set_rate(ATTENTIVE_SLEW);
-                                (
-                                    roved(snake.head.attentive.pose(), rove_pan_deg, rove_tilt_deg),
-                                    breathed(ATTENTIVE_DIMMER_FLOOR, ATTENTIVE_DIMMER, breath),
-                                    WHITE,
-                                    GOBO_OPEN,
-                                )
                             }
                             Show::Magic => {
                                 snake.slew.set_rate(MAGIC_SLEW);

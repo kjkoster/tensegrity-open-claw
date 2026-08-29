@@ -100,11 +100,11 @@ pub const MQTT_FAREWELL_MS: u64 = 500;
 pub const EYEBALL_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
 pub const EYEBALL_PORT: u16 = 9001;
 
-// How long a sighting stays actionable. Past this the show degrades to plain attentive and
-// holds, which is the same answer for a dead daemon, a wedged one, and a lost camera — the
-// three failures are indistinguishable from here and want identical handling. Long enough to
-// ride out several missed frames at a pose rate that may only be 4–7 Hz, short enough that a
-// dead camera does not leave heads pointing at where someone used to be.
+// How long a sighting stays actionable. Past this the show is being shown nobody, which is the
+// same answer for a dead daemon, a wedged one, and a lost camera — the three failures are
+// indistinguishable from here and want identical handling. Long enough to ride out several missed
+// frames at a pose rate that may only be 4–7 Hz, short enough that a dead camera does not leave
+// heads pointing at where someone used to be.
 pub const EYEBALL_STALE_US: u64 = 1_000_000;
 
 // Rebind backoff for the listener, matching the sACN receiver's: retrying rather than dying

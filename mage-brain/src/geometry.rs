@@ -1,10 +1,9 @@
-//! Where the four heads point, recorded off the console rather than measured on a field.
+//! The four heads, and the channel pair that says where one of them is pointing.
 //!
-//! There is no world frame here and no solve. Every number below is what the sliders showed
-//! when a head was driven onto something by hand, which is the whole of this rig's
-//! calibration: the arms drive pan and tilt directly, so nothing ever has to know where a
-//! head stands, which way the field runs, or how far away the mage is. A rig that moves gets
-//! these rows retyped and setup is done.
+//! There is no world frame here, no solve, and nothing measured. The arms drive pan and tilt
+//! directly, so nothing ever has to know where a head stands, which way the field runs, or how
+//! far away the mage is — a rig that moves gets carried out, set down and switched on. What is
+//! left below is the roster: four names bound to four patched fixtures.
 //!
 //! Sixteen bit, because pan and tilt are sixteen-bit channels and the coarse byte alone is
 //! two degrees of pan — which is visible as a step in a move slow enough to watch.
@@ -43,18 +42,12 @@ fn degrees(dmx: u16, range_deg: f64) -> f64 {
     f64::from(dmx) / f64::from(u16::MAX) * range_deg
 }
 
-/// One head and the one thing recorded about it.
+/// One head: a name and the fixture it is patched to.
 ///
 /// The name is the workspace's, so a line of log and a line of patch name the same head.
 pub struct Head {
     pub name: &'static str,
     pub fixture: &'static patch::Zq02015,
-    /// Where this head sits in attentive: driven onto the mage by hand, read off the sliders.
-    ///
-    /// Per head rather than shared, because the four stand in different places and the whole
-    /// point of the state is that all four land on the same person. It is also the only
-    /// per-head number left — magic drives the pair off the arm and needs nothing measured.
-    pub attentive: Aim,
 }
 
 /// The arc as it stands, from the mage's left round to their right.
@@ -64,23 +57,19 @@ pub struct Head {
 pub static SNAKE_1: Head = Head {
     name: "snake_1",
     fixture: &patch::SNAKE_1,
-    attentive: Aim::new(0x0000, 0xff00),
 };
 
 pub static SNAKE_2: Head = Head {
     name: "snake_2",
     fixture: &patch::SNAKE_2,
-    attentive: Aim::new(0x0000, 0xff00),
 };
 
 pub static SNAKE_3: Head = Head {
     name: "snake_3",
     fixture: &patch::SNAKE_3,
-    attentive: Aim::new(0x0000, 0xff00),
 };
 
 pub static SNAKE_4: Head = Head {
     name: "snake_4",
     fixture: &patch::SNAKE_4,
-    attentive: Aim::new(0x0000, 0xff00),
 };

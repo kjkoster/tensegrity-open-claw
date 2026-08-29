@@ -11,15 +11,16 @@
 //! fresh. Silence and a wedged sender are then the same observation, which is what the
 //! staleness window is for.
 //!
-//! The key set inside `keypoints` is deliberately not fixed. The estimator is expected to be
-//! replaced — a model today, contour extremities under infrared later — and a schema that
-//! named the seventeen joints of one particular model would have to change with it.
+//! What the show reads off a frame is the arms, already reduced to angles by the daemon. The
+//! landmarks they were built from stay on the daemon's side, where the preview draws them:
+//! the estimator is expected to be replaced — a model today, contour extremities under
+//! infrared later — and a schema naming the seventeen joints of one particular model would
+//! have to change with it, for a key set nothing here reads.
 
 use crate::clock;
 use crate::config as cfg;
 use crate::latest::LatestTx;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{SocketAddrV4, UdpSocket};
@@ -41,7 +42,7 @@ pub struct Sighting {
     /// clock below, because the two ends have no reason to agree on the time of day.
     pub sent_at: f64,
     /// Which estimator produced this — `movenet`, `silhouette`, or whatever replaces them.
-    /// It names the key set in `keypoints` and belongs in any log line about them.
+    /// It says what the arms below were measured from, and belongs in any log line about them.
     pub source: String,
     /// The rate the daemon is achieving, which is the number that says whether the vision
     /// half is healthy long before the show looks wrong.
@@ -50,9 +51,6 @@ pub struct Sighting {
     /// this *is* occupancy: presence and vision are the same fact, so a dead eyeball reads as a
     /// rig with nobody in front of it. The show's own staleness path is what covers that.
     pub present: bool,
-    /// Name → `[x, y, confidence]`, normalised `0..1` within the crop. Normalised, so a change
-    /// of camera resolution or crop moves nothing downstream.
-    pub keypoints: BTreeMap<String, [f32; 3]>,
     /// Both arms, reduced to angles by the daemon. What the show steers on.
     ///
     /// Defaulted rather than required, because the two ends restart independently: a daemon
@@ -106,8 +104,9 @@ pub struct Arm {
 impl Sighting {
     /// Whether this sighting is recent enough to act on.
     ///
-    /// The whole degrade path hangs off this one question: past the window, the show falls
-    /// back to plain attentive and holds, whether the daemon died, wedged, or lost its camera.
+    /// The whole degrade path hangs off this one question: past the window the show stops
+    /// being shown a mage, and once that has stood for its own timeout the heads go back to
+    /// wandering — whether the daemon died, wedged, or lost its camera.
     /// A default `Sighting` has never been received and reads stale from the first frame, so a
     /// show that starts before the daemon does behaves the same as one whose daemon left.
     pub fn fresh(&self) -> bool {
