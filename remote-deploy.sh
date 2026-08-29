@@ -47,8 +47,36 @@ case "$RIG" in
     *) echo "unknown rig '$RIG' — expected claw-brain or mage-brain" >&2; exit 1 ;;
 esac
 
-# --- 1. Stem's broker ------------------------------------------------------
-# First, before anything that reports to it. Every daemon on this rig holds its own client
+# --- 1. 4G uplink watchdog -------------------------------------------------
+# Ahead of everything else, for the same reason the broker goes ahead of the build and a
+# stronger one: this is what gets the Pi back onto the network after the modem wedges, and the
+# rig is a long way from the person who would otherwise have to walk to it. A deploy that dies
+# at the build should still have installed the way back in.
+#
+# The script carries its own configuration — the interface, the hub and port whose power gets
+# cut, the tunnel address — and the hub and port were established by cutting them and watching
+# the dongle's LED go dark. That makes this copy the source of truth for those values: anything
+# retuned on the Pi and not carried back here is overwritten by the next deploy.
+#
+# Only the timer is enabled. The service is `oneshot` and deliberately has no `[Install]`
+# section — something has to decide when the check runs, and that is the timer's whole job.
+step "install 4G uplink watchdog"
+sudo install -m 0755 "$REPO/4g-watchdog.sh" /usr/local/sbin/4g-watchdog.sh
+sudo install -m 0644 "$REPO/4g-watchdog.service" /etc/systemd/system/4g-watchdog.service
+sudo install -m 0644 "$REPO/4g-watchdog.timer" /etc/systemd/system/4g-watchdog.timer
+sudo systemctl daemon-reload
+sudo systemctl enable 4g-watchdog.timer
+# Restarted and not merely enabled, so an edited schedule takes effect on this deploy rather
+# than at whatever reboot happens next. The timer only: the service is the check itself, and
+# firing it from here would have it judge an uplink in the middle of being deployed over.
+if sudo systemctl restart 4g-watchdog.timer; then
+    echo "4G watchdog timer running"
+else
+    echo "WARNING: 4g-watchdog.timer did not start — journalctl -u 4g-watchdog.timer -n 40"
+fi
+
+# --- 2. Stem's broker ------------------------------------------------------
+# Before anything that reports to it. Every daemon on this rig holds its own client
 # connection and announces itself on `health/`, so the broker is not one more service among
 # them — it is the thing that lets the rest of this script be watched while it runs. Bringing
 # it up ahead of the build also means a build that fails leaves the rig's telemetry intact
@@ -71,11 +99,11 @@ else
     echo "mosquitto not installed — skipping (sudo apt install mosquitto mosquitto-clients)"
 fi
 
-# --- 2. build both rigs natively on the Pi --------------------------------
+# --- 3. build both rigs natively on the Pi --------------------------------
 step "build claw-brain and mage-brain"
 ( cd "$REPO" && cargo build --release )
 
-# --- 3. install both binaries ---------------------------------------------
+# --- 4. install both binaries ---------------------------------------------
 # Both rigs are always built and always installed. Switching rigs means travel and setup, so
 # which one is live is a decision made on site — and made explicitly, by naming it.
 step "install rig binaries"
@@ -101,7 +129,7 @@ elif [ ! -e /usr/local/bin/brain ]; then
     echo "         Re-run with claw-brain or mage-brain; this script will not choose for you."
 fi
 
-# --- 4. brain daemon -------------------------------------------------------
+# --- 5. brain daemon -------------------------------------------------------
 step "install and restart brain daemon"
 sudo install -m 0644 "$REPO/brain.service" /etc/systemd/system/brain.service
 sudo systemctl daemon-reload
@@ -109,7 +137,7 @@ sudo systemctl enable brain
 sudo systemctl restart brain
 echo "brain daemon restarted: $(readlink /usr/local/bin/brain)"
 
-# --- 5. Stem ---------------------------------------------------------------
+# --- 6. Stem ---------------------------------------------------------------
 # rig_mqtt.py installs beside its importers rather than into a site-packages directory: both
 # daemons are run by absolute path, which puts /usr/local/bin first on their import path, and
 # one file copy beats owning a package layout for a single shared module.
@@ -126,7 +154,7 @@ else
     echo "WARNING: stem did not start — journalctl -u stem -n 40"
 fi
 
-# --- 6. eyeball's pose model -----------------------------------------------
+# --- 7. eyeball's pose model -----------------------------------------------
 # MoveNet SinglePose Lightning, int8, from the TF Hub lite-model store — the same model the
 # TensorFlow Hub MoveNet tutorial uses. Fetched once and then left alone: it is a few megabytes
 # over a 4G modem, and it never changes.
@@ -169,7 +197,7 @@ else
     fi
 fi
 
-# --- 7. eyeball daemon -----------------------------------------------------
+# --- 8. eyeball daemon -----------------------------------------------------
 # Installed and restarted alongside the brain, but never coupled to it: no ordering, no
 # dependency, in either direction. A dead eyeball is a staleness timeout the show already
 # handles, and a unit dependency would turn that degraded show into a stopped one.

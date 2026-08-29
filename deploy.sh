@@ -44,13 +44,17 @@ esac
 #   eyeball/         the vision daemon and its unit
 #   stem/            the broker configuration, and whatever else Stem grows
 #   brain.service    installed as the systemd unit
+#   4g-watchdog.*    the uplink watchdog: its script, its unit and its timer
 #
 # The workspaces and the definitions are not optional: each rig's build reads its own `.qxw`
 # and resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
 DIRECTORIES=(cortex cortex-build claw-brain mage-brain fixtures eyeball stem)
-FILES=(Cargo.toml claw.qxw mage.qxw brain.service remote-deploy.sh)
+FILES=(
+    Cargo.toml claw.qxw mage.qxw brain.service remote-deploy.sh
+    4g-watchdog.sh 4g-watchdog.service 4g-watchdog.timer
+)
 
 step "rsync sources to $PI:$PI_DIR"
 # --checksum, not the default size+mtime check: git checkouts and editor saves bump source

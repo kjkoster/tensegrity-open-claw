@@ -61,11 +61,52 @@ macOS.
 
 ### 4G uplink
 
-> ⚠️ **Not yet captured in the repo.** The deployed Pi reaches the internet over a 4G modem,
-> but no config for it lives in this tree. To document: modem device + connection method
-> (USB dongle vs. tethering; ModemManager/`mmcli`, `usb0` DHCP, or `ppp`), APN/SIM, routing
-> metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet `10.0.1.0/24` stay
-> local), and boot-time bring-up so a reboot reconnects.
+> ⚠️ **The link itself is not captured in the repo.** The deployed Pi reaches the internet over
+> a 4G modem, and no config for the connection lives in this tree. To document: modem device +
+> connection method (USB dongle vs. tethering; ModemManager/`mmcli`, `usb0` DHCP, or `ppp`),
+> APN/SIM, routing metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet
+> `10.0.1.0/24` stay local), and boot-time bring-up so a reboot reconnects.
+
+The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs it:
+
+| Repo | On the Pi |
+|---|---|
+| `4g-watchdog.sh` | `/usr/local/sbin/4g-watchdog.sh` |
+| `4g-watchdog.service` | `/etc/systemd/system/4g-watchdog.service` |
+| `4g-watchdog.timer` | `/etc/systemd/system/4g-watchdog.timer` |
+
+The timer runs the check every minute and is the only one of the two enabled — the service is
+`oneshot` and exists to be fired. On a consecutive run of failed checks it escalates, at minute
+3, 5 and 8: restart the connection, ask the HiLink dongle to reboot itself, cut the dongle's USB
+power with `uhubctl`. **Each of those fires once**, and the gap to the next rung is what gives it
+time to work — a dongle needs 30–60 s to register after a reset, so a remedy re-applied every
+minute is one that never lets the dongle finish coming back.
+
+At minute 13 it reboots the Pi, and that rung refuses itself three ways: within 15 minutes of
+boot, while `IFACE` does not exist (no reboot fixes a renamed interface, and a warm reboot does
+not cut USB power), and within an hour of the last watchdog reboot. That last guard is why the
+timestamp lives in `/var/lib` — a reboot is precisely the event that clears `/run`, and without it
+a campsite with no coverage reboots the rig every quarter of an hour, mid-show, for as long as the
+outage lasts.
+
+Separately, when the internet is up but the WireGuard tunnel is not, `wg-quick` is restarted.
+
+```
+systemctl list-timers 4g-watchdog.timer     # when it last ran and when it runs next
+journalctl -t 4g-watchdog                   # what it has been doing
+cat /run/4g-watchdog/consecutive-failures   # how far up the ladder it currently is
+cat /var/lib/4g-watchdog/last-reboot        # epoch seconds of the last watchdog reboot
+sudo /usr/local/sbin/4g-watchdog.sh         # run one check by hand
+```
+
+**The script's configuration lives inside the script**, at the top: the modem's interface, the
+`uhubctl` hub and port, the tunnel address, and the thresholds. Those are the repo's copy to
+change — a value edited on the Pi is overwritten by the next deploy. The hub and port in
+particular have to be confirmed by eye, because a wrong pair exits 0 without cutting anything: run
+`sudo uhubctl -l <loc> -p <port> -a cycle -d 5` and watch the dongle's LED go dark. The sysfs
+unbind/rebind fallback follows that same port unless `USB_DEV` names another one, so the two
+cannot disagree by accident — which they did, silently, because a Pi 4 gangs its USB ports and
+cutting the wrong one cuts the dongle anyway.
 
 ## Attached hardware
 
@@ -160,7 +201,7 @@ DMX **OUT** of the last device on the bus.
   `Restart=always`, `RestartSec=5`, `After=network.target`, RT scheduling as above).
 - `sudo systemctl enable --now brain` / `sudo systemctl restart brain`.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
-- The 4G/WiFi bring-up units belong here too once documented.
+- The WiFi bring-up units belong here too once documented; the 4G watchdog's are above.
 
 ### Selecting the rig
 
@@ -184,12 +225,11 @@ sudo systemctl restart brain
 `journalctl -u brain` also says so on every line: the running rig prefixes its log with its own
 name.
 
-`brain.service` is the only unit `remote-deploy.sh` installs. The health daemon
-(`stem.service`), the local MQTT broker and the systemd watchdog settings are designed in
-[`SHOW.md`](SHOW.md) and [`PET-THE-DOG.md`](PET-THE-DOG.md) but **not built** — when they
-land, how to configure them belongs in this file. There is also a 4G watchdog script running
-on the Pi that is not in the repo at all; getting it versioned is an open item in
-[`TODO.md`](TODO.md).
+`remote-deploy.sh` also installs `stem.service`, `eyeball.service`, the broker's `stem.conf` and
+the 4G watchdog's unit and timer (above). The systemd watchdog settings designed in
+[`PET-THE-DOG.md`](PET-THE-DOG.md) are **not built** — when they land, how to configure them
+belongs in this file. Folding the 4G watchdog's job into Stem, so there is one health daemon
+rather than two overlapping ones, is an open item in [`TODO.md`](TODO.md).
 
 ## Build & deploy
 

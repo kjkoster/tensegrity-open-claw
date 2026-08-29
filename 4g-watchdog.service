@@ -1,0 +1,11 @@
+# Oneshot service fired by 4g-watchdog.timer. Runs as root because the
+# recovery steps need uhubctl, sysfs writes and systemctl reboot.
+# Installed at /etc/systemd/system/4g-watchdog.service by remote-deploy.sh — see the README.
+[Unit]
+Description=4G uplink watchdog check
+# The check pings out over the network, so don't start before it exists.
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/4g-watchdog.sh

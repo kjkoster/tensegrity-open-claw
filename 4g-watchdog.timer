@@ -1,0 +1,13 @@
+# Runs the 4G uplink watchdog check once a minute. The escalation thresholds
+# in 4g-watchdog.sh are expressed in these one-minute ticks.
+# Installed at /etc/systemd/system/4g-watchdog.timer by remote-deploy.sh — see the README.
+[Unit]
+Description=Run the 4G uplink watchdog every minute
+
+[Timer]
+# Give the modem time to register on the network after boot before judging it.
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
