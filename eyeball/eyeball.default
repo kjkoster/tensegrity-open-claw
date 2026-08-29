@@ -21,6 +21,21 @@ EYEBALL_CROP=0.21875,0,0.5625,1
 
 EYEBALL_CAMERA_RESOLUTION=480x270
 
+# How the picture is fetched. `rtsp` is H.264 and `mjpeg` is independent JPEGs over HTTP; the
+# Axis serves either at any resolution, so this is a free choice and the reasoning is in
+# EYEBALL.md §4.
+#
+# It is also the first thing to try when the preview runs late. H.264 carries latency this rig
+# cannot see into — an RTSP jitter buffer, and a GOP structure that means a frame cannot be
+# decoded until its references have been — while MJPEG has no inter-frame state, no GOP delay
+# and no buffer to tune. The bandwidth it costs instead is irrelevant on a dedicated link with
+# one camera on it. Switching costs one word here and a restart, so measure rather than argue —
+# and measure latency by filming a running clock, not with a rate off the broker. EYEBALL.md
+# §4.1 is why that is the method and why no rate can stand in for it.
+#
+# Commented because this is the code's own default. Uncomment only to overrule it.
+#EYEBALL_CAMERA_TRANSPORT=mjpeg
+
 # What the camera is asked to send, which has to sit a little above what the estimator achieves.
 # Below it and the stream becomes the ceiling — the loop runs at the camera's rate and no amount
 # of tuning downstream shows any effect at all, which is exactly what a request of 10 did once
@@ -29,6 +44,14 @@ EYEBALL_CAMERA_RESOLUTION=480x270
 #
 # eyeball/status/captured_fps against eyeball/status/fps is the readout: the first should stay a
 # little ahead of the second, and the gap between them is decode being thrown away.
+#
+# Neither says anything about how old a frame is, and no rate ever can — a pipeline running three
+# seconds late still reports the rate it was asked for. What captured_fps does catch is the one
+# delay that grows: decode slower than the camera delivers drags it below the number above.
+#
+# Age is eyeball/status/sighting_age_ms, and preview_age_ms beside it. The first is the rig's own
+# latency and the one to tune against; the second adds a drawing and an encode the show never
+# waits for. EYEBALL.md §4.1 has what to subtract them from.
 # Pi 3B can do ~15 fps
 EYEBALL_CAMERA_FPS=15
 
@@ -55,8 +78,10 @@ EYEBALL_CAMERA_FPS=15
 # published under eyeball/camera/requested/ beside what the camera says it actually is.
 #
 # A setting this firmware refuses reappears as a mismatch on every start until it is deleted from
-# here — MaxSlowShutter is one such on the M3105-LVE, kept for now because firmware generations
-# disagree about which of the two exposure ceilings binds and the other one takes.
+# here. MaxSlowShutter was one such on the M3105-LVE and has been deleted: 6.15.2 answers
+# `Error setting ... to '10000'` and the read-back still says 33333, so it is not refused-but-
+# maybe, it is unsettable. Which of the two exposure ceilings binds the sensor stopped being a
+# question worth carrying a line for once only one of them could be written at all.
 #
 # The list below is the night configuration, which is the one the show runs. Infrared beats
 # visible light on this rig by a wide margin, so there is no day list any more; the reasoning is
@@ -64,12 +89,26 @@ EYEBALL_CAMERA_FPS=15
 #
 #   IrCutFilter=no          the sensor sees 850 nm, lit by the camera's own illuminator
 #   WhiteBalance            locked, so a wash with no green in it cannot be chased
-#   Exposure=auto           bounded rather than locked, by the two ceilings below
+#   Exposure=auto           bounded rather than locked, by the ceiling below
 #   CaptureFrequency=50Hz   the mains here; 60Hz buys banding and a wrong quantisation
 #   MaxExposureTime=10000   10 ms, the shortest a 50 Hz flicker quantisation offers, and the
-#                           difference between a landmark on a moving wrist and a streak
+#                           difference between a landmark on a moving wrist and a streak. The
+#                           camera's own default is 2000000 — two seconds — which is not a
+#                           blurred landmark but half a frame per second, and looks from the
+#                           outside exactly like a preview running seconds behind. This one does
+#                           take on 6.15.2, confirmed in the start-up log, which is what rules
+#                           the exposure out as a cause of lag rather than assuming it away.
 #   ExposurePriority=0      spend light on a short shutter rather than on low noise: a pose
 #                           model tolerates noise far better than it tolerates blur
+#
+#   Rotation=180            the camera is mounted inverted, and this is what puts the picture
+#                           back up the right way. It was set by hand in the web UI and nothing
+#                           reproduced it: a factory reset or a replacement camera would come up
+#                           with an upside-down picture, MoveNet would find nobody, and the rig
+#                           would look broken for a reason nothing in this file mentioned. The
+#                           crop above is symmetric about the centre and full height, so a 180°
+#                           rotation maps it onto itself and it needs no change alongside this.
+#                           It is also the one Image-group setting here — see below.
 #
 # Bounded is not locked, and the show now moves the thing the bound is metering. The heads stand
 # beside the camera and light the mage from the camera's own viewpoint, and the movement envelope
@@ -79,4 +118,27 @@ EYEBALL_CAMERA_FPS=15
 # because `hold` freezes the sensor at whatever it was metering the instant the daemon started:
 # on a rig whose beams come up afterwards, that is a lock onto a dark field. It wants setting
 # with the show already lit, and confirming in the start-up log like everything else here.
-EYEBALL_CAMERA_SETTINGS=ImageSource.I0.DayNight.IrCutFilter=no,ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,ImageSource.I0.Sensor.Exposure=auto,ImageSource.I0.CaptureFrequency=50Hz,ImageSource.I0.Sensor.MaxExposureTime=10000,ImageSource.I0.Sensor.MaxSlowShutter=10000,ImageSource.I0.Sensor.ExposurePriority=0,ImageSource.I0.Sensor.ExposurePriorityLowlight=0
+#
+# Not the IR illuminator, whatever its name suggests. Layout.IRIlluminationEnabled reads `yes`
+# here and is a web UI toggle rather than the lamp — it sits among HeaterEnabled, SnapshotEnabled
+# and ShowAMCToolbar, and this model has no root.Light group at all. IrCutFilter above is the only
+# infrared control there is; do not add the Layout one thinking it does something.
+#
+# Two groups are settable and only the rotation is taken from the second. The rest of the
+# camera's `Image` group, which holds the whole H.264 encoder, is left to whatever the camera
+# decided: a 32-frame GOP, main profile, unlimited VBR. That is the same "decides for
+# itself, badly" this variable exists to close, and it is where H.264's latency lives. The
+# parameters, their values and what each one buys are in EYEBALL.md §4.2, ready to paste — left
+# out of the line below on purpose, because forcing an encoder before measuring whether the
+# delay is even upstream is arguing rather than measuring.
+#
+# The clock overlay from EYEBALL.md §4.1 belongs in that same group, and is the one thing here
+# that measures rather than changes anything:
+#
+#   Image.I0.Text.TextEnabled=yes,Image.I0.Text.ClockEnabled=yes,Image.I0.Text.DateEnabled=yes
+#
+# Read §4.1 before trusting what it shows: this camera has no NTP server it can reach, so the
+# overlay carries an unsynchronised clock and the difference against the Pi's is an offset plus
+# a delay. Filming a clock has no such problem and needs nothing set here at all.
+#
+EYEBALL_CAMERA_SETTINGS=ImageSource.I0.DayNight.IrCutFilter=no,ImageSource.I0.Sensor.WhiteBalance=fixed_outdoor1,ImageSource.I0.Sensor.Exposure=auto,ImageSource.I0.CaptureFrequency=50Hz,ImageSource.I0.Sensor.MaxExposureTime=10000,ImageSource.I0.Sensor.ExposurePriority=0,ImageSource.I0.Sensor.ExposurePriorityLowlight=0,Image.I0.Appearance.Rotation=180

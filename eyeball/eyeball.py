@@ -61,6 +61,31 @@ CAMERA_FPS = os.environ.get("EYEBALL_CAMERA_FPS", "10")
 # window onto the same sensor, addressed as `camera=N` on every stream URL and every PTZ call.
 CAMERA_VIEW = os.environ.get("EYEBALL_CAMERA_VIEW", "1")
 
+# What FFmpeg is told before it opens the stream, which is where this daemon's latency budget is
+# either kept or lost. `|` separates options and `;` separates a key from its value.
+#
+# TCP because UDP loses slices on a busy link and OpenCV renders the tearing rather than dropping
+# the frame, which reads as a vision bug rather than a network one. The rest are the low-latency
+# flags, and they are the half that matters here: `max_delay` alone defaults to half a second of
+# reordering slack, and no amount of keeping only the newest frame downstream gives that back.
+#
+# One string for both transports, and two of these are inert under `mjpeg` — `rtsp_transport` and
+# `reorder_queue_size` have no protocol to apply to. FFmpeg ignores what it cannot use, so the
+# alternative is a branch that exists only to shorten a log line.
+#
+# Named here rather than written at the call site so it can be logged at start-up. What FFmpeg
+# was told is the first thing worth knowing when the picture turns out to be running late, and
+# reading it back off the source is inferring the answer rather than seeing it. It says what was
+# handed over, not what bound — the line beneath it, reporting whether the buffer size took, is
+# the shape every claim about this pipeline should be in.
+FFMPEG_OPTIONS = (
+    "rtsp_transport;tcp"
+    "|fflags;nobuffer"
+    "|flags;low_delay"
+    "|max_delay;0"
+    "|reorder_queue_size;0"
+)
+
 # What the daemon insists the camera is set to lives in `/etc/default/eyeball`, not here.
 #
 # Every setting is a thing the show requires and the camera will otherwise decide for itself,
@@ -163,6 +188,12 @@ PREVIEW_IDLE_S = 10.0
 # How long a single-frame request waits for a frame newer than itself, so a page opened after a
 # quiet spell does not serve whatever was last drawn whenever somebody last looked.
 PREVIEW_WAIT_S = 1.0
+# How much of the preview stream the kernel is allowed to hold. Left alone this autotunes into
+# the megabytes, which at these frame sizes is seconds of pictures already beyond Python's reach:
+# once that buffer is full it stays full, and every frame in it is served late. Capped to roughly
+# two frames so a client that cannot keep up blocks the write instead of filling a queue, which
+# is what lets the stream skip what went stale while it waited. Linux doubles what is asked for.
+STREAM_SNDBUF = 64 * 1024
 
 SERVICE = "eyeball"
 TELEMETRY_INTERVAL_S = 5.0
@@ -645,9 +676,10 @@ class Watched(Latest):
 
 def open_camera():
     """Opens the camera, low-latency, retrying until it answers."""
-    # RTSP over TCP: UDP loses slices on a busy link and OpenCV renders the tearing rather
-    # than dropping the frame, which reads as a vision bug rather than a network one.
-    os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+    # Set rather than defaulted. An operator who exported this for one experiment would otherwise
+    # keep the daemon on their string for every start afterwards, and the symptom of that is
+    # latency rather than an error.
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = FFMPEG_OPTIONS
 
     url = stream_url()
     source = int(url) if url.isdigit() else url
@@ -656,9 +688,15 @@ def open_camera():
         capture = cv2.VideoCapture(source)
         if capture.isOpened():
             # Default buffering costs hundreds of milliseconds, and the mechanical lag of a
-            # moving head has already spent the latency budget.
-            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            log(f"camera open: {url.split('@')[-1]}")
+            # moving head has already spent the latency budget. This binds on the backends that
+            # implement it and not on FFMPEG, which is the one any URL here gets — so it is
+            # reported rather than assumed. A property that silently does nothing reads exactly
+            # like a property that worked, and this one has a comment's worth of intent on it.
+            buffered = capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            log(
+                f"camera open: {url.split('@')[-1]} — {capture.getBackendName()}, "
+                f"buffer size {'held at 1' if buffered else 'not settable on this backend'}"
+            )
             return capture
         capture.release()
         log(f"camera did not open, retrying in {backoff_s}s")
@@ -680,7 +718,10 @@ def capture_thread(frames, stats):
             if not ok:
                 log("camera read failed, reopening")
                 break
-            frames.put(frame)
+            # Stamped where it enters, because every question about lag downstream is really
+            # "how old is this picture", and the only place that can be answered from is the one
+            # that saw it arrive.
+            frames.put((time.monotonic(), frame))
             stats["captured"] += 1
         camera.release()
 
@@ -1246,6 +1287,11 @@ class Preview(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
 
+    # A JPEG goes out as one write and the next one is a frame away. Nagle would hold the tail of
+    # each frame back waiting for a second write to coalesce with, which on a stream this sparse
+    # is a delay per frame paid for nothing.
+    disable_nagle_algorithm = True
+
     def log_message(self, format, *args):
         """Silenced: a browser holding an MJPEG stream open would otherwise fill the journal."""
 
@@ -1283,6 +1329,11 @@ class Preview(BaseHTTPRequestHandler):
         # keep-alive without one is a connection the client cannot find the end of.
         self.send_header("Connection", "close")
         self.end_headers()
+        # Before the first frame goes out, because the point is that this buffer never gets to
+        # fill. A capped one turns a client that cannot keep up into a blocked write, and the
+        # loop below then hands it whatever is newest when it unblocks rather than the frame it
+        # was part-way through queueing.
+        self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, STREAM_SNDBUF)
         last = None
         try:
             while True:
@@ -1663,6 +1714,7 @@ def main():
     # for a daemon that runs but sees nothing, and `EnvironmentFile=-` means a missing
     # configuration file starts the daemon on defaults rather than failing where it would show.
     log(f"camera: {CAMERA_HOST} — {CAMERA_TRANSPORT} {CAMERA_RESOLUTION} at {CAMERA_FPS} fps")
+    log(f"ffmpeg: {FFMPEG_OPTIONS}")
     # Listed rather than counted, and before the camera is touched. What the daemon is about to
     # force is the thing a journal is read for after a picture comes out wrong, and reading it
     # back off a label would be inferring the answer instead of seeing it.
@@ -1722,7 +1774,9 @@ def main():
     to_brain = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     sequence = 0
-    last_frame = None
+    last_sample = None
+    sighting_age_ms = 0.0
+    preview_age_ms = 0.0
     fps = 0.0
     estimate_ms = 0.0
     last_tick = time.monotonic()
@@ -1733,11 +1787,12 @@ def main():
     last_captured_at = time.monotonic()
 
     while True:
-        frame = frames.get()
-        if frame is None or frame is last_frame:
+        sample = frames.get()
+        if sample is None or sample is last_sample:
             time.sleep(0.005)
             continue
-        last_frame = frame
+        last_sample = sample
+        captured_at, frame = sample
 
         box = crop_box(frame)
         x, y, w, h = box
@@ -1787,6 +1842,13 @@ def main():
         }
         payload = json.dumps(sighting).encode()
         to_brain.sendto(payload, (BRAIN_HOST, BRAIN_PORT))
+        # How old the picture was when the show was told about it: the wait for this loop to come
+        # free, plus the estimator. This is the rig's own latency and the only part of it anything
+        # here can shorten — what happens before the capture thread belongs to the camera, and
+        # everything after this line belongs to the preview.
+        sighting_age_ms = (
+            0.9 * sighting_age_ms + 0.1 * (time.monotonic() - captured_at) * 1000
+        )
         Preview.pose.put(payload)
 
         # Drawing and encoding only while somebody is looking. This is by far the most expensive
@@ -1811,6 +1873,12 @@ def main():
             Preview.annotated.put(
                 encode(annotate(small, scaled, keypoints, estimator, readout))
             )
+            # The same age again, after the drawing and the JPEG. Whatever a stopwatch in front
+            # of the camera reads over and above this is the camera's own pipeline and the
+            # browser's — the two ends of the path that publish nothing about themselves.
+            preview_age_ms = (
+                0.9 * preview_age_ms + 0.1 * (time.monotonic() - captured_at) * 1000
+            )
 
         if time.time() - last_telemetry >= TELEMETRY_INTERVAL_S:
             last_telemetry = time.time()
@@ -1822,7 +1890,21 @@ def main():
                 # What the camera is actually delivering. Below the requested rate means the
                 # camera or the link is the limit; above the processing rate means frames are
                 # being decoded and dropped, and the request should come down to meet it.
+                #
+                # It is a rate and not an age, and the difference matters when the picture is
+                # running late: a pipeline three seconds behind still reports the rate it was
+                # asked for. The one delay this does catch is the one that grows — decode slower
+                # than delivery drags it under the requested number. Everything else wants a
+                # clock burnt into the frame by the camera.
                 "captured_fps": round(captured_fps, 2),
+                # Age of the frame at the moment the show was told, and again at the moment the
+                # preview was published. Rates say whether frames are keeping up; these say
+                # whether the ones getting through are recent, which is a different question and
+                # the one a person complains about. The show's number is the smaller and the one
+                # that matters: the preview pays for a drawing and an encode the rig never waits
+                # for. `null` for the preview while nobody is looking, because nothing is drawn.
+                "sighting_age_ms": round(sighting_age_ms, 1),
+                "preview_age_ms": round(preview_age_ms, 1) if drawing else None,
                 # What the camera is actually sending, which is the only way to know whether it
                 # honoured the resolution the URL asked for.
                 "width": frame.shape[1],
