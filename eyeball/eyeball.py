@@ -807,14 +807,16 @@ class Arm:
 
     `upper` is the shoulder-to-elbow segment and it is unsigned, running 0° with the arm hanging
     straight down to 180° with it straight up. Unsigned because that is the sweep the tilt
-    channel makes — pointing at the mage, through vertical, out to the audience — and which side
-    of the body the arm swings out to says nothing about where along that sweep it is.
+    channel makes — out at the audience, through vertical, back over the mage — and which side of
+    the body the arm swings out to says nothing about where along that sweep it is.
 
     The forearm is given twice, and on purpose. `fore` is its angle in the picture, signed from
-    straight down; `bend` is the elbow's own bend, the same segment measured against the upper
-    arm, which reads 0 on a straight arm and ±90 on a square one. Which of the two makes the
-    better pan is a question about how a child moves rather than about geometry, and carrying
-    both means it is answered by reading two numbers on one screen rather than by a rebuild.
+    straight down, and the show takes it unsigned and averages it with `upper`: the two together
+    are how far the whole arm is up, which is the one thing the heads are flown from. `bend` is
+    the elbow's own bend, the same segment measured against the upper arm, which reads 0 on a
+    straight arm and ±90 on a square one. Nothing reads it — it is carried for the readout,
+    where a person watching a child move can see what an elbow does before anything rests on
+    it.
 
     Any angle is None where the picture cannot say: a landmark the model is unsure of, or a
     segment pointed near enough at the lens that its projection is too short to have a direction.
@@ -919,8 +921,9 @@ TEXT_MARGIN = 8
 
 # What the skeleton is drawn at, by whether the show reads it.
 #
-# The arms carry the whole of the control — the upper segment aims a pair of heads and the lower
-# one swings them — so they keep their side's colour and the full weight. The torso, the legs
+# The arms carry the whole of the control — how far an arm is up is where its pair of heads
+# points, and both of its segments are read to say that — so they keep their side's colour and
+# the full weight. The torso, the legs
 # and the head are there to say that the shape in the picture is a person and which way it is
 # facing, which is a job that is done just as well thin and white, and done worse at a weight
 # that competes with the two limbs somebody is actually watching.
@@ -1001,13 +1004,13 @@ def degrees_or_dash(value):
 def arm_lines(keypoints, floors, arm, side):
     """One arm's chain — shoulder, elbow, wrist — as it is now over the worst it has just been.
 
-    This arm is what the show is built on: its upper segment aims a pair of heads and its lower
-    one swings them, so the whole of the pointing rests on three landmarks of which the middle
-    one is by far the least certain. Two numbers each: the first says whether the joint is
+    This arm is what the show is built on: its two segments together say how far up it is, and
+    that is where its pair of heads points, so the whole of the pointing rests on three
+    landmarks of which the middle one is by far the least certain. Two numbers each: the first says whether the joint is
     there, the second whether it stayed there while somebody moved.
 
-    Under them the two segments as angles, which is what the show will actually fly a pair of
-    heads from and therefore the thing worth watching settle while somebody moves.
+    Under them the two segments as angles, which averaged are what the show actually flies a
+    pair of heads from and therefore the thing worth watching settle while somebody moves.
 
     A line per row, and no side written on any of them. Which arm these belong to is said by
     which edge of the picture they are drawn against, which is a thing the eye reads without

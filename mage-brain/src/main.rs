@@ -20,8 +20,13 @@
 //! arm 3 and 4 — so a kid who moves one arm moves that pair, and finds the other pair has been
 //! following the arm they left hanging all along.
 //!
-//! There is no geometry in any of it, and nothing measured. The arms drive pan and tilt as
-//! channel values, so the rig gets carried out, set down and switched on.
+//! One axis and one gesture: how far the arm is up. Raised arms bring the beams up and back
+//! over the mage, hanging arms lay them out over the audience, and nothing a mage does swings a
+//! head sideways. Magic does not pan at all, so a pair does exactly one thing and a kid finds it
+//! in the first second rather than discovering it while hunting for something else.
+//!
+//! There is no geometry in any of it, and nothing measured. The arms drive tilt as a channel
+//! value, so the rig gets carried out, set down and switched on.
 
 mod geometry;
 
@@ -129,28 +134,25 @@ const MAGIC_DIMMER_FLOOR: u8 = 0x90;
 const MAGIC_COLOR_RED: u8 = 0x10;
 const MAGIC_GOBO: u8 = 0x30;
 
-// Tilt against the upper arm: hanging straight down puts the beam up over the mage, straight
-// up runs it out over the audience. The two ends are chosen rather than mechanical — the
-// arm-down end is deliberately not the channel's own end, because these heads sit at lens
-// height and the extreme would be a beam through a child.
-const MAGIC_TILT_ARM_DOWN: u16 = 0xa000;
-const MAGIC_TILT_ARM_UP: u16 = 0x0000;
+// Tilt against the arm's elevation: an arm hanging straight down lays the beam out over the
+// audience, and raising it lifts the beam with it, back up and over the mage. The beam follows
+// the hand, which is the reading a kid arrives with — the ends of the channel are the same two
+// as before, and only which arm posture reaches them has changed.
+//
+// Both ends are chosen rather than mechanical: these heads sit at lens height, so the
+// audience-facing end is the one that has to stop short, and it is the end a mage standing
+// still now holds. The clamp is what enforces it, not this pair of numbers.
+const MAGIC_TILT_ARM_DOWN: u16 = 0x0000;
+const MAGIC_TILT_ARM_UP: u16 = 0xa000;
 
-// Pan against the forearm: hanging straight down is the centre, and swinging it either way
-// carries the pair with it. Both heads in a pair take the same value, so they swing together
-// and keep the fan they were set up with — which is what reads as *both my snakes turned that
-// way* rather than as two heads doing two things.
-const MAGIC_PAN_CENTRE: u16 = 0xaa00;
-const MAGIC_PAN_FULL_LEFT: u16 = 0xe000;
-const MAGIC_PAN_FULL_RIGHT: u16 = 0x7000;
+// Where every head sits in pan for the whole of magic. Held rather than steered, and the same
+// value for all four: the fan the heads were set down in is the fan the show keeps, so the only
+// thing moving under an arm is the thing that arm is for.
+const MAGIC_PAN: u16 = 0xaa00;
 
-// How far off vertical the forearm has to swing to reach those ends. A quarter turn, so a kid
-// reaches the extremes without having to fold their arm behind them.
-const MAGIC_FORE_FULL_DEG: f64 = 90.0;
-
-// The upper arm's own range, which is what the daemon reports: 0° hanging straight down to
-// 180° straight up.
-const UPPER_ARM_RANGE_DEG: f64 = 180.0;
+// The range an arm is measured on, and what the daemon's angles arrive as: 0° hanging straight
+// down to 180° straight up, per segment and therefore for the two of them averaged.
+const ARM_RANGE_DEG: f64 = 180.0;
 
 // How far the breath swings the beam either side of where the state put it. The same breath
 // that rides the dimmer rides the aim, so a head that is holding still is never quite still —
@@ -217,10 +219,10 @@ struct Pair {
     /// side-of-frame test binds every arm to the wrong pair.
     side: &'static str,
     heads: [usize; 2],
-    /// The last aim the arm produced. Held rather than recomputed when a segment blanks: a
-    /// forearm pointed at the lens has no readable direction, and following the noise is
-    /// worse than holding still.
-    aim: Aim,
+    /// The last tilt the arm produced. Held rather than recomputed when the arm blanks: an arm
+    /// pointed at the lens has no readable elevation, and following the noise is worse than
+    /// holding still.
+    tilt: u16,
 }
 
 impl Pair {
@@ -228,34 +230,41 @@ impl Pair {
         Self {
             side,
             heads,
-            aim: Aim::new(MAGIC_PAN_CENTRE, MAGIC_TILT_ARM_DOWN),
+            // The arm-up end until an arm has actually been read, which is the harmless one:
+            // magic can begin on a frame whose arms all blanked, and a pair that starts where a
+            // hanging arm would put it starts pointed at the audience on no evidence at all.
+            tilt: MAGIC_TILT_ARM_UP,
         }
     }
 
-    /// Where this arm is pointing its pair, or the last answer if it cannot say.
+    /// How far up this arm is holding its pair, or the last answer if the picture cannot say.
     ///
-    /// The two segments are read independently, so a readable upper arm still drives tilt
-    /// while an unreadable forearm leaves pan where it was.
+    /// The whole arm and not either segment of it: the two are averaged, which on a straight
+    /// arm is the arm's own elevation and on a bent one falls between the halves — a folded
+    /// elbow puts the beams between where each half points, which is what a bent arm looks
+    /// like it should do.
+    ///
+    /// Whichever segments the picture could read are what gets averaged, because the daemon's
+    /// gate is per segment and half an arm still says roughly how far up the arm is. With
+    /// neither of them readable the tilt stays where it was.
     fn steer(&mut self, arm: &Arm) {
-        if let Some(upper) = arm.upper {
-            self.aim.tilt = lerp(
-                MAGIC_TILT_ARM_DOWN,
-                MAGIC_TILT_ARM_UP,
-                upper / UPPER_ARM_RANGE_DEG,
-            );
+        // The forearm arrives signed — which side of the body it swung out to — and magic no
+        // longer asks: only how far off hanging it is, which is the scale the upper arm is
+        // already on.
+        let mut sum = 0.0;
+        let mut segments = 0u32;
+        for angle in [arm.upper, arm.fore.map(f64::abs)].into_iter().flatten() {
+            sum += angle;
+            segments += 1;
         }
-        if let Some(fore) = arm.fore {
-            // Positive is toward the picture's right, which the mirror makes the mage's left.
-            // The two halves are interpolated separately because the ends are not the same
-            // distance from the centre, and one straight line through all three would put the
-            // centre somewhere the arm never hangs.
-            let end = if fore >= 0.0 {
-                MAGIC_PAN_FULL_LEFT
-            } else {
-                MAGIC_PAN_FULL_RIGHT
-            };
-            self.aim.pan = lerp(MAGIC_PAN_CENTRE, end, fore.abs() / MAGIC_FORE_FULL_DEG);
+        if segments == 0 {
+            return;
         }
+        self.tilt = lerp(
+            MAGIC_TILT_ARM_DOWN,
+            MAGIC_TILT_ARM_UP,
+            sum / f64::from(segments) / ARM_RANGE_DEG,
+        );
     }
 }
 
@@ -460,7 +469,11 @@ fn main() {
                             Show::Magic => {
                                 snake.slew.set_rate(MAGIC_SLEW);
                                 (
-                                    roved(pair.aim.pose(), rove_pan_deg, rove_tilt_deg),
+                                    roved(
+                                        Aim::new(MAGIC_PAN, pair.tilt).pose(),
+                                        rove_pan_deg,
+                                        rove_tilt_deg,
+                                    ),
                                     breathed(MAGIC_DIMMER_FLOOR, MAGIC_DIMMER, breath),
                                     MAGIC_COLOR_RED,
                                     MAGIC_GOBO,
