@@ -840,6 +840,72 @@ class Arm:
         }
 
 
+class Body:
+    """Where the mage is standing, which is what swings the heads sideways.
+
+    `across` is the torso's centre across the crop, signed: 0 in the middle and +1 at the
+    picture's right, which the mirror makes the mage's left — the same convention `fore` carries,
+    so the whole payload has one idea of which way is positive.
+
+    Position and not pointing, which is the point of it. The arms say how far up the beams go and
+    this says where across the field they go, so no single gesture can move both axes, and a kid
+    who has found one has not accidentally moved the other.
+
+    From the shoulders and the hips, because the middle of a torso is the steadiest thing in the
+    picture at the distance a child stands: it survives a head turned away and an arm across the
+    body, and it moves the width of the crop where a nose moves the width of a head.
+
+    `head` is the same measure taken from the nose alone, and nothing flies it. It is carried for
+    the preview, where standing and leaning can be told apart by watching a child rather than by a
+    rebuild — the way `fore` and `bend` are both carried.
+    """
+
+    def __init__(self, across, head):
+        self.across = across
+        self.head = head
+
+    def published(self):
+        return {
+            "across": None if self.across is None else round(self.across, 3),
+            "head": None if self.head is None else round(self.head, 3),
+        }
+
+
+def read_body(keypoints):
+    """Where the mage stands, from the torso and from the nose, or None for either.
+
+    Held to the stricter confidence floor rather than the arms': this number moves every head on
+    the rig at once, and a landmark the model has guessed at would swing all four beams off a
+    child rather than cost one segment its angle.
+
+    Taken from *pairs* — both shoulders, or both hips — and never from a single landmark. Half a
+    torso is off-centre by half a body, so a hip dropping out for a frame would jump the beams a
+    body's width sideways and back. Where no pair is complete this says nothing at all and the
+    show holds what it had, which is the same bargain every arm angle makes.
+    """
+    def middle(first, second):
+        left = landmark(keypoints, first, MOVENET_MIN_CONFIDENCE)
+        right = landmark(keypoints, second, MOVENET_MIN_CONFIDENCE)
+        if left is None or right is None:
+            return None
+        return (left[0] + right[0]) / 2
+
+    def across(fraction):
+        # The crop's own width is the field the mage walks: 0 at its left edge, 1 at its right.
+        return None if fraction is None else max(-1.0, min(1.0, (fraction - 0.5) * 2))
+
+    pairs = [
+        middle("left_shoulder", "right_shoulder"),
+        middle("left_hip", "right_hip"),
+    ]
+    found = [fraction for fraction in pairs if fraction is not None]
+    nose = landmark(keypoints, "nose", MOVENET_MIN_CONFIDENCE)
+    return Body(
+        across=across(sum(found) / len(found) if found else None),
+        head=across(None if nose is None else nose[0]),
+    )
+
+
 def read_arm(keypoints, side, scale, box):
     """One side's two segments, gated on confidence and on how long they look."""
     shoulder = landmark(keypoints, f"{side}_shoulder")
@@ -1001,13 +1067,18 @@ def degrees_or_dash(value):
     return f"{value:5.0f}°" if value is not None else f"{'—':>5} "
 
 
+def across_or_dash(value):
+    """A position across the field, signed, or a dash occupying the same five columns."""
+    return f"{value:+5.2f}" if value is not None else f"{'—':>5}"
+
+
 def arm_lines(keypoints, floors, arm, side):
     """One arm's chain — shoulder, elbow, wrist — as it is now over the worst it has just been.
 
     This arm is what the show is built on: its two segments together say how far up it is, and
-    that is where its pair of heads points, so the whole of the pointing rests on three
-    landmarks of which the middle one is by far the least certain. Two numbers each: the first says whether the joint is
-    there, the second whether it stayed there while somebody moved.
+    that is where its pair of heads points, so the whole of the pointing rests on three landmarks
+    of which the middle one is by far the least certain. Two numbers each: the first says whether
+    the joint is there, the second whether it stayed there while somebody moved.
 
     Under them the two segments as angles, which averaged are what the show actually flies a
     pair of heads from and therefore the thing worth watching settle while somebody moves.
@@ -1826,6 +1897,7 @@ def main():
         held = floors(keypoints, now)
         scale = body_scale(keypoints, box)
         arms = {side: read_arm(keypoints, side, scale, box) for side in ("left", "right")}
+        body = read_body(keypoints)
 
         sighting = {
             "seq": sequence,
@@ -1842,6 +1914,9 @@ def main():
             # angles are eventually worth in pan and tilt is the show's business, not this
             # daemon's.
             "arms": {side: arm.published() for side, arm in arms.items()},
+            # Where the mage is standing, which is the other half of the control and the only
+            # part of it that is not an arm.
+            "body": body.published(),
         }
         payload = json.dumps(sighting).encode()
         to_brain.sendto(payload, (BRAIN_HOST, BRAIN_PORT))
@@ -1867,7 +1942,14 @@ def main():
             ratio = small.shape[1] / frame.shape[1]
             scaled = tuple(int(value * ratio) for value in box)
             readout = Readout(
-                header=[estimator.name, f"{fps:4.1f} Hz", confidence_mean(keypoints)],
+                header=[
+                    estimator.name,
+                    f"{fps:4.1f} Hz",
+                    confidence_mean(keypoints),
+                    # In the header rather than beside an arm, because it belongs to neither:
+                    # one number swings every head on the rig.
+                    f"across {across_or_dash(body.across)} head {across_or_dash(body.head)}",
+                ],
                 # Mirrored on purpose: the camera faces the mage, so their right arm is the one
                 # drawn on the left of the picture.
                 image_left=arm_lines(keypoints, held, arms["right"], "right"),
@@ -1944,6 +2026,7 @@ def main():
                 # Every five seconds, which is a record rather than an instrument: an angle is
                 # tuned against the preview, where it updates per frame.
                 "arms": {side: arm.published() for side, arm in arms.items()},
+                "body": body.published(),
                 # What the length gate is measured against, so a segment that reads no angle can
                 # be told from one whose landmarks were simply never found.
                 "body_scale": None if not scale else round(scale, 1),

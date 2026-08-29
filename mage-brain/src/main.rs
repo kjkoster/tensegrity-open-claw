@@ -20,13 +20,19 @@
 //! arm 3 and 4 — so a kid who moves one arm moves that pair, and finds the other pair has been
 //! following the arm they left hanging all along.
 //!
-//! One axis and one gesture: how far the arm is up. Raised arms bring the beams up and back
-//! over the mage, hanging arms lay them out over the audience, and nothing a mage does swings a
-//! head sideways. Magic does not pan at all, so a pair does exactly one thing and a kid finds it
-//! in the first second rather than discovering it while hunting for something else.
+//! The arms are half of it, and they carry one axis: how far up an arm is, is how far up its
+//! pair points. Raised arms bring the beams up and back over the mage, hanging arms lay them out
+//! over the audience.
 //!
-//! There is no geometry in any of it, and nothing measured. The arms drive tilt as a channel
-//! value, so the rig gets carried out, set down and switched on.
+//! The other half is not a gesture at all. Where the mage *stands* is what swings the heads
+//! sideways, so the two axes hang off two different parts of a body: arms up and down, feet left
+//! and right. Nothing a kid does with an arm can slide the beams sideways, and walking cannot
+//! change how high they point — which is what an arm driving both of them cost, and why one of
+//! them was moved off the arms. Walking is also the mapping nobody has to be told about.
+//!
+//! There is no geometry in any of it, and nothing measured. Tilt is a channel value off an arm,
+//! and pan is interpolated between pan values recorded on the rig, so it gets carried out, set
+//! down and switched on.
 
 mod geometry;
 
@@ -36,7 +42,7 @@ use cortex::config as cfg;
 use cortex::eyeball::{self, Arm, Sighting};
 use cortex::latest;
 use cortex::moving_head::{Pose, Slew, SlewRate, aim};
-use geometry::Aim;
+use geometry::{Aim, lerp};
 use std::f64::consts::TAU;
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
@@ -145,22 +151,9 @@ const MAGIC_GOBO: u8 = 0x30;
 const MAGIC_TILT_ARM_DOWN: u16 = 0x0000;
 const MAGIC_TILT_ARM_UP: u16 = 0xa000;
 
-// Where every head sits in pan for the whole of magic. Held rather than steered, and the same
-// value for all four: the fan the heads were set down in is the fan the show keeps, so the only
-// thing moving under an arm is the thing that arm is for.
-const MAGIC_PAN: u16 = 0xaa00;
-
 // The range an arm is measured on, and what the daemon's angles arrive as: 0° hanging straight
 // down to 180° straight up, per segment and therefore for the two of them averaged.
 const ARM_RANGE_DEG: f64 = 180.0;
-
-// How far the breath swings the beam either side of where the state put it. The same breath
-// that rides the dimmer rides the aim, so a head that is holding still is never quite still —
-// which is most of what makes four lights read as four creatures rather than four lamps.
-//
-// Pan and tilt take it a quarter turn apart, so the beam walks a small slow circle instead of
-// sliding up and down one diagonal. A diagonal reads as a fader somebody is moving.
-const BREATH_ROVE_DEG: f64 = 3.0;
 
 // `patch` and `scenes`, generated from mage.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained.
@@ -268,33 +261,6 @@ impl Pair {
     }
 }
 
-/// Walks from one channel value to another, `at` running 0 to 1 and clamped at both ends.
-///
-/// In the channel's own units rather than in degrees, because both ends of every one of these
-/// walks was read off a slider and the arithmetic between them should not have to make a trip
-/// through a travel constant to get back to where it started.
-fn lerp(from: u16, to: u16, at: f64) -> u16 {
-    let at = at.clamp(0.0, 1.0);
-    let span = f64::from(to) - f64::from(from);
-    (f64::from(from) + span * at)
-        .round()
-        .clamp(0.0, f64::from(u16::MAX)) as u16
-}
-
-/// A pose nudged by the breath and held inside the head's own travel.
-fn roved(pose: Pose, pan_deg: f64, tilt_deg: f64) -> Pose {
-    Pose::new(
-        (pose.pan_deg + pan_deg).clamp(
-            0.0,
-            <patch::Zq02015 as cortex::qlc_plus::Position>::PAN_RANGE_DEG,
-        ),
-        (pose.tilt_deg + tilt_deg).clamp(
-            0.0,
-            <patch::Zq02015 as cortex::qlc_plus::Position>::TILT_RANGE_DEG,
-        ),
-    )
-}
-
 /// A state's brightness with the breath on it, swinging between the two ends it was given.
 ///
 /// Never to zero and never near it: a light that reaches black reads as broken, and one that
@@ -351,6 +317,12 @@ fn main() {
     // an empty field and a dead daemon are the same observation from here.
     let mut show = Show::Bored;
 
+    // Where the mage is standing, held across frames the way a pair holds its tilt. One number
+    // for the whole rig rather than one per pair: there is one mage, and four heads disagreeing
+    // about where they are standing is not a thing the field can produce. The middle until
+    // somebody has been seen there, which is where the heads already point.
+    let mut across = 0.0f64;
+
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
         patch: &patch::PATCH,
@@ -383,12 +355,11 @@ fn main() {
                 patch::PINSPOT.effect.set(slots, 0);
                 patch::PINSPOT.speed.set(slots, 0);
 
-                // The heads take the same breath between their own two ends, which are
-                // nothing like the pinspot's: the pinspot is a bench lamp allowed to fall to an
-                // ember, while these are beams on a child and a deep dip would read as the rig
-                // losing them.
-                let rove_pan_deg = BREATH_ROVE_DEG * turn.sin();
-                let rove_tilt_deg = BREATH_ROVE_DEG * turn.cos();
+                // The heads take the same breath on the dimmer alone, between their own two
+                // ends, which are nothing like the pinspot's: the pinspot is a bench lamp
+                // allowed to fall to an ember, while these are beams on a child and a deep dip
+                // would read as the rig losing them. Nothing breathes on the aim — where a head
+                // points is what a mage put there, and only that.
 
                 let sighting = sightings.snapshot();
                 let has_vision = sighting.fresh();
@@ -429,10 +400,17 @@ fn main() {
                     eprintln!("show: {}", show.label());
                 }
 
-                // Both arms steer their own pair whenever anything is flying, an arm hanging
-                // at a mage's side included: that pair points where a hanging arm points,
-                // which is the arm doing what it was asked rather than a pair left behind.
+                // Everything that steers steers whenever anything is flying, an arm hanging at
+                // a mage's side and a mage standing still included: that pair points where a
+                // hanging arm points and every head sits where a standing mage puts it, which is
+                // the rig doing what it was asked rather than waiting to be told again.
                 if show == Show::Magic {
+                    // Held rather than zeroed when the torso blanks: a mage turned side-on is
+                    // still standing where they were standing, and swinging every head back to
+                    // the middle is the one answer that is certainly wrong.
+                    if let Some(seen) = sighting.body.across {
+                        across = seen;
+                    }
                     for pair in &mut pairs {
                         let arm = match pair.side {
                             "left" => &sighting.arms.left,
@@ -469,11 +447,9 @@ fn main() {
                             Show::Magic => {
                                 snake.slew.set_rate(MAGIC_SLEW);
                                 (
-                                    roved(
-                                        Aim::new(MAGIC_PAN, pair.tilt).pose(),
-                                        rove_pan_deg,
-                                        rove_tilt_deg,
-                                    ),
+                                    // Pan off this head's own recorded track, tilt off the arm
+                                    // flying this pair: the two axes meet here and nowhere else.
+                                    Aim::new(snake.head.pan.at(across), pair.tilt).pose(),
                                     breathed(MAGIC_DIMMER_FLOOR, MAGIC_DIMMER, breath),
                                     MAGIC_COLOR_RED,
                                     MAGIC_GOBO,

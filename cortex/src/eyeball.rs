@@ -58,6 +58,13 @@ pub struct Sighting {
     /// this the whole datagram fails to parse and the rig reads as blind.
     #[serde(default)]
     pub arms: Arms,
+    /// Where the mage is standing, reduced by the daemon the same way the arms are. The other
+    /// half of what the show steers on, and the half no gesture can reach.
+    ///
+    /// Defaulted for the same reason as the arms: the two ends restart independently, and a
+    /// daemon too old to send it should cost the show its panning rather than its vision.
+    #[serde(default)]
+    pub body: Body,
 
     /// Arrival on the shared monotonic clock. Filled here, never sent.
     #[serde(skip)]
@@ -72,6 +79,25 @@ pub struct Sighting {
 pub struct Arms {
     pub left: Arm,
     pub right: Arm,
+}
+
+/// Where the mage is standing, across the field.
+///
+/// Position, and deliberately not any kind of pointing. The arms say how far up the beams go and
+/// this says where across the field they go, so the two axes hang off two different parts of a
+/// body and no single gesture can move both — which is what the arms driving both of them cost.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Body {
+    /// The torso's centre across the camera's crop: 0 in the middle, +1 at the picture's right,
+    /// which the mirror makes the mage's left. The same sign convention `Arm::fore` carries.
+    ///
+    /// From the shoulders and hips rather than any single landmark, so it cannot jump half a
+    /// body sideways when one of them drops out. `None` where neither pair was found, and the
+    /// show holds what it had.
+    pub across: Option<f64>,
+    /// The same measure from the nose alone. Nothing reads it: it rides along so that standing
+    /// and leaning can be told apart on the preview, the way `Arm::bend` does for the elbow.
+    pub head: Option<f64>,
 }
 
 /// One arm's two segments as angles in the picture, with the lengths that say whether to
