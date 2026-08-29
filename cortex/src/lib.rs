@@ -11,6 +11,7 @@
 pub mod audio_features;
 pub mod clock;
 pub mod config;
+pub mod envelope;
 pub mod eyeball;
 pub mod latest;
 pub mod moving_head;
