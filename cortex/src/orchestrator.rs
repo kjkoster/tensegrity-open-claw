@@ -80,14 +80,14 @@ pub async fn frame_task(
         }
 
         let packet = dmx::encode(
-            cfg::UNIVERSE,
+            rig.sacn.universe,
             sequence,
             cfg::SACN_PRIORITY,
             0,
             &cid,
             &slots[..dmx_slots],
         );
-        dmx::send_multicast(&socket, cfg::UNIVERSE, cfg::SACN_PORT, &packet);
+        dmx::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
         // A wire write error is logged, not fatal — a yanked cable must not take the
         // sculpture down.
         if let Err(e) = hat.send(&slots) {

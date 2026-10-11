@@ -84,6 +84,16 @@ committed in `fixtures/` are the source of truth for *what their channels mean*.
 ingests both and generates a struct per fixture, with a named field per channel, into that
 rig's own crate.
 
+**The universe and the sACN port come from the same file**, off the E1.31 output patched to
+the workspace's first universe. That output describes the console's own transmission, but a
+rig has one universe and relays a takeover onto it, so those two numbers are the rig's as
+well: what the brain listens for, what it sends, and what a ball listens for. The address
+that output unicasts to is the one the brain's receiver binds.
+
+**A ball is a fixture in that patch like any other**, and its firmware is built from the
+workspace too. The firmware build reads the addressing alone and turns every patched ball
+into a constant; a board is provisioned by naming the one it is.
+
 The workspace is strictly a **build artifact**: it is consumed at build time and never crosses
 into the running program, not even as a filename. A rig has exactly one, so naming the rig in
 the log already says which file the binary was built from.
@@ -154,7 +164,8 @@ identity.
 The engine keeps running while overridden — its noise fields, breath phase and slews stay
 continuous — so handback resumes mid-stride rather than springing out of a frozen frame.
 
-The receiver binds the Pi's WireGuard address alone rather than the wildcard. That is not
+The receiver binds the address the workspace's console unicasts to — the Pi's WireGuard
+address — alone rather than the wildcard. That is not
 just narrowing: it is also what stops the brain's own multicast being delivered back to its
 own receiver.
 

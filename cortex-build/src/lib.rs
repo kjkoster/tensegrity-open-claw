@@ -31,18 +31,56 @@
 //!     is the local name with the namespace already stripped, and a missing `<Engine>`
 //!     or an empty patch is fatal rather than empty.
 //!   * `<Address>` is **0-based**: DMX address 1 on the wire is `<Address>0</Address>`.
-//!   * `<Universe>` is the 0-based index into the workspace's universe list. Index 0 is
-//!     the universe whose E1.31 output carries universe 1 on the wire.
+//!   * `<Universe>` is the 0-based index into the workspace's universe list, which is not
+//!     the number on the wire. That one is the `universe` parameter of the E1.31 output
+//!     patched to it in the `<InputOutputMap>`.
+//!   * The E1.31 output describes the console's own transmission: where QLC+ sends when it
+//!     takes the rig over. The rig has one universe and relays a takeover onto it, so the
+//!     universe and the port that output names are the rig's own as well — the ones the
+//!     daemon listens and sends on, and the ones a wireless fixture listens on.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
-/// The daemon sends exactly one universe (`cortex::config::UNIVERSE`). In the workspace that
-/// is the universe at 0-based index 0.
+/// The daemon sends exactly one universe. In the workspace that is the universe at 0-based
+/// index 0; what it is numbered on the wire is the workspace's to say.
 const WORKSPACE_UNIVERSE_INDEX: u32 = 0;
+
+/// The QLC+ plugin whose output parameters name the universe and the port.
+const SACN_PLUGIN: &str = "E1.31";
+
+/// The universe a rig lives on, the port it is carried over and the address the console
+/// unicasts to, as the workspace's E1.31 output states them.
+pub struct Sacn {
+    pub universe: u16,
+    pub port: u16,
+    pub address: Ipv4Addr,
+}
+
+/// Where one patched fixture sits, for a build that needs the addressing and not the
+/// channels.
+pub struct Addressed {
+    /// The fixture's name in the workspace.
+    pub name: String,
+    /// The Rust constant that name becomes — the same one the rig's generated patch uses.
+    pub ident: String,
+    pub manufacturer: String,
+    pub model: String,
+    /// 1-based DMX start address, as it is on the wire.
+    pub address: u16,
+    pub channels: u16,
+}
+
+/// A workspace's addressing: the universe it is on, and every fixture patched into it, in
+/// address order.
+pub struct Addressing {
+    pub sacn: Sacn,
+    pub fixtures: Vec<Addressed>,
+}
 
 /// Slots in a DMX-512 universe. Spelled out rather than borrowed from the crate that
 /// drives the wire: a build script may only use its build-dependencies, and pulling in a
@@ -170,38 +208,11 @@ impl Patched {
 /// sculpture it hangs on. Each rig reads every definition and resolves only what its own
 /// patch names.
 pub fn ingest(workspace: &Path) {
-    println!("cargo:rerun-if-changed={}", workspace.display());
+    let xml = read_workspace(workspace);
+    let doc = parse_workspace(&xml, workspace);
+    let engine = engine_of(&doc, workspace);
 
-    let xml = fs::read_to_string(workspace).unwrap_or_else(|e| {
-        panic!(
-            "cannot read the QLC+ workspace at {}: {e}\n\
-             The rig's patch and scenes come from that file. deploy.sh rsyncs the whole \
-             repository to the Pi; if you are building by hand, make sure it is there.",
-            workspace.display()
-        )
-    });
-    // QLC+ writes a `<!DOCTYPE Workspace>` declaration, and roxmltree rejects any DTD by
-    // default as a hardening measure. Allowing it is safe here: the DTD is an empty
-    // internal subset that declares no entities, and roxmltree keeps its billion-laughs
-    // protection regardless.
-    let options = roxmltree::ParsingOptions {
-        allow_dtd: true,
-        ..roxmltree::ParsingOptions::default()
-    };
-    let doc = roxmltree::Document::parse_with_options(&xml, options)
-        .unwrap_or_else(|e| panic!("{} is not valid XML: {e}", workspace.display()));
-
-    let engine = doc
-        .root_element()
-        .children()
-        .find(|node| node.is_element() && node.tag_name().name() == "Engine")
-        .unwrap_or_else(|| {
-            panic!(
-                "{} has no <Engine> element — is it a QLC+ workspace?",
-                workspace.display()
-            )
-        });
-
+    let sacn = parse_sacn(engine, workspace);
     let mut patch = parse_patch(engine);
     let scenes = parse_scenes(engine, &patch);
 
@@ -223,7 +234,174 @@ pub fn ingest(workspace: &Path) {
         .unwrap_or_else(|| panic!("{} has no file name", workspace.display()));
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    fs::write(out_dir.join("rig.rs"), render_rig(&patch, &scenes, source)).unwrap();
+    fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &scenes, source)).unwrap();
+}
+
+/// Reads one QLC+ workspace for its addressing alone, and generates nothing.
+///
+/// For a build that has to agree with the rig about where a fixture sits without being the
+/// rig: firmware that is itself a patched fixture and needs its own address. It goes through
+/// the same patch checks as [`ingest`], so both builds refuse the same workspaces.
+pub fn addressing(workspace: &Path) -> Addressing {
+    let xml = read_workspace(workspace);
+    let doc = parse_workspace(&xml, workspace);
+    let engine = engine_of(&doc, workspace);
+
+    let sacn = parse_sacn(engine, workspace);
+    let mut fixtures: Vec<Addressed> = parse_patch(engine)
+        .into_values()
+        .map(|fixture| Addressed {
+            ident: ident_of(&fixture.name),
+            name: fixture.name,
+            manufacturer: fixture.manufacturer,
+            model: fixture.model,
+            // Both fit: `parse_patch` holds every fixture inside the universe.
+            address: (fixture.address + 1) as u16,
+            channels: fixture.channels as u16,
+        })
+        .collect();
+    fixtures.sort_by_key(|fixture| fixture.address);
+
+    Addressing { sacn, fixtures }
+}
+
+fn read_workspace(workspace: &Path) -> String {
+    println!("cargo:rerun-if-changed={}", workspace.display());
+
+    fs::read_to_string(workspace).unwrap_or_else(|e| {
+        panic!(
+            "cannot read the QLC+ workspace at {}: {e}\n\
+             The rig's patch and scenes come from that file. deploy.sh rsyncs the whole \
+             repository to the Pi; if you are building by hand, make sure it is there.",
+            workspace.display()
+        )
+    })
+}
+
+fn parse_workspace<'a>(xml: &'a str, workspace: &Path) -> roxmltree::Document<'a> {
+    // QLC+ writes a `<!DOCTYPE Workspace>` declaration, and roxmltree rejects any DTD by
+    // default as a hardening measure. Allowing it is safe here: the DTD is an empty
+    // internal subset that declares no entities, and roxmltree keeps its billion-laughs
+    // protection regardless.
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..roxmltree::ParsingOptions::default()
+    };
+    roxmltree::Document::parse_with_options(xml, options)
+        .unwrap_or_else(|e| panic!("{} is not valid XML: {e}", workspace.display()))
+}
+
+fn engine_of<'a, 'input>(
+    doc: &'a roxmltree::Document<'input>,
+    workspace: &Path,
+) -> roxmltree::Node<'a, 'input> {
+    doc.root_element()
+        .children()
+        .find(|node| node.is_element() && node.tag_name().name() == "Engine")
+        .unwrap_or_else(|| {
+            panic!(
+                "{} has no <Engine> element — is it a QLC+ workspace?",
+                workspace.display()
+            )
+        })
+}
+
+/// Reads the universe and the port off the E1.31 output patched to the rig's universe.
+fn parse_sacn(engine: roxmltree::Node, workspace: &Path) -> Sacn {
+    fn child<'a, 'input>(
+        node: roxmltree::Node<'a, 'input>,
+        name: &str,
+    ) -> Option<roxmltree::Node<'a, 'input>> {
+        node.children()
+            .find(|child| child.is_element() && child.tag_name().name() == name)
+    }
+
+    let universe = child(engine, "InputOutputMap")
+        .and_then(|map| {
+            map.children().find(|node| {
+                node.is_element()
+                    && node.tag_name().name() == "Universe"
+                    && node.attribute("ID") == Some(&WORKSPACE_UNIVERSE_INDEX.to_string())
+            })
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{} has no <Universe ID=\"{WORKSPACE_UNIVERSE_INDEX}\"> in its \
+                 <InputOutputMap>, so nothing says which universe the rig is on.",
+                workspace.display()
+            )
+        });
+    let parameters = child(universe, "Output")
+        .filter(|output| output.attribute("Plugin") == Some(SACN_PLUGIN))
+        .and_then(|output| child(output, "PluginParameters"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the first universe of {} has no {SACN_PLUGIN} output. The universe number \
+                 and the port come from that output, so patch one in QLC+'s Inputs/Outputs \
+                 tab and set its parameters there.",
+                workspace.display()
+            )
+        });
+
+    let parameter = |attribute: &str| -> &str {
+        parameters
+            .attribute(attribute)
+            .unwrap_or_else(|| {
+                panic!(
+                    "the {SACN_PLUGIN} output in {} has no `{attribute}` parameter. Set it \
+                     in the output's configuration in QLC+ and save.",
+                    workspace.display()
+                )
+            })
+            .trim()
+    };
+    let number = |attribute: &str| -> u16 {
+        parameter(attribute).parse().unwrap_or_else(|e| {
+            panic!(
+                "the {SACN_PLUGIN} output in {} has a non-numeric `{attribute}`: {e}",
+                workspace.display()
+            )
+        })
+    };
+
+    // The daemon's receiver binds the address the console unicasts to and joins no group, so
+    // a console set to multicast would be sending where nothing listens.
+    if parameter("multicast") != "0" {
+        panic!(
+            "the {SACN_PLUGIN} output in {} is set to multicast. The daemon only receives a \
+             console by unicast; untick Multicast in the output's configuration in QLC+ and \
+             give it the daemon's address.",
+            workspace.display()
+        );
+    }
+
+    let sacn = Sacn {
+        universe: number("universe"),
+        port: number("ucastPort"),
+        address: parameter("ucastIP").parse().unwrap_or_else(|e| {
+            panic!(
+                "the {SACN_PLUGIN} output in {} has a `ucastIP` that is not an IPv4 \
+                 address: {e}",
+                workspace.display()
+            )
+        }),
+    };
+    // E1.31 §9.1.1 reserves universe 0 and everything from 64000 up.
+    if !(1..=63999).contains(&sacn.universe) {
+        panic!(
+            "the {SACN_PLUGIN} output in {} is set to universe {}, outside the 1–63999 \
+             sACN allows.",
+            workspace.display(),
+            sacn.universe
+        );
+    }
+    if sacn.port == 0 {
+        panic!(
+            "the {SACN_PLUGIN} output in {} is set to port 0.",
+            workspace.display()
+        );
+    }
+    sacn
 }
 
 /// Renders the whole of a rig's generated half: both modules and the check between them.
@@ -233,6 +411,7 @@ pub fn ingest(workspace: &Path) {
 /// function has. Splitting them would put the assertion in a hand-written file, where it is
 /// a line each rig has to remember to copy.
 fn render_rig(
+    sacn: &Sacn,
     patch: &BTreeMap<u32, Patched>,
     scenes: &[(String, Vec<(u32, u8)>)],
     source: &str,
@@ -240,7 +419,7 @@ fn render_rig(
     let mut out = String::new();
     writeln!(out, "// Generated from {source}. Do not edit.").unwrap();
     writeln!(out).unwrap();
-    write_module(&mut out, "patch", &render_patch(patch));
+    write_module(&mut out, "patch", &render_patch(sacn, patch));
     write_module(&mut out, "scenes", &render_scenes(scenes));
     out
 }
@@ -780,9 +959,9 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
         if universe != WORKSPACE_UNIVERSE_INDEX {
             panic!(
                 "fixture {id} {name:?} is patched to workspace universe index {universe}. \
-                 The daemon sends exactly one universe (index {WORKSPACE_UNIVERSE_INDEX}, \
-                 wire universe 1); teaching Scene about universes is a deliberate change, \
-                 not something to fold in silently."
+                 The daemon sends exactly one universe (index {WORKSPACE_UNIVERSE_INDEX}); \
+                 teaching Scene about universes is a deliberate change, not something to \
+                 fold in silently."
             );
         }
         if channels == 0 {
@@ -1150,7 +1329,7 @@ fn write_value_constants(out: &mut String, shape: &Patched) {
 /// That last one is why channels are typed rather than numbered. `PINSPOT.red` names the red
 /// emitter because the definition says that channel of that mode is `IntensityRed`; there is
 /// no offset in the source to get wrong, and a fixture with no red simply has no `red`.
-fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
+fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
     let mut out = String::new();
 
     let mut fixtures: Vec<&Patched> = patch.values().collect();
@@ -1164,7 +1343,7 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
             .iter()
             .any(|fixture| fixture.fields.iter().any(|f| f.name() == field))
     };
-    let mut imports = vec!["Channel", "PatchEntry"];
+    let mut imports = vec!["Channel", "PatchEntry", "Sacn"];
     if implements("red") && implements("green") && implements("blue") {
         imports.push("Rgb");
     }
@@ -1189,6 +1368,20 @@ fn render_patch(patch: &BTreeMap<u32, Patched>) -> String {
     }
     imports.sort_unstable();
     writeln!(out, "use cortex::qlc_plus::{{{}}};", imports.join(", ")).unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(
+        out,
+        "/// The universe the rig is on, the port it is carried over and where a console \
+         reaches it."
+    )
+    .unwrap();
+    let [a, b, c, d] = sacn.address.octets();
+    writeln!(out, "pub const SACN: Sacn = Sacn {{").unwrap();
+    writeln!(out, "    universe: {},", sacn.universe).unwrap();
+    writeln!(out, "    port: {},", sacn.port).unwrap();
+    writeln!(out, "    address: core::net::Ipv4Addr::new({a}, {b}, {c}, {d}),").unwrap();
+    writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 
     // One struct per fixture *type*, shared by every instance of it: three Yaras patched

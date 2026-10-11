@@ -12,7 +12,7 @@
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
     <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
-     <PluginParameters UniverseChannels="116" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
+     <PluginParameters UniverseChannels="205" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
@@ -60,6 +60,16 @@
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
+   <Manufacturer>Tensegrity</Manufacturer>
+   <Model>Ball</Model>
+   <Mode>6 channel</Mode>
+   <ID>4</ID>
+   <Name>Ball [5]</Name>
+   <Universe>0</Universe>
+   <Address>199</Address>
+   <Channels>6</Channels>
+  </Fixture>
+  <Fixture>
    <Manufacturer>CLF</Manufacturer>
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
@@ -99,7 +109,7 @@
    <FxItem ID="1" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="2" XPos="700" YPos="1000" ZPos="0"/>
    <FxItem ID="3" XPos="1050" YPos="1000" ZPos="0"/>
-   <FxItem ID="4" XPos="1400" YPos="1000" ZPos="0"/>
+   <FxItem ID="4" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="5" XPos="1595" YPos="1000" ZPos="0"/>
    <FxItem ID="6" XPos="1824" YPos="1000" ZPos="0"/>
    <FxItem ID="7" XPos="2053" YPos="1000" ZPos="0"/>

@@ -28,6 +28,7 @@ fn main() {
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
+        sacn: patch::SACN,
         patch: &patch::PATCH,
         scenes: &scenes::SCENES,
         // Every fixture named here comes from the QLC+ patch, so this closure is also the

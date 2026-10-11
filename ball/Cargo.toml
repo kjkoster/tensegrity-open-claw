@@ -4,8 +4,11 @@ name         = "ball"
 rust-version = "1.95"
 version      = "0.1.0"
 
+[build-dependencies]
+cortex-build = { path = "../cortex-build" }
+
 [dependencies]
-esp-hal             = { version = "~1.1.0", features = ["esp32c3", "unstable"] }
+esp-hal            = { version = "~1.1.0", features = ["esp32c3", "unstable"] }
 esp-rtos            = { version = "0.3.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32c3"] }
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32c3"] }
 esp-radio           = { version = "0.18.0", features = ["esp-alloc", "esp32c3", "unstable", "wifi"] }

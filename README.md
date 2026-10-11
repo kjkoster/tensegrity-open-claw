@@ -286,6 +286,11 @@ offsets, drift is caught by the compiler in every direction:
 | overlap two fixtures' slots | fails, naming both fixtures and their spans |
 | name two fixtures so they yield the same Rust constant | fails — the daemon could not tell them apart |
 | patch a fixture outside the first universe | fails — the daemon sends exactly one universe |
+| change the E1.31 output's universe or port | the brain listens and sends there, and so does every ball once re-flashed |
+| change the E1.31 output's unicast address | the brain's receiver binds that address instead |
+| switch the E1.31 output to multicast | fails — the brain only receives a console by unicast |
+| remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
+| delete or rename a ball a board is provisioned as | the ball firmware stops compiling at that board's row |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
 | name a scene anything but `[a-z][a-z0-9_]*` | fails — scene names are the keys the daemon knows scenes by |
 | give two scenes the same name | fails; QLC+ does not enforce uniqueness, the daemon needs it |
@@ -333,8 +338,9 @@ A board has to be known in two places, under two different MACs:
    `unknown device usb-Espressif_…` — add that name to `DEVICE_MAP` in `remote-deploy.sh`,
    mapped to `ball`, and deploy again.
 2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
-   `Board` row to paste, then panics. Add the row to `BOARDS` in `ball/src/config.rs` with
-   the DMX address it should listen on, and deploy once more.
+   `Board` row to paste, then panics. Add the row to `BOARDS` in `ball/src/config.rs`, name
+   the fixture it is in `claw.qxw` — `Ball [5]` there is `patch::BALL_5` here — and deploy
+   once more. The address, the universe and the port come with the fixture.
 
 ## Watching a board
 

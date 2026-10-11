@@ -13,6 +13,8 @@
 //! no red channel has no `red` field and does not implement [`Rgb`], so wiring the sparkle
 //! engine to it is a compile error rather than a fixture that lights the wrong colour.
 
+use core::net::Ipv4Addr;
+
 /// One band of a channel's range, as the definition describes it.
 ///
 /// A `.qxf` states what a fixture does over a span of DMX values, and that statement is the
@@ -167,6 +169,29 @@ pub struct PatchEntry {
     /// names and its capability traits, where the compiler checks it. Carrying a runtime
     /// copy of the same fact would be a second encoding able to drift from the first.
     pub channels: &'static [Channel],
+}
+
+/// The universe a rig lives on, the port it is carried over and where a console reaches it,
+/// as the E1.31 output in its workspace states them.
+///
+/// That output is the console's: it says where QLC+ sends when it takes the rig over. A rig
+/// has one universe and a takeover is relayed onto it, so the universe and the port are what
+/// the daemon listens for and what it sends.
+#[derive(Clone, Copy)]
+pub struct Sacn {
+    pub universe: u16,
+    pub port: u16,
+    /// The address the console unicasts to, and the one address the receiver binds.
+    ///
+    /// Deliberately one address and not the wildcard. Binding a single address is what keeps
+    /// the daemon's own sACN multicast, which it transmits at frame rate, from being
+    /// delivered straight back to its own receiver. There are no multicast joins for the
+    /// same reason: a console on a tunnel with no multicast has to unicast here regardless.
+    ///
+    /// Two consequences worth knowing. A console arriving on any other interface cannot take
+    /// over. And if the interface holding this address is down at startup the bind fails,
+    /// which is wanted: the receiver retries with backoff and comes up whenever it does.
+    pub address: Ipv4Addr,
 }
 
 /// A fixture with additive red, green and blue emitters.

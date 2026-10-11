@@ -1,13 +1,11 @@
 //! All tunables in one place. The festival tuning loop is "edit numbers, rebuild, restart".
 //!
 //! These describe the *cabinet* rather than the sculpture hanging off it: the Pi, the RS-485
-//! HAT, the audio interface, the serial device, the WireGuard address a console arrives on.
+//! HAT, the audio interface, the serial device.
 
 use std::net::Ipv4Addr;
 
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
-pub const UNIVERSE: u16 = 1;
-pub const SACN_PORT: u16 = 5568;
 // Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
 pub const FRAME_RATE_HZ: u64 = 40;
 
@@ -34,26 +32,14 @@ pub const SACN_SOURCE_TIMEOUT_US: u64 = 2_500_000;
 // unbounded storage, and an expiring entry frees a slot within the timeout above.
 pub const SACN_MAX_SOURCES: usize = 4;
 
-// The one address the receiver binds — the Pi's WireGuard address, where the console lives.
-//
-// Deliberately not the wildcard. Binding a single address is what keeps the brain's own sACN
-// multicast, which it transmits at frame rate, from being delivered straight back to its own
-// receiver. There are no multicast joins for the same reason: wg0 is POINTOPOINT with no
-// MULTICAST flag, so a console on the tunnel has to unicast here regardless.
-//
-// Two consequences worth knowing. A console on eth0 or wlan0 cannot take over — set this to
-// `Ipv4Addr::UNSPECIFIED` to accept from anywhere again, and the loopback comes back with
-// it. And if the tunnel is down at startup the bind fails, which is wanted: the receiver
-// retries with backoff and comes up whenever wg0 does.
-pub const SACN_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 8, 0, 3);
-
 // Rebind backoff cap for the receive socket. Retrying rather than dying means the takeover
 // path comes back the moment whatever held the port lets go, and the sculpture keeps
 // breathing on the internal engine meanwhile.
 pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
-// Fixture addressing is not here: it is generated from the rig's QLC+ workspace into the
-// rig's own `patch` module, the single source of truth for what is patched where.
+// Fixture addressing, the universe, the sACN port and the address a console is received on
+// are not here: they are generated from the rig's QLC+ workspace into the rig's own `patch`
+// module, the single source of truth for what is patched where.
 
 // ── Telemetry (the broker) ───────────────────────────────────────────────────
 // Stem owns the broker; every daemon holds its own client and announces itself under

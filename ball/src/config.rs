@@ -8,18 +8,26 @@
 //! runtime. The stable per-board identity is its WiFi station MAC, programmed into efuse at
 //! manufacture and read at boot via
 //! `efuse::interface_mac_address(InterfaceMacAddress::Station)` (before WiFi starts). This
-//! module maps each known MAC to that board's DMX base address; WiFi settings, universe,
-//! and sACN port are the same for every board and live as global constants below.
+//! module maps each known MAC to the fixture that board is in the rig's QLC+ workspace.
+//!
+//! ## Why a board names a fixture and not an address
+//!
+//! A ball is patched in the workspace like every other fixture, and the brain's patch is
+//! generated from that file. An address written here would be a second copy of it, right
+//! until the first repatch. `build.rs` turns every ball in the workspace into a constant in
+//! `patch` instead, carrying its DMX address, the universe and the sACN port, so a ball that
+//! is renamed or removed in QLC+ stops this file compiling, and one patched there with no
+//! board to be it is reported as unused.
 //!
 //! ## Getting a board's MAC the first time
 //!
 //! 1. Flash the firmware and watch the RTT log. Every board prints its MAC at boot as
 //!    `mac address:    XX:XX:XX:XX:XX:XX`, and an unprovisioned one follows it with the
 //!    `Board` row to paste.
-//! 2. Add that row to `BOARDS` below, set its DMX address, and re-flash.
+//! 2. Add that row to `BOARDS` below, name its fixture, and re-flash.
 //!
 //! An unprovisioned MAC panics on purpose (see `dmx_config_for`) so a board is never
-//! silently run with the wrong DMX address.
+//! silently run as the wrong fixture.
 //!
 //! Caveat: this is the *station* MAC, **not** the USB-JTAG debug-unit MAC that appears in
 //! the `/dev/serial/by-id` names of `remote-deploy.sh`'s `DEVICE_MAP`. Do not copy the
@@ -53,30 +61,34 @@ const fn number(setting: &str) -> u64 {
 /// that has been silent for its `ap_max_inactivity`, so the ball stays silent for that long
 /// and a margin on top.
 pub const WIFI_RETRY_SILENCE: Duration = Duration::from_secs(AP_MAX_INACTIVITY_S + 5);
-// What the brain sends on: `UNIVERSE` and `SACN_PORT` in `cortex/src/config.rs`.
-const UNIVERSE: u16 = 1;
-const SACN_PORT: u16 = 5568;
+
+// ── The balls the workspace patches ────────────────────────────────────────────
+mod patch {
+    use crate::models::DmxConfig;
+
+    include!(concat!(env!("OUT_DIR"), "/patch.rs"));
+}
 
 // ── Per-board settings, keyed by station MAC ───────────────────────────────────
 struct Board {
     /// WiFi station MAC, read from efuse at boot — the board's stable identity.
     mac: [u8; 6],
-    /// DMX base address; the ball's other slots follow it.
-    dmx_address: u16,
+    /// The fixture this board is in the workspace, and with it where it listens.
+    dmx: DmxConfig,
 }
 
 const BOARDS: &[Board] = &[
-    Board { mac: [0x40, 0x4C, 0xCA, 0xFB, 0x79, 0x10], dmx_address: 1 }, // TODO set DMX address
+    Board { mac: [0x40, 0x4C, 0xCA, 0xFB, 0x79, 0x10], dmx: patch::BALL_5 },
 ];
 
 /// Returns the DMX configuration for the board with the given station MAC.
 /// Panics if the MAC is not provisioned in `BOARDS` — an unknown board must not
-/// run with a guessed DMX address — or if its row holds an invalid one.
+/// run as a guessed fixture.
 pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
     let board = BOARDS.iter().find(|board| board.mac == mac).unwrap_or_else(|| {
         rprintln!("unprovisioned board: add this row to config::BOARDS in config.rs:");
         rprintln!(
-            "    Board {{ mac: [0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}], dmx_address: 1 }}, // TODO set DMX address",
+            "    Board {{ mac: [0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}], dmx: patch::BALL_ }}, // TODO name its fixture",
             mac[0],
             mac[1],
             mac[2],
@@ -86,7 +98,7 @@ pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
         );
         panic!("unprovisioned board MAC");
     });
-    DmxConfig::new(board.dmx_address, UNIVERSE, SACN_PORT)
+    board.dmx
 }
 
 /// The WiFi settings shared by every board. A `const`, so that a malformed one fails the

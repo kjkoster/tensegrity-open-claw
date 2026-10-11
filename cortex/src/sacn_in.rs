@@ -17,13 +17,15 @@
 //! is actually driving is decided once per frame in the orchestrator, so a single decision
 //! feeds both the wire and the network.
 //!
-//! The socket binds one address — the Pi's WireGuard address — rather than the wildcard, so
+//! The socket binds one address — the one the workspace's console unicasts to, which is the
+//! Pi's WireGuard address — rather than the wildcard, so
 //! the brain's own multicast is never delivered back to its own receiver.
 
 use crate::clock;
 use crate::config as cfg;
 use crate::dmx::STREAM_TERMINATED;
 use crate::latest::LatestTx;
+use crate::qlc_plus::Sacn;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
@@ -304,14 +306,18 @@ fn slots_of(pkt: &[u8], count: usize) -> [u8; SLOTS] {
 /// embassy executor without stalling the frame loop, and embassy has no reactor for `std`
 /// sockets. Same shape as audio capture: a blocking producer feeding the frame loop through
 /// a latest-value seam.
-pub fn spawn_receiver(own_cid: [u8; 16], publisher: LatestTx<Takeover>) -> JoinHandle<()> {
+pub fn spawn_receiver(
+    own_cid: [u8; 16],
+    sacn: Sacn,
+    publisher: LatestTx<Takeover>,
+) -> JoinHandle<()> {
     thread::Builder::new()
         .name("sacn-in".into())
         .spawn(move || {
             let mut backoff_s = 1u64;
             loop {
                 let started = clock::now_us();
-                if let Err(e) = receive(&own_cid, &publisher) {
+                if let Err(e) = receive(&own_cid, sacn, &publisher) {
                     eprintln!("sacn: receive failed: {e}");
                 }
                 // Hand the universe back now rather than letting the timeout do it: we can
@@ -323,7 +329,7 @@ pub fn spawn_receiver(own_cid: [u8; 16], publisher: LatestTx<Takeover>) -> JoinH
                 }
                 eprintln!(
                     "sacn: rebinding :{} in {backoff_s}s (internal engine keeps driving)",
-                    cfg::SACN_PORT
+                    sacn.port
                 );
                 thread::sleep(Duration::from_secs(backoff_s));
                 backoff_s = (backoff_s * 2).min(cfg::SACN_BIND_RETRY_MAX_S);
@@ -334,15 +340,19 @@ pub fn spawn_receiver(own_cid: [u8; 16], publisher: LatestTx<Takeover>) -> JoinH
 
 /// Binds, joins, and runs the receive loop until an unrecoverable socket error. Only
 /// returns on error; the caller rebinds with backoff.
-fn receive(own_cid: &[u8; 16], publisher: &LatestTx<Takeover>) -> Result<(), Box<dyn Error>> {
-    // One address, no multicast joins: see SACN_BIND_ADDRESS. A failure here is normally the
+fn receive(
+    own_cid: &[u8; 16],
+    sacn: Sacn,
+    publisher: &LatestTx<Takeover>,
+) -> Result<(), Box<dyn Error>> {
+    // One address, no multicast joins: see `Sacn::address`. A failure here is normally the
     // tunnel not being up yet, which the caller's backoff handles.
-    let socket = UdpSocket::bind(SocketAddrV4::new(cfg::SACN_BIND_ADDRESS, cfg::SACN_PORT))?;
+    let socket = UdpSocket::bind(SocketAddrV4::new(sacn.address, sacn.port))?;
     eprintln!(
         "sacn: listening on {}:{} universe {} — takeover above priority {}",
-        cfg::SACN_BIND_ADDRESS,
-        cfg::SACN_PORT,
-        cfg::UNIVERSE,
+        sacn.address,
+        sacn.port,
+        sacn.universe,
         cfg::SACN_PRIORITY,
     );
 
@@ -373,7 +383,7 @@ fn receive(own_cid: &[u8; 16], publisher: &LatestTx<Takeover>) -> Result<(), Box
 
         let Some((n, from)) = received else { continue };
         let SocketAddr::V4(from) = from else { continue };
-        let Some(header) = parse_header(&pkt[..n], cfg::UNIVERSE) else {
+        let Some(header) = parse_header(&pkt[..n], sacn.universe) else {
             continue;
         };
 

@@ -24,9 +24,9 @@ mod orchestrator;
 mod sacn_in;
 
 use audio_features::AudioFeatures;
-use config::{FRAME_RATE_HZ, SACN_PORT, SACN_PRIORITY, SACN_RELEASE_FRAMES, UNIVERSE};
+use config::{FRAME_RATE_HZ, SACN_PRIORITY, SACN_RELEASE_FRAMES};
 use embassy_executor::Executor;
-use qlc_plus::PatchEntry;
+use qlc_plus::{PatchEntry, Sacn};
 use scenes::Scene;
 use signal_hook::{consts::SIGTERM, iterator::Signals};
 use std::net::UdpSocket;
@@ -49,6 +49,8 @@ pub struct Rig {
     /// The binary's own name, which prefixes every log line. The rig passes
     /// `env!("CARGO_PKG_NAME")`, so it cannot drift from the binary that is installed.
     pub name: &'static str,
+    /// The universe and port the workspace puts the rig on.
+    pub sacn: Sacn,
     /// The generated patch, as plain data, so the startup log can name what this binary was
     /// built against — and so the frame width can be derived from it.
     pub patch: &'static [PatchEntry],
@@ -95,11 +97,15 @@ pub fn run(rig: Rig) -> ! {
     // blocking recv_from would stall the executor's single task. It publishes candidates;
     // the frame loop decides once per frame whether one is actually driving.
     let (takeover_tx, takeover_rx) = latest::latest(sacn_in::Takeover::idle());
-    let _sacn_in = sacn_in::spawn_receiver(cid, takeover_tx);
+    let sacn = rig.sacn;
+    let _sacn_in = sacn_in::spawn_receiver(cid, sacn, takeover_tx);
 
-    let group = dmx::multicast_addr(UNIVERSE);
+    let group = dmx::multicast_addr(sacn.universe);
     let name = rig.name;
-    eprintln!("{name}: universe {UNIVERSE} → {group}:{SACN_PORT}  @ {FRAME_RATE_HZ} Hz");
+    eprintln!(
+        "{name}: universe {} → {group}:{}  @ {FRAME_RATE_HZ} Hz",
+        sacn.universe, sacn.port
+    );
 
     // The patch and scenes the build compiled in. Logged so a running binary can be checked
     // against the workspace that produced it: a fixture at the wrong address, or an edited
@@ -125,7 +131,7 @@ pub fn run(rig: Rig) -> ! {
     // retained, so a subscriber arriving later still gets it.
     let (_telemetry, publisher, farewell) = telemetry::spawn(TELEMETRY_SERVICE);
     publisher.publish("identity/rig", name, true);
-    publisher.publish("identity/universe", UNIVERSE.to_string(), true);
+    publisher.publish("identity/universe", sacn.universe.to_string(), true);
     publisher.publish("identity/frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("identity/fixtures", rig.patch.len().to_string(), true);
     publisher.publish("identity/scenes", rig.scenes.len().to_string(), true);
@@ -142,8 +148,8 @@ pub fn run(rig: Rig) -> ! {
         if signals.forever().next().is_some() {
             eprintln!("{name}: SIGTERM — releasing sACN source ({SACN_RELEASE_FRAMES} terminate frames)");
             for sequence in 0..SACN_RELEASE_FRAMES {
-                let packet = dmx::encode_release(UNIVERSE, sequence, SACN_PRIORITY, &cid, dmx_slots);
-                dmx::send_multicast(&shutdown_socket, UNIVERSE, SACN_PORT, &packet);
+                let packet = dmx::encode_release(sacn.universe, sequence, SACN_PRIORITY, &cid, dmx_slots);
+                dmx::send_multicast(&shutdown_socket, sacn.universe, sacn.port, &packet);
             }
             // After the fixtures are handed back, because they are what the delay would cost.
             // Without this every ordinary restart would look like a crash: the will fires

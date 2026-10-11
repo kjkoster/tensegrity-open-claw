@@ -1,4 +1,15 @@
+use std::env;
+use std::fmt::Write as _;
 use std::fs;
+use std::path::{Path, PathBuf};
+
+// The rig's QLC+ workspace. A ball is a fixture patched in it like any other, so where it
+// listens is read from the same file the brain's patch is generated from.
+const WORKSPACE: &str = "../claw.qxw";
+
+// How the workspace names a ball: the manufacturer and model of `fixtures/ball.qxf`.
+const MANUFACTURER: &str = "Tensegrity";
+const MODEL: &str = "Ball";
 
 // The access point's own configuration. The firmware takes what it has to agree with the
 // access point on from here, so the two cannot drift apart.
@@ -24,6 +35,46 @@ fn main() {
             .unwrap_or_else(|| panic!("{HOSTAPD_CONF} has no `{key}=` line"));
         println!("cargo:rustc-env={variable}={value}");
     }
+
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    fs::write(out_dir.join("patch.rs"), render_patch()).unwrap();
+}
+
+/// Renders one `DmxConfig` constant per ball the workspace patches.
+///
+/// Constants and nothing else, so the firmware gets its addressing without a table to search
+/// or anything to allocate, and a board row naming a ball that is no longer patched stops
+/// compiling.
+fn render_patch() -> String {
+    let addressing = cortex_build::addressing(Path::new(WORKSPACE));
+    let sacn = &addressing.sacn;
+
+    let mut out = String::new();
+    writeln!(out, "// Generated from {WORKSPACE}. Do not edit.").unwrap();
+    for ball in addressing
+        .fixtures
+        .iter()
+        .filter(|fixture| fixture.manufacturer == MANUFACTURER && fixture.model == MODEL)
+    {
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "/// {} — universe {}, DMX address {} (slots {}–{}).",
+            ball.name,
+            sacn.universe,
+            ball.address,
+            ball.address,
+            ball.address + ball.channels - 1,
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "pub const {}: DmxConfig = DmxConfig::new({}, {}, {});",
+            ball.ident, ball.address, sacn.universe, sacn.port,
+        )
+        .unwrap();
+    }
+    out
 }
 
 /// The value of a `key=value` line, verbatim: hostapd does not trim or unquote it either.
