@@ -78,7 +78,18 @@ else
     echo "WARNING: 4g-watchdog.timer did not start — journalctl -u 4g-watchdog.timer -n 40"
 fi
 
-# --- 2. Stem's broker ------------------------------------------------------
+# --- 2. WiFi access point --------------------------------------------------
+# The versioned configuration replaces whatever is on the Pi, so a setting changed there by
+# hand does not survive a deploy. 0600 because it holds the passphrase.
+#
+# Restarted on every deploy, changed or not. That drops every station for a few seconds, and
+# it is also what clears the access point's memory of them before the boards are flashed
+# further down, which restarts them without their saying goodbye.
+step "install and restart WiFi access point"
+sudo install -m 0600 "$REPO/etc/hostapd.conf" /etc/hostapd/hostapd.conf
+sudo systemctl restart hostapd
+
+# --- 3. Stem's broker ------------------------------------------------------
 # Before anything that reports to it. Every daemon on this rig holds its own client
 # connection and announces itself on `health/`, so the broker is not one more service among
 # them — it is the thing that lets the rest of this script be watched while it runs. Bringing
@@ -102,11 +113,11 @@ else
     echo "mosquitto not installed — skipping (sudo apt install mosquitto mosquitto-clients)"
 fi
 
-# --- 3. build brain natively on the Pi ------------------------------------
+# --- 4. build brain natively on the Pi ------------------------------------
 step "build brain"
 ( cd "$REPO" && cargo build --release )
 
-# --- 4. brain daemon -------------------------------------------------------
+# --- 5. brain daemon -------------------------------------------------------
 step "install and restart brain daemon"
 # Removed first, so that what lands is a file of its own whatever was there before: a symlink
 # at this path must be replaced, never written through to the binary it points at.
@@ -118,7 +129,7 @@ sudo systemctl enable brain
 sudo systemctl restart brain
 echo "brain daemon restarted"
 
-# --- 5. Stem ---------------------------------------------------------------
+# --- 6. Stem ---------------------------------------------------------------
 # rig_mqtt.py installs beside its importer rather than into a site-packages directory: the
 # daemon is run by absolute path, which puts /usr/local/bin first on its import path, and
 # one file copy beats owning a package layout for a single shared module.
@@ -135,7 +146,7 @@ else
     echo "WARNING: stem did not start — journalctl -u stem -n 40"
 fi
 
-# --- 6. flash attached microcontrollers ------------------------------------
+# --- 7. flash attached microcontrollers ------------------------------------
 # Last, so a board that is not in DEVICE_MAP fails the deploy only after the rig is back up.
 # Absent boards are simply skipped.
 step "flash attached microcontrollers"

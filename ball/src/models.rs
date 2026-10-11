@@ -57,21 +57,35 @@ impl DmxConfig {
 pub struct WifiConfig {
     ssid: &'static str,
     password: &'static str,
+    country: [u8; 2],
+    channel: u8,
 }
 
 impl WifiConfig {
     /// Panics on credentials the radio would not accept. See [`DmxConfig::new`].
-    pub const fn new(ssid: &'static str, password: &'static str) -> Self {
+    pub const fn new(
+        ssid: &'static str,
+        password: &'static str,
+        country: &'static str,
+        channel: u8,
+    ) -> Self {
         assert!(!ssid.is_empty() && ssid.len() <= 32, "SSID must be 1-32 bytes");
         // WPA2-PSK requires 8–63 ASCII characters; 64-byte form is a raw PMK hex string.
         assert!(password.len() >= 8 && password.len() <= 64, "passphrase must be 8-64 bytes");
         assert!(!contains_nul(ssid), "SSID must not contain a NUL");
         assert!(!contains_nul(password), "passphrase must not contain a NUL");
-        Self { ssid, password }
+        assert!(country.len() == 2, "country code must be two letters");
+        // Not 0, which is how an access point asks to pick its own channel: there would
+        // be no telling which one to look on.
+        assert!(channel >= 1 && channel <= 13, "WiFi channel must be 1-13");
+        let country = country.as_bytes();
+        Self { ssid, password, country: [country[0], country[1]], channel }
     }
 
     pub fn ssid(self) -> &'static str { self.ssid }
     pub fn password(self) -> &'static str { self.password }
+    pub fn country(self) -> [u8; 2] { self.country }
+    pub fn channel(self) -> u8 { self.channel }
 }
 
 // A loop because iterators are not usable in a `const fn`.

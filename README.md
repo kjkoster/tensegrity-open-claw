@@ -49,9 +49,11 @@ macOS.
 ### WiFi AP (fixtures join this)
 
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
-  `10.0.10.1`, leased from `10.0.10.10+`. The Pi's `hostapd.conf` is the only source of
-  truth for the SSID and passphrase. The balls have both compiled in, in
-  `ball/src/config.rs`, so changing either means changing it there and re-flashing.
+  `10.0.10.1`, leased from `10.0.10.10+`. `etc/hostapd.conf` is the only source of truth
+  for the access point: every deploy installs it over the Pi's copy and restarts `hostapd`,
+  which drops every WiFi client for a few seconds. The balls have the SSID and passphrase
+  compiled in, read from that same file when the firmware is built, so changing either
+  takes a deploy with every ball plugged in to be re-flashed.
 - The **Ethernet port** is exposed to a dev laptop for SSH.
 
 ### 4G uplink

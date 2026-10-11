@@ -8,7 +8,7 @@
 //! runtime. The stable per-board identity is its WiFi station MAC, programmed into efuse at
 //! manufacture and read at boot via
 //! `efuse::interface_mac_address(InterfaceMacAddress::Station)` (before WiFi starts). This
-//! module maps each known MAC to that board's DMX base address; WiFi credentials, universe,
+//! module maps each known MAC to that board's DMX base address; WiFi settings, universe,
 //! and sACN port are the same for every board and live as global constants below.
 //!
 //! ## Getting a board's MAC the first time
@@ -25,15 +25,34 @@
 //! the `/dev/serial/by-id` names of `remote-deploy.sh`'s `DEVICE_MAP`. Do not copy the
 //! DEVICE_MAP values here — read the station MAC from the RTT log.
 
+use embassy_time::Duration;
 use rtt_target::rprintln;
 
 use crate::models::{DmxConfig, WifiConfig};
 
 // ── Global settings (identical for every board) ───────────────────────────────
-// The SSID and passphrase of the Pi's access point. `hostapd.conf` on the Pi is what the
-// AP actually uses; these have to be changed along with it.
-const SSID: &str = "closed claw DMX";
-const PASSWORD: &str = "close-that-claw";
+// Read out of `etc/hostapd.conf` by `build.rs`, so the firmware is always built against
+// the access point configuration that is deployed alongside it.
+const SSID: &str = env!("WIFI_SSID");
+const PASSWORD: &str = env!("WIFI_PASSPHRASE");
+const COUNTRY: &str = env!("WIFI_COUNTRY");
+const CHANNEL: u64 = number(env!("WIFI_CHANNEL"));
+// Seconds of silence after which the access point forgets a station.
+const AP_MAX_INACTIVITY_S: u64 = number(env!("AP_MAX_INACTIVITY"));
+
+const fn number(setting: &str) -> u64 {
+    match u64::from_str_radix(setting, 10) {
+        Ok(number) => number,
+        Err(_) => panic!("a setting in etc/hostapd.conf that has to be a number is not one"),
+    }
+}
+
+/// How long the radio stays quiet between connection attempts. An access point that still
+/// lists this ball as associated from before a restart does not answer its attempts to
+/// join, and every attempt it hears keeps that stale entry alive. It only forgets a station
+/// that has been silent for its `ap_max_inactivity`, so the ball stays silent for that long
+/// and a margin on top.
+pub const WIFI_RETRY_SILENCE: Duration = Duration::from_secs(AP_MAX_INACTIVITY_S + 5);
 // What the brain sends on: `UNIVERSE` and `SACN_PORT` in `cortex/src/config.rs`.
 const UNIVERSE: u16 = 1;
 const SACN_PORT: u16 = 5568;
@@ -70,6 +89,9 @@ pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
     DmxConfig::new(board.dmx_address, UNIVERSE, SACN_PORT)
 }
 
-/// The WiFi credentials shared by every board. A `const`, so that a malformed SSID or
-/// passphrase fails the build instead of the board.
-pub const WIFI_CONFIG: WifiConfig = WifiConfig::new(SSID, PASSWORD);
+/// The WiFi settings shared by every board. A `const`, so that a malformed one fails the
+/// build instead of the board.
+pub const WIFI_CONFIG: WifiConfig = {
+    assert!(CHANNEL <= u8::MAX as u64, "WiFi channel must be 1-13");
+    WifiConfig::new(SSID, PASSWORD, COUNTRY, CHANNEL as u8)
+};

@@ -1,13 +1,20 @@
 use alloc::string::String;
 use embassy_executor::Spawner;
 use embassy_net::{Runner, Stack, StackResources};
-use embassy_time::{Duration, Timer};
-use esp_hal::peripherals::WIFI;
-use esp_radio::wifi::{Interface, PowerSaveMode, WifiController, sta::StationConfig};
+use embassy_time::{Duration, Instant, Timer};
+use esp_hal::{peripherals::WIFI, system::software_reset};
+use esp_radio::wifi::{
+    ControllerConfig, Interface, PowerSaveMode, WifiController, WifiError, sta::StationConfig,
+};
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
-use crate::models::WifiConfig;
+use crate::{config::WIFI_RETRY_SILENCE, models::WifiConfig};
+
+// The ball runs unattended, so a radio that stays offline this long is restarted along
+// with everything else: nobody is there to power-cycle it. Long enough for many silences,
+// because a restart does not help against a stale entry and only the silence does.
+const RESTART_AFTER: Duration = Duration::from_secs(300);
 
 static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
 
@@ -23,21 +30,46 @@ async fn wifi_supervision_task(
 ) -> ! {
     loop {
         rprintln!("connecting to {}...", wifi_config.ssid());
+        let connecting_since = Instant::now();
         loop {
+            // So that no attempt starts from a connection the driver still holds. The
+            // driver refuses this unless it believes it is connected, which is the
+            // expected answer here.
+            match controller.disconnect_async().await {
+                Ok(info) => {
+                    rprintln!("dropped a lingering connection ({:?})", info);
+                }
+                Err(WifiError::NotConnected) => {}
+                Err(e) => {
+                    rprintln!("wifi disconnect failed ({:?})", e);
+                }
+            }
+
             match controller.connect_async().await {
                 Ok(_) => break,
                 Err(e) => {
                     rprintln!("wifi connection failed ({:?}), retrying...", e);
-                    Timer::after(Duration::from_secs(1)).await;
                 }
+            }
+
+            Timer::after(WIFI_RETRY_SILENCE).await;
+
+            // After the silence and not before it, so that the attempt the restart leads
+            // straight into is still a full silence away from the last one.
+            if connecting_since.elapsed() > RESTART_AFTER {
+                rprintln!(
+                    "no wifi for {} seconds, restarting",
+                    RESTART_AFTER.as_secs()
+                );
+                // Time for the probe to read the line above before it is gone.
+                Timer::after(Duration::from_millis(100)).await;
+                software_reset();
             }
         }
         rprintln!("wifi connected");
 
-        while controller.is_connected() {
-            Timer::after(Duration::from_secs(1)).await;
-        }
-        rprintln!("wifi disconnected");
+        let disconnect = controller.wait_for_disconnect_async().await;
+        rprintln!("wifi disconnected ({:?})", disconnect);
     }
 }
 
@@ -47,7 +79,9 @@ pub async fn connect(
     seed: u64,
     wifi_config: WifiConfig,
 ) -> Stack<'static> {
-    let (mut controller, interfaces) = esp_radio::wifi::new(wifi, Default::default())
+    let controller_config =
+        ControllerConfig::default().with_country_info(wifi_config.country());
+    let (mut controller, interfaces) = esp_radio::wifi::new(wifi, controller_config)
         .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
 
     let (network_stack, runner) = embassy_net::new(
@@ -62,6 +96,9 @@ pub async fn connect(
         .set_config(&esp_radio::wifi::Config::Station(
             StationConfig::default()
                 .with_ssid(wifi_config.ssid())
+                // Where the scan starts, so the access point is found on the first
+                // channel tried. The other channels are still scanned if it is not there.
+                .with_channel(wifi_config.channel())
                 .with_password(String::from(wifi_config.password())),
         ))
         .unwrap();
