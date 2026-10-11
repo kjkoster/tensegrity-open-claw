@@ -1,6 +1,3 @@
-extern crate alloc;
-
-use alloc::string::String;
 use embassy_net::Ipv4Address;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
@@ -29,13 +26,6 @@ impl DmxValue {
     }
 }
 
-#[derive(Debug)]
-pub enum DmxConfigError {
-    Address,
-    Universe,
-    Port,
-}
-
 #[derive(Clone, Copy)]
 pub struct DmxConfig {
     address: u16,
@@ -44,18 +34,14 @@ pub struct DmxConfig {
 }
 
 impl DmxConfig {
-    pub fn new(address: u16, universe: u16, sacn_port: u16) -> Result<Self, DmxConfigError> {
-        if !(1..=512).contains(&address) {
-            return Err(DmxConfigError::Address);
-        }
+    /// Panics on a value outside the protocol's range: the configuration is compiled in,
+    /// so a bad one is a mistake in the source and never something to recover from.
+    pub const fn new(address: u16, universe: u16, sacn_port: u16) -> Self {
+        assert!(address >= 1 && address <= 512, "DMX address must be 1-512");
         // E1.31 §9.1.1: universe 0 and 64000–65535 are reserved; valid range is 1–63999.
-        if !(1..=63999).contains(&universe) {
-            return Err(DmxConfigError::Universe);
-        }
-        if sacn_port == 0 {
-            return Err(DmxConfigError::Port);
-        }
-        Ok(Self { address, universe, sacn_port })
+        assert!(universe >= 1 && universe <= 63999, "sACN universe must be 1-63999");
+        assert!(sacn_port != 0, "sACN port must not be 0");
+        Self { address, universe, sacn_port }
     }
 
     pub fn address(self) -> u16 { self.address }
@@ -67,38 +53,36 @@ impl DmxConfig {
     }
 }
 
-#[derive(Debug)]
-pub enum WifiConfigError {
-    SsidLength,
-    SsidNul,
-    PasswordLength,
-    PasswordNul,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct WifiConfig {
-    ssid: String,
-    password: String,
+    ssid: &'static str,
+    password: &'static str,
 }
 
 impl WifiConfig {
-    pub fn new(ssid: String, password: String) -> Result<Self, WifiConfigError> {
-        if ssid.is_empty() || ssid.len() > 32 {
-            return Err(WifiConfigError::SsidLength);
-        }
-        if ssid.bytes().any(|b| b == 0) {
-            return Err(WifiConfigError::SsidNul);
-        }
+    /// Panics on credentials the radio would not accept. See [`DmxConfig::new`].
+    pub const fn new(ssid: &'static str, password: &'static str) -> Self {
+        assert!(!ssid.is_empty() && ssid.len() <= 32, "SSID must be 1-32 bytes");
         // WPA2-PSK requires 8–63 ASCII characters; 64-byte form is a raw PMK hex string.
-        if password.len() < 8 || password.len() > 64 {
-            return Err(WifiConfigError::PasswordLength);
-        }
-        if password.bytes().any(|b| b == 0) {
-            return Err(WifiConfigError::PasswordNul);
-        }
-        Ok(Self { ssid, password })
+        assert!(password.len() >= 8 && password.len() <= 64, "passphrase must be 8-64 bytes");
+        assert!(!contains_nul(ssid), "SSID must not contain a NUL");
+        assert!(!contains_nul(password), "passphrase must not contain a NUL");
+        Self { ssid, password }
     }
 
-    pub fn ssid(&self) -> &str { &self.ssid }
-    pub fn password(&self) -> &str { &self.password }
+    pub fn ssid(self) -> &'static str { self.ssid }
+    pub fn password(self) -> &'static str { self.password }
+}
+
+// A loop because iterators are not usable in a `const fn`.
+const fn contains_nul(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0 {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }

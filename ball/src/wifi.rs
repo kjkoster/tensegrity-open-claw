@@ -22,24 +22,22 @@ async fn wifi_supervision_task(
     wifi_config: WifiConfig,
 ) -> ! {
     loop {
-        while controller.is_connected() {
-            Timer::after(Duration::from_secs(1)).await;
-        }
-
-        rprintln!(
-            "wifi disconnected, reconnecting to {}...",
-            wifi_config.ssid()
-        );
+        rprintln!("connecting to {}...", wifi_config.ssid());
         loop {
             match controller.connect_async().await {
                 Ok(_) => break,
                 Err(e) => {
-                    rprintln!("wifi reconnect failed ({:?}), retrying...", e);
+                    rprintln!("wifi connection failed ({:?}), retrying...", e);
                     Timer::after(Duration::from_secs(1)).await;
                 }
             }
         }
-        rprintln!("wifi reconnected");
+        rprintln!("wifi connected");
+
+        while controller.is_connected() {
+            Timer::after(Duration::from_secs(1)).await;
+        }
+        rprintln!("wifi disconnected");
     }
 }
 
@@ -47,12 +45,11 @@ pub async fn connect(
     spawner: Spawner,
     wifi: WIFI<'static>,
     seed: u64,
-    wifi_config: &WifiConfig,
-) -> (Stack<'static>, [u8; 6]) {
+    wifi_config: WifiConfig,
+) -> Stack<'static> {
     let (mut controller, interfaces) = esp_radio::wifi::new(wifi, Default::default())
         .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
 
-    let mac = interfaces.station.mac_address();
     let (network_stack, runner) = embassy_net::new(
         interfaces.station,
         embassy_net::Config::dhcpv4(Default::default()),
@@ -73,14 +70,7 @@ pub async fn connect(
     // UDP packets (sACN/E1.31) to be silently dropped during the sleep window.
     controller.set_power_saving(PowerSaveMode::None).unwrap();
 
-    loop {
-        rprintln!("connecting to {}...", wifi_config.ssid());
-        match controller.connect_async().await {
-            Ok(_) => break,
-            Err(e) => rprintln!("wifi connection failed ({:?}), retrying...", e),
-        }
-    }
-    rprintln!("wifi connected, waiting for dhcp...");
+    spawner.spawn(wifi_supervision_task(controller, wifi_config).unwrap());
     network_stack.wait_config_up().await;
 
     if let Some(cfg) = network_stack.config_v4() {
@@ -91,7 +81,5 @@ pub async fn connect(
         }
     }
 
-    spawner.spawn(wifi_supervision_task(controller, wifi_config.clone()).unwrap());
-
-    (network_stack, mac)
+    network_stack
 }

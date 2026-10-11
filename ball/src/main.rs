@@ -8,6 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 mod config;
+mod led;
 mod models;
 mod sacn;
 mod wifi;
@@ -41,12 +42,13 @@ static DMX_VALUE: DmxWatch = DmxWatch::new();
 
 #[embassy_executor::task]
 async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
+    let mut buffers = sacn::Buffers::new();
+    let dmx_value = DMX_VALUE.sender();
     loop {
         network_stack.wait_config_up().await;
-        let mut listener = sacn::Listener::new(network_stack, config, DMX_VALUE.sender());
-        // run() returns on a universe timeout; drop the listener (leaving the
-        // multicast group) and recreate it so it rejoins with a fresh socket.
-        listener.run().await;
+        // listen() returns on a universe timeout; calling it again rejoins with a
+        // fresh socket.
+        sacn::listen(network_stack, config, &dmx_value, &mut buffers).await;
     }
 }
 
@@ -68,8 +70,14 @@ async fn main(spawner: Spawner) -> ! {
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
+    // Before anything that can wait or panic, so the fade shows the firmware is alive
+    // while the network is still coming up.
+    let status_led = led::StatusLed::new(peripherals.LEDC, peripherals.GPIO21);
+    spawner.spawn(led::sine_fade(status_led).unwrap());
+
     rprintln!("");
-    rprintln!("cpu:            {} MHz", cpu_clock().as_mhz());
+    rprintln!("ball firmware started");
+    rprintln!("cpu:           {} MHz", cpu_clock().as_mhz());
 
     // Read this board's station MAC from efuse (before WiFi starts) and use it to
     // pick its compiled-in configuration. See config.rs for the why and the
@@ -89,11 +97,10 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     let dmx_config = config::dmx_config_for(mac_address);
-    let wifi_config = config::wifi_config();
 
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
-    let (network_stack, _) = wifi::connect(spawner, peripherals.WIFI, seed, &wifi_config).await;
+    let network_stack = wifi::connect(spawner, peripherals.WIFI, seed, config::WIFI_CONFIG).await;
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
 

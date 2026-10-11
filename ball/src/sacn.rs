@@ -1,4 +1,3 @@
-use core::cell::UnsafeCell;
 use embassy_net::{
     Stack,
     udp::{PacketMetadata, UdpSocket},
@@ -29,122 +28,94 @@ const DMX_NULL_START: u8 = 0x00;
 // Maximum E1.31 UDP payload: 126-byte header + 512 DMX slots.
 const MAX_PACKET_LEN: usize = 638;
 
-// Socket ring-buffer storage. Lives 'static so UdpSocket<'static> can borrow it.
-// Only one Listener exists at a time; main enforces this by dropping the old one
-// before creating a new one.
-struct SacnBufs {
-    rx_meta: UnsafeCell<[PacketMetadata; 4]>,
-    rx_data: UnsafeCell<[u8; MAX_PACKET_LEN]>,
-    tx_meta: UnsafeCell<[PacketMetadata; 1]>,
-    tx_data: UnsafeCell<[u8; 64]>,
-}
-// SAFETY: single-task access guaranteed by the one-Listener-at-a-time invariant.
-unsafe impl Sync for SacnBufs {}
-
-static BUFS: SacnBufs = SacnBufs {
-    rx_meta: UnsafeCell::new([PacketMetadata::EMPTY; 4]),
-    rx_data: UnsafeCell::new([0u8; MAX_PACKET_LEN]),
-    tx_meta: UnsafeCell::new([PacketMetadata::EMPTY; 1]),
-    tx_data: UnsafeCell::new([0u8; 64]),
-};
-
-// No source arbitration here: every packet for our universe is obeyed, whoever sent it.
-// Choosing between a console and the brain happens on the Pi, which leaves the brain as
-// the only sender on the access point.
-pub(crate) struct Listener {
-    socket: UdpSocket<'static>,
-    config: DmxConfig,
-    last_value: Option<DmxValue>,
-    dmx_value: DmxSender,
+/// The socket's ring-buffer storage. Owned by the caller of [`listen`] so that it outlives
+/// each socket and is reused by the next one.
+pub(crate) struct Buffers {
+    rx_meta: [PacketMetadata; 4],
+    rx_data: [u8; MAX_PACKET_LEN],
+    tx_meta: [PacketMetadata; 1],
+    tx_data: [u8; 64],
 }
 
-impl Listener {
-    pub(crate) fn new(
-        network_stack: Stack<'static>,
-        config: DmxConfig,
-        dmx_value: DmxSender,
-    ) -> Self {
-        let multicast = config.multicast_address();
-        if let Err(e) = network_stack.join_multicast_group(multicast) {
-            rprintln!("multicast join error: {:?}", e);
-        }
-
-        // SAFETY: only one Listener exists at a time; main drops the previous
-        // Listener before calling new(), so these buffers have no live borrowers.
-        let mut socket = unsafe {
-            UdpSocket::new(
-                network_stack,
-                &mut *BUFS.rx_meta.get(),
-                &mut *BUFS.rx_data.get(),
-                &mut *BUFS.tx_meta.get(),
-                &mut *BUFS.tx_data.get(),
-            )
-        };
-        if let Err(e) = socket.bind(config.sacn_port()) {
-            rprintln!("socket bind error: {:?}", e);
-        }
-
-        rprintln!("dmx address:    {}", config.address());
-        rprintln!("dmx universe:   {}", config.universe());
-        rprintln!("sacn multicast: {}:{}", multicast, config.sacn_port());
-
+impl Buffers {
+    pub(crate) fn new() -> Self {
         Self {
-            socket,
-            config,
-            last_value: None,
-            dmx_value,
+            rx_meta: [PacketMetadata::EMPTY; 4],
+            rx_data: [0; MAX_PACKET_LEN],
+            tx_meta: [PacketMetadata::EMPTY; 1],
+            tx_data: [0; 64],
         }
     }
+}
 
-    /// Publishes to `dmx_value` whenever the DMX value at the configured address changes.
-    /// Returns on timeout so the caller can drop and recreate the Listener, which
-    /// rebinds the socket and sends a fresh IGMP join. Rejoining the multicast group
-    /// in-place after a timeout is not sufficient: the socket may be stale from the
-    /// WiFi disconnect and embassy_net may not deliver packets to it after reconnect.
-    #[allow(
-        clippy::large_stack_frames,
-        reason = "pkt_buf (638 bytes) must be held across the recv_from await"
-    )]
-    pub(crate) async fn run(&mut self) {
-        let mut pkt_buf = [0u8; MAX_PACKET_LEN];
-        loop {
-            match with_timeout(
-                Duration::from_secs(UNIVERSE_TIMEOUT),
-                self.socket.recv_from(&mut pkt_buf),
-            )
-            .await
-            {
-                Ok(Ok((n, _))) => {
-                    let value = parse_e131_slots(
-                        &pkt_buf[..n],
-                        self.config.universe(),
-                        self.config.address(),
-                    );
-                    if let Some(value) = value
-                        && Some(value) != self.last_value
-                    {
-                        self.last_value = Some(value);
-                        self.dmx_value.send(value);
-                    }
-                }
-                Ok(Err(e)) => {
-                    rprintln!("recv_from error: {:?}", e);
-                }
-                Err(_) => {
-                    rprintln!(
-                        "no universe for {} seconds, recreating socket",
-                        UNIVERSE_TIMEOUT
-                    );
-                    return;
+/// Publishes to `dmx_value` whenever the DMX value at the configured address changes.
+/// Returns on timeout so the caller can call it again, which binds a fresh socket and
+/// sends a fresh IGMP join. Rejoining the multicast group on the same socket after a
+/// timeout is not sufficient: the socket may be stale from the WiFi disconnect and
+/// embassy_net may not deliver packets to it after reconnect.
+///
+/// No source arbitration here: every packet for our universe is obeyed, whoever sent it.
+/// Choosing between a console and the brain happens on the Pi, which leaves the brain as
+/// the only sender on the access point.
+#[allow(
+    clippy::large_stack_frames,
+    reason = "pkt_buf (638 bytes) must be held across the recv_from await"
+)]
+pub(crate) async fn listen(
+    network_stack: Stack<'static>,
+    config: DmxConfig,
+    dmx_value: &DmxSender,
+    buffers: &mut Buffers,
+) {
+    let multicast = config.multicast_address();
+    if let Err(e) = network_stack.join_multicast_group(multicast) {
+        rprintln!("multicast join error: {:?}", e);
+    }
+
+    let mut socket = UdpSocket::new(
+        network_stack,
+        &mut buffers.rx_meta,
+        &mut buffers.rx_data,
+        &mut buffers.tx_meta,
+        &mut buffers.tx_data,
+    );
+    if let Err(e) = socket.bind(config.sacn_port()) {
+        rprintln!("socket bind error: {:?}", e);
+    }
+
+    rprintln!("dmx address:    {}", config.address());
+    rprintln!("dmx universe:   {}", config.universe());
+    rprintln!("sacn multicast: {}:{}", multicast, config.sacn_port());
+
+    let mut pkt_buf = [0u8; MAX_PACKET_LEN];
+    loop {
+        match with_timeout(
+            Duration::from_secs(UNIVERSE_TIMEOUT),
+            socket.recv_from(&mut pkt_buf),
+        )
+        .await
+        {
+            Ok(Ok((n, _))) => {
+                let value = parse_e131_slots(&pkt_buf[..n], config.universe(), config.address());
+                if let Some(value) = value {
+                    dmx_value.send_if_modified(|current| {
+                        let changed = *current != Some(value);
+                        *current = Some(value);
+                        changed
+                    });
                 }
             }
+            Ok(Err(e)) => {
+                rprintln!("recv_from error: {:?}", e);
+            }
+            Err(_) => {
+                rprintln!(
+                    "no universe for {} seconds, recreating socket",
+                    UNIVERSE_TIMEOUT
+                );
+                return;
+            }
         }
-    }
-}
-
-impl Drop for Listener {
-    fn drop(&mut self) {
-        rprintln!("sACN listener destroyed");
     }
 }
 

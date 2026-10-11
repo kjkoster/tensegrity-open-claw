@@ -46,11 +46,13 @@ struct Board {
     dmx_address: u16,
 }
 
-const BOARDS: &[Board] = &[];
+const BOARDS: &[Board] = &[
+    Board { mac: [0x40, 0x4C, 0xCA, 0xFB, 0x79, 0x10], dmx_address: 1 }, // TODO set DMX address
+];
 
 /// Returns the DMX configuration for the board with the given station MAC.
 /// Panics if the MAC is not provisioned in `BOARDS` — an unknown board must not
-/// run with a guessed DMX address.
+/// run with a guessed DMX address — or if its row holds an invalid one.
 pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
     let board = BOARDS.iter().find(|board| board.mac == mac).unwrap_or_else(|| {
         rprintln!("unprovisioned board: add this row to config::BOARDS in config.rs:");
@@ -65,10 +67,9 @@ pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
         );
         panic!("unprovisioned board MAC");
     });
-    DmxConfig::new(board.dmx_address, UNIVERSE, SACN_PORT).expect("hardcoded DMX config is invalid")
+    DmxConfig::new(board.dmx_address, UNIVERSE, SACN_PORT)
 }
 
-/// Returns the WiFi credentials shared by every board.
-pub fn wifi_config() -> WifiConfig {
-    WifiConfig::new(SSID.into(), PASSWORD.into()).expect("hardcoded WiFi config is invalid")
-}
+/// The WiFi credentials shared by every board. A `const`, so that a malformed SSID or
+/// passphrase fails the build instead of the board.
+pub const WIFI_CONFIG: WifiConfig = WifiConfig::new(SSID, PASSWORD);

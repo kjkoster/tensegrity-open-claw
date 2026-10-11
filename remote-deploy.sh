@@ -22,6 +22,7 @@ step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
 # To find a board's ID: ls /dev/serial/by-id/  (while the board is plugged in)
 #
 declare -A DEVICE_MAP=(
+  ["usb-Espressif_USB_JTAG_serial_debug_unit_40:4C:CA:FB:79:10-if00"]="ball"
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
