@@ -324,6 +324,24 @@ MOVENET_BONES = [
 # camera takes a moment longer to notice.
 MOVENET_MIN_CONFIDENCE = float(os.environ.get("EYEBALL_MIN_CONFIDENCE", "0.40"))
 
+# How many landmarks have to clear that floor before this daemon will say there is a mage.
+#
+# One used to be enough, because presence was the same question as "did the estimator return
+# anything", and the estimator returns a pose whenever its single best landmark clears the floor.
+# One landmark is not a person. On an empty field the model puts a confident elbow on a bush or a
+# patch of grass for a few frames at a time, and every one of those was reported as a mage — the
+# rig announced arrivals to nobody all afternoon, and the tell was in its own logs: those frames
+# never carried a readable arm, because there was no arm in them.
+#
+# Five is deliberately well short of a whole body and well past a lucky landmark. A mage side-on
+# to the camera, or half behind another child, still clears it; a false positive has to invent
+# five plausible joints at once, which is a different order of coincidence from inventing one.
+#
+# This is not the estimator's own gate and does not replace it: a marginal pose still comes back
+# and is still drawn, so a ghost the show ignores is a ghost somebody can still see in the
+# preview and count the landmarks of.
+MOVENET_MIN_LANDMARKS = int(os.environ.get("EYEBALL_MIN_LANDMARKS", "5"))
+
 
 def movenet_tensor(frame, size, dtype):
     """RGB, batched, cast. The frame arrives already square and already the right size."""
@@ -1049,6 +1067,25 @@ def bone_stroke(first, second):
     return Stroke(COLOUR_CENTRE, QUIET_WIDTH, QUIET_OUTLINE)
 
 
+def confident(keypoints):
+    """How many landmarks the model is sure enough of to be worth anything."""
+    if not keypoints:
+        return 0
+    return sum(
+        1 for _, _, confidence in keypoints.values() if confidence >= MOVENET_MIN_CONFIDENCE
+    )
+
+
+def is_present(keypoints):
+    """Whether there is enough of a body in this frame to call it a mage.
+
+    The daemon's own judgement, and the whole of what the show reads to decide whether anybody is
+    there — so it is a question about a body rather than about whether the estimator returned
+    something. A pose is not evidence of a person; a pose with several joints in it is.
+    """
+    return confident(keypoints) >= MOVENET_MIN_LANDMARKS
+
+
 def confidence_mean(keypoints):
     """How sure the model is overall, as the number worth watching while tuning the picture.
 
@@ -1059,7 +1096,10 @@ def confidence_mean(keypoints):
     if not keypoints:
         return "conf —"
     values = [confidence for _, _, confidence in keypoints.values()]
-    return f"conf {sum(values) / len(values):.2f}"
+    # The count beside the mean, because it is the one that decides whether the show believes
+    # any of this: a ghost reads a plausible mean off seventeen mediocre landmarks and still has
+    # only one or two worth the name.
+    return f"conf {sum(values) / len(values):.2f}  {confident(keypoints)}/{len(values)} sure"
 
 
 def degrees_or_dash(value):
@@ -1904,7 +1944,7 @@ def main():
             "sent_at": time.time(),
             "source": estimator.name,
             "fps": round(fps, 2),
-            "present": keypoints is not None,
+            "present": is_present(keypoints),
             "keypoints": {
                 name: [round(px, 4), round(py, 4), round(confidence, 3)]
                 for name, (px, py, confidence) in (keypoints or {}).items()
@@ -2011,7 +2051,7 @@ def main():
                 "previewing": drawing,
                 "seq": sequence,
                 "captured": stats["captured"],
-                "present": keypoints is not None,
+                "present": is_present(keypoints),
                 "estimator": estimator.name,
                 # The same floors the preview draws, for the sittings where nobody has a browser
                 # pointed at the rig. Six landmarks rather than seventeen: these are the ones the

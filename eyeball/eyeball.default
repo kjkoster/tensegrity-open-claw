@@ -61,11 +61,21 @@ EYEBALL_CAMERA_FPS=15
 # blanks — and both are numbers a kid in front of the camera is expected to move.
 #
 # The confidence one is the arms' own and is deliberately below EYEBALL_MIN_CONFIDENCE, which
-# decides what gets drawn and whether there is a mage at all. Loosen this one, not that one.
+# decides what gets drawn. Loosen this one, not that one.
 #
 # Commented because these are the code's own defaults. Uncomment only to overrule them.
 #EYEBALL_ARM_MIN_CONFIDENCE=0.20
 #EYEBALL_ARM_MIN_LENGTH=0.20
+
+# What it takes to be a mage: how many landmarks have to clear EYEBALL_MIN_CONFIDENCE before this
+# daemon reports one. Not one, which is what it effectively was — the model puts a confident
+# landmark on a bush now and then, and the rig spent an afternoon greeting arrivals nobody could
+# see. Five is short of a body and past a coincidence.
+#
+# Raise it if an empty field still produces mages; lower it if a real mage standing side-on or
+# half hidden gets dropped. The preview prints the count beside the mean confidence, which is the
+# number to watch while deciding either way.
+#EYEBALL_MIN_LANDMARKS=5
 
 # How the crop is shrunk to the model's input, and left to the daemon on purpose. Bilinear is
 # right while the crop is near the model's input size, area-averaging is right if it is ever
