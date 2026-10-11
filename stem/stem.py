@@ -11,10 +11,6 @@ Two subtrees, both retained, because both answer questions asked after the inter
     stem/specs/…   what this machine is — written once, never changes while it runs
     stem/stats/…   how it is doing — temperature, throttling, memory, load, uplink
 
-The camera is not here. Everything about it — what it is, how it is configured, and whether it
-answers — belongs to eyeball under `eyeball/camera/`, so that one subtree is the whole answer
-rather than two subtrees that have to be read together.
-
 One field per topic: `stem/stats/temperature_c`, `stem/stats/throttling/since_boot/under_voltage`.
 Nested readings become nested topics, so a subscriber can take a single number without knowing
 anything about the shape it arrived in.
@@ -101,9 +97,8 @@ def os_name():
 def specs():
     """What this machine is. Published once, retained, and never republished.
 
-    It exists because the numbers that matter downstream — the pose rate a core can sustain,
-    whether a wheel exists for this interpreter — are answers to questions about this exact
-    board, and reading them out of a telemetry tree beats an SSH session and a remembered
+    It exists because the numbers that matter downstream — what a core can sustain, whether
+    a wheel exists for this interpreter — are answers to questions about this exact board, and reading them out of a telemetry tree beats an SSH session and a remembered
     command line.
     """
     return {

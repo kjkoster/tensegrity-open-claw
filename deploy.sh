@@ -1,33 +1,32 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — rsync the sources to claw-pi, then run remote-deploy.sh there to build both rig
-#             binaries natively and restart whichever one the symlink selects.
+# deploy.sh — rsync the sources to claw-pi, then run remote-deploy.sh there to build the
+#             brain natively and restart it.
 #
-# Run from the repo root on the Mac (riverrain):
+#             The MCU firmware is the exception: it is built here, on the Mac, and only the
+#             binary is shipped, for remote-deploy.sh to flash onto every attached board.
 #
-#   ./deploy.sh                 build, install, restart the rig that is already selected
-#   ./deploy.sh mage-brain      … and point the symlink at the mage rig first
-#   ./deploy.sh claw-brain      … and point it back at the claw
-#
-# Naming a rig is the only thing that ever moves the symlink; a plain deploy leaves whatever
-# is live exactly where it is. Stops at the first error so you can see how far it got.
+# Run from the repo root on the Mac (riverrain):  ./deploy.sh
+# Stops at the first error so you can see how far it got.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PI="claw-pi"               # ssh alias (key-based)
 PI_DIR="tensegrity-open-claw"
-RIG="${1:-}"               # empty means "leave the symlink alone"
 
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
-# Fail here rather than on the Pi: a typo should not cost a full remote build to discover.
-case "$RIG" in
-    ""|claw-brain|mage-brain) ;;
-    *) echo "unknown rig '$RIG' — expected claw-brain or mage-brain" >&2; exit 1 ;;
-esac
+# --- 1. Build MCU firmware locally ----------------------------------------
+# Ahead of the rsync, so firmware that does not compile fails here, before anything on the Pi
+# has been touched. Inside the crate's own directory because that is what selects its target
+# and toolchain: `ball` is not a member of the workspace the Pi builds.
+BALL_BINARY="ball/target/riscv32imc-unknown-none-elf/release/ball"
 
-# --- 1. Ship sources to the Pi --------------------------------------------
+step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
+( cd ball && cargo build --release )
+
+# --- 2. Ship sources to the Pi --------------------------------------------
 # The Pi's clock used to be pushed from here, because cargo decides freshness by mtime and
 # a lagging Pi clock makes every rsynced source look newer than every build artifact. It
 # now runs systemd-timesyncd against the Debian pool (`timedatectl timesync-status`), so
@@ -37,23 +36,25 @@ esac
 # so adding something is a decision instead of an oversight — the design documents, the
 # reference PDFs, the editor config and the git history all stay on the Mac.
 #
-#   the four crates  the members of the cargo workspace
+#   the three crates the members of the cargo workspace
 #   claw.qxw         the claw's patch (what is where) and its scenes
-#   mage.qxw         the mage rig's patch
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
-#   eyeball/         the vision daemon and its unit
-#   stem/            the broker configuration, and whatever else Stem grows
+#   stem/           the broker configuration, and whatever else Stem grows
 #   brain.service    installed as the systemd unit
 #   4g-watchdog.*    the uplink watchdog: its script, its unit and its timer
+#   attach.sh        the probe-rs wrapper, which re-execs its own copy on the Pi
 #
-# The workspaces and the definitions are not optional: each rig's build reads its own `.qxw`
-# and resolves it against `fixtures/`, and a missing definition fails the build deliberately,
+# `ball/` is absent on purpose: the Pi flashes that firmware and never builds it, so it gets
+# the binary, below, and not the crate.
+#
+# The workspace and the definitions are not optional: the build reads `claw.qxw` and
+# resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build claw-brain mage-brain fixtures eyeball stem)
+DIRECTORIES=(cortex cortex-build brain fixtures stem)
 FILES=(
-    Cargo.toml claw.qxw mage.qxw brain.service remote-deploy.sh
-    4g-watchdog.sh 4g-watchdog.service 4g-watchdog.timer
+    Cargo.toml claw.qxw brain.service remote-deploy.sh
+    4g-watchdog.sh 4g-watchdog.service 4g-watchdog.timer attach.sh
 )
 
 step "rsync sources to $PI:$PI_DIR"
@@ -73,9 +74,13 @@ for directory in "${DIRECTORIES[@]}"; do
 done
 rsync -az --checksum "${FILES[@]}" "$PI:$PI_DIR/"
 
-# --- 2. Build and restart on the Pi ---------------------------------------
+step "rsync MCU binaries to $PI:$PI_DIR/binaries"
+ssh "$PI" "mkdir -p '$PI_DIR/binaries'"
+rsync -az "$BALL_BINARY" "$PI:$PI_DIR/binaries/ball"
+
+# --- 3. Build, restart and flash on the Pi --------------------------------
 step "run remote deploy on $PI"
-ssh "$PI" "bash $PI_DIR/remote-deploy.sh $RIG"
+ssh "$PI" "bash $PI_DIR/remote-deploy.sh"
 
 step "deploy complete"
 say "The installation of the Open Claw has completed. Go check it out"

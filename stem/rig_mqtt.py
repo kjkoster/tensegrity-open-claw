@@ -23,12 +23,12 @@ running `systemctl stop`, the second is a segfault, an OOM kill, or a Pi that lo
 Retained on all three, deliberately. The question a health topic answers is asked by whoever
 subscribes *after* the interesting moment, and an unretained tree is empty exactly then.
 
-No leading slash: `health/eyeball`, not `/health/eyeball`. A leading slash is legal MQTT but
+No leading slash: `health/stem`, not `/health/stem`. A leading slash is legal MQTT but
 creates an anonymous empty first level, and `health/#` then matches nothing.
 
 ## Everything else
 
-Telemetry publishes under the service's own name — `stem/specs`, `eyeball/status` — so the
+Telemetry publishes under the service's own name — `stem/specs`, `brain/identity` — so the
 tree says which process asserted a thing, and a dead process's topics stop moving instead of
 being quietly taken over.
 

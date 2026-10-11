@@ -8,7 +8,7 @@ Wants=mosquitto.service
 After=mosquitto.service
 
 [Service]
-# Its own venv, not eyeball's. Stem must not inherit another daemon's dependencies — it has to
+# Its own venv, not a shared one. Stem must not inherit another daemon's dependencies — it has to
 # keep reporting when that daemon is exactly what has gone wrong.
 ExecStart=/opt/stem/venv/bin/python3 /usr/local/bin/stem.py
 Restart=always
@@ -19,7 +19,7 @@ RestartSec=5
 # No real-time scheduling either, and a positive Nice on top: everything this daemon reads is
 # slow-moving, and none of it is worth a single late DMX frame.
 Nice=10
-# The three cores eyeball uses. Core 3 is brain's, and a health daemon waking every thirty
+# Every core but one. Core 3 is brain's, and a health daemon waking every thirty
 # seconds has no business on it.
 CPUAffinity=0 1 2
 

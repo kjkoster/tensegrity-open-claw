@@ -1,6 +1,6 @@
 [package]
 edition      = "2024"
-name         = "mage-brain"
+name         = "brain"
 rust-version = "1.96"
 version      = "0.1.0"
 

@@ -12,17 +12,11 @@ The system is two parts:
 - **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg,
   plus a pinspot. What is patched where lives in `claw.qxw`, not in this file.
 
-The cabinet drives **two rigs**, one at a time: the claw described above, and the mage rig —
-same Pi, same HAT, a camera instead of a microphone. Both binaries are always built and
-installed, and `/usr/local/bin/brain` is a symlink selecting which one runs; see
-[Selecting the rig](#selecting-the-rig). [`MAGE.md`](MAGE.md) is the mage rig's own reference.
-
 Deep dives. None of them describe what the code does today — that is what this file and the
 code itself are for:
 
 - [`DESIGN.md`](DESIGN.md) — the system's architectural decisions, and what is not built yet.
 - [`SHOW.md`](SHOW.md) — the show: moods, behaviours, and the pipeline that will drive them.
-- [`MAGE.md`](MAGE.md) — the second rig, and what the two share.
 - [`PET-THE-DOG.md`](PET-THE-DOG.md) — watchdog layering for unattended operation.
 - [`TODO.md`](TODO.md) — the empirical tests, and open items.
 
@@ -56,7 +50,8 @@ macOS.
 
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
   `10.0.10.1`, leased from `10.0.10.10+`. The Pi's `hostapd.conf` is the only source of
-  truth for the SSID and passphrase.
+  truth for the SSID and passphrase. The balls have both compiled in, in
+  `ball/src/config.rs`, so changing either means changing it there and re-flashing.
 - The **Ethernet port** is exposed to a dev laptop for SSH.
 
 ### 4G uplink
@@ -120,6 +115,7 @@ records is *how* you set them on each model, which does not change.
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
 | 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
+| ESP32-C3 MCUs (the balls) | USB serial/JTAG | Flashed by `deploy.sh` while plugged into the Pi; see [Ball fixtures](#ball-fixtures-esp32-c3). Not needed for `brain` itself. |
 | HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Mode *and* address are DIP switches, not a menu — set the binary pattern from the datasheet in `reference/`. |
 
 ## OS configuration (once)
@@ -203,29 +199,7 @@ DMX **OUT** of the last device on the bus.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
 - The WiFi bring-up units belong here too once documented; the 4G watchdog's are above.
 
-### Selecting the rig
-
-`/usr/local/bin/brain` is a **symlink** to `claw-brain` or `mage-brain`, and the unit execs
-through it. The symlink is the state — there is no second file to go stale. A deploy moves it
-only when you name a rig, and otherwise leaves it exactly as found:
-
-```
-./deploy.sh mage-brain          # from the Mac: deploy, select the mage rig, restart
-./deploy.sh                     # deploy and restart whatever is already live
-```
-
-On the Pi, by hand:
-
-```
-readlink /usr/local/bin/brain                            # which rig is live
-sudo ln -sfn /usr/local/bin/mage-brain /usr/local/bin/brain
-sudo systemctl restart brain
-```
-
-`journalctl -u brain` also says so on every line: the running rig prefixes its log with its own
-name.
-
-`remote-deploy.sh` also installs `stem.service`, `eyeball.service`, the broker's `stem.conf` and
+`remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf` and
 the 4G watchdog's unit and timer (above). The systemd watchdog settings designed in
 [`PET-THE-DOG.md`](PET-THE-DOG.md) are **not built** — when they land, how to configure them
 belongs in this file. Folding the 4G watchdog's job into Stem, so there is one health daemon
@@ -236,32 +210,34 @@ rather than two overlapping ones, is an open item in [`TODO.md`](TODO.md).
 From the Mac at the repo root:
 
 ```
-./deploy.sh                 # build, install, restart the rig that is already selected
-./deploy.sh mage-brain      # … and point the symlink at the mage rig first
+./deploy.sh
 ```
 
 Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `remote-deploy.sh` there, which builds
-both rigs natively and installs `/usr/local/bin/claw-brain`, `/usr/local/bin/mage-brain` and
-the systemd unit. Naming a rig is the only thing that moves the symlink.
+`brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
+restarts the daemon.
 
-The cargo workspace is four crates:
+Before any of that, `deploy.sh` builds the `ball` firmware on the Mac. Only the binary goes to
+the Pi, as `tensegrity-open-claw/binaries/ball`, and the last thing `remote-deploy.sh` does is
+flash it onto every board it finds under `/dev/serial/by-id`.
+
+The cargo workspace is three crates:
 
 | | |
 |---|---|
-| `cortex/` | everything both rigs use: capture, features, noise, both transports, the frame loop |
-| `cortex-build/` | the QLC+ ingest, a build-dependency of both rigs |
-| `claw-brain/` | the claw: `claw.qxw`'s patch and the sparkle show |
-| `mage-brain/` | the mage rig: `mage.qxw`'s patch and its show |
+| `cortex/` | everything under the show: capture, features, noise, both transports, the frame loop |
+| `cortex-build/` | the QLC+ ingest, a build-dependency of the rig crate |
+| `brain/` | the claw: `claw.qxw`'s patch and the sparkle show |
 
-A rig crate is two files: a `build.rs` naming its workspace, and a `main.rs` that includes the
-generated patch and writes the show.
+The rig crate is two files: a `build.rs` naming its workspace, and a `main.rs` that includes
+the generated patch and writes the show.
 
-The deploy ships **only what the Pi builds from** — the four crates, both `.qxw` workspaces,
+The deploy ships **only what the Pi builds from** — the three crates, `claw.qxw`,
 `fixtures/`, `brain.service` and `remote-deploy.sh`. The list is written out in `deploy.sh`
 rather than filtered by exclusions, so adding something is a decision; the design documents,
-the reference PDFs and the git history stay on the Mac. Both workspaces go because each rig's
-build compiles **its fixture patch and its scenes** in — so saving in QLC+ and deploying is
-all it takes to get an edited scene onto the rig.
+the reference PDFs and the git history stay on the Mac. The workspace goes because the build
+compiles **its fixture patch and its scenes** in — so saving in QLC+ and deploying is all it
+takes to get an edited scene onto the rig.
 
 > The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
 > hand — the deploy leaves it alone rather than removing things on the Pi on its own.
@@ -277,8 +253,8 @@ rig.
 fixtures sit; the `.qxf` definitions in `fixtures/` say *what their channels mean*. Scene
 reads both, resolves each patched fixture against its definition's mode, and generates a
 `patch` module with a struct per fixture — a named field per channel — plus a `scenes` module,
-into the rig crate that asked for them. `fixtures/` is one directory for both rigs; each build
-reads every definition and resolves only what its own patch names.
+into the rig crate that asked for them. The build reads every definition in `fixtures/` and
+resolves only what the patch names.
 
 **Why it happens at build time.** Ingesting rather than committing a generated file means
 there is no stale copy to go stale. `cargo` is told to watch the workspace, so saving in QLC+
@@ -323,17 +299,50 @@ outright, with a message naming the manufacturer and model.
 was built from:
 
 ```
-claw-brain: 7 fixtures
-claw-brain:   pinspot @ 1–5 — HQ Power VDPLPS36B2 LED Pinspot PAR36, 5 Channel
-claw-brain: 1 scenes
-claw-brain:   front_wash_warm (18 values)
+brain: 7 fixtures
+brain:   pinspot @ 1–5 — HQ Power VDPLPS36B2 LED Pinspot PAR36, 5 Channel
+brain: 1 scenes
+brain:   front_wash_warm (18 values)
 ```
-
-The prefix is the rig, which is also how you confirm the symlink points where you think — and
-the rig is what says which workspace this came from, since a rig has exactly one.
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
+
+---
+
+# Ball fixtures (ESP32-C3)
+
+An ESP32-C3 that joins the Pi's WiFi AP and listens for the sACN universe. The firmware is
+the `ball/` crate: `no_std` Rust on Embassy, built on the Mac for
+`riscv32imc-unknown-none-elf` with the stable toolchain. It is not a member of the cargo
+workspace the Pi builds; build it from inside its own directory:
+
+```
+cd ball && cargo build --release
+```
+
+Every board gets the same binary and identifies itself at boot by its WiFi station MAC.
+
+## Provisioning a new board
+
+A board has to be known in two places, under two different MACs:
+
+1. Plug it into the Pi and run `./deploy.sh`. It stops at the flash step with
+   `unknown device usb-Espressif_…` — add that name to `DEVICE_MAP` in `remote-deploy.sh`,
+   mapped to `ball`, and deploy again.
+2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
+   `Board` row to paste, then panics. Add the row to `BOARDS` in `ball/src/config.rs` with
+   the DMX address it should listen on, and deploy once more.
+
+## Watching a board
+
+```
+./attach.sh            # the only board attached
+./attach.sh 0          # by index in `probe-rs list`
+./attach.sh AC:A7      # by any unique part of the probe's serial
+```
+
+Runs from the Mac and attaches `probe-rs` on the Pi, which is where the boards are plugged in.
 
 ---
 
@@ -349,10 +358,9 @@ does not look like a wrong setting — it looks like broken software.
 | `rPAN` | `no` | Axis not reversed. |
 | `rTiL` | `no` | Axis not reversed. |
 
-`rPAN` and `rTiL` may be either way round, but **every head must agree**, and the geometry has
-to be told which way. A head with one axis reversed tracks DMX perfectly and lands nowhere
-near where the geometry says — which reads as a broken solver, not as a menu. The mage rig's
-`geometry.rs` carries a `Sense` per axis for exactly this, seeded to match the table above.
+`rPAN` and `rTiL` may be either way round, but **every head must agree**. A head with one
+axis reversed tracks DMX perfectly and lands nowhere near where the others do — which reads
+as broken aiming code, not as a menu.
 
 ---
 
@@ -361,8 +369,8 @@ near where the geometry says — which reads as a broken solver, not as a menu. 
 QLC+ does two jobs here and nothing else: taking the rig over by hand, and programming
 scenes. It is stock — no plugins, no patches.
 
-There is one workspace per rig — [`claw.qxw`](claw.qxw) and [`mage.qxw`](mage.qxw) —
-and each is the **source of truth** for what that rig has patched where. `cortex-build` reads
+The workspace is [`claw.qxw`](claw.qxw), and it is the **source of truth** for what the rig
+has patched where. `cortex-build` reads
 it at build time along with the `.qxf` definitions in `fixtures/`, so a change in QLC+ reaches
 the rig by saving and deploying — there is no second copy of the patch in the Rust sources to
 keep in step.
@@ -436,8 +444,8 @@ with a live universe cannot seize the rig by accident.
 6. `./deploy.sh`, then check the startup log names your scene:
 
    ```
-   claw-brain: 1 scenes
-   claw-brain:   front_wash_warm (18 values)
+   brain: 1 scenes
+   brain:   front_wash_warm (18 values)
    ```
 
    That line is the confirmation the build ingested the save. Scenes have no runtime role

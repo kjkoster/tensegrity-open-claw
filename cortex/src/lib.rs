@@ -1,9 +1,7 @@
-//! The shared crate: everything both rigs use, and the loop that runs their shows.
+//! Everything under the show, and the loop that runs it.
 //!
-//! The cabinet drives more than one sculpture, and only one runs at a time. The rigs diverge
-//! in the show and converge in everything under it, so they are separate binaries over this
-//! one library: a rig's fixtures are generated inside the rig's own crate, which makes
-//! reaching into the other rig's fixtures impossible rather than merely discouraged.
+//! The show and the patch generated from its QLC+ workspace live in the rig's own crate;
+//! what does not depend on which fixtures are patched lives here.
 //!
 //! A rig hands over a [`Rig`] and gets the frame loop, the audio pipeline, both transports
 //! and the takeover arbitration for it.
@@ -12,7 +10,6 @@ pub mod audio_features;
 pub mod clock;
 pub mod config;
 pub mod envelope;
-pub mod eyeball;
 pub mod latest;
 pub mod moving_head;
 pub mod perlin;
@@ -35,7 +32,7 @@ use signal_hook::{consts::SIGTERM, iterator::Signals};
 use std::net::UdpSocket;
 
 /// The name the brain wears on the broker: its health topic and the prefix on everything else
-/// it publishes. Not the binary's name — see where it is used.
+/// it publishes.
 const TELEMETRY_SERVICE: &str = "brain";
 
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
@@ -46,12 +43,11 @@ const TELEMETRY_SERVICE: &str = "brain";
 /// `show` is called once per frame with the latest audio features, the frame period in
 /// seconds, and the full 512-slot buffer to fill. It is a closure rather than a trait
 /// implementation because the boundary carries no meaning beyond "the rig fills the slot
-/// buffer" — when the intent frame lands it replaces the closure and neither rig's content
-/// moves.
+/// buffer" — when the intent frame lands it replaces the closure and the rig's content does
+/// not move.
 pub struct Rig {
-    /// The binary's own name, which prefixes every log line. `journalctl` then says which
-    /// rig is live without anyone having to read the symlink. Rigs pass
-    /// `env!("CARGO_PKG_NAME")`, so it cannot drift from the binary the symlink points at.
+    /// The binary's own name, which prefixes every log line. The rig passes
+    /// `env!("CARGO_PKG_NAME")`, so it cannot drift from the binary that is installed.
     pub name: &'static str,
     /// The generated patch, as plain data, so the startup log can name what this binary was
     /// built against — and so the frame width can be derived from it.
@@ -125,10 +121,8 @@ pub fn run(rig: Rig) -> ! {
         eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
     }
 
-    // The brain's own client. `brain` rather than the binary's name: only one rig runs at a
-    // time, and a subscriber asking whether the brain is alive should not have to know which
-    // sculpture is standing. Which one it is goes on `brain/identity`, retained, so that
-    // arrives with the answer rather than instead of it.
+    // The brain's own client. What it was built as and against goes on `brain/identity`,
+    // retained, so a subscriber arriving later still gets it.
     let (_telemetry, publisher, farewell) = telemetry::spawn(TELEMETRY_SERVICE);
     publisher.publish("identity/rig", name, true);
     publisher.publish("identity/universe", UNIVERSE.to_string(), true);

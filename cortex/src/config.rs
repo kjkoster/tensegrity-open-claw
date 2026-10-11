@@ -1,11 +1,7 @@
 //! All tunables in one place. The festival tuning loop is "edit numbers, rebuild, restart".
 //!
-//! One file for both rigs, because these describe the *cabinet* rather than the sculpture
-//! hanging off it: the same Pi, the same RS-485 HAT, the same audio interface, the same
-//! serial device, the same WireGuard address a console arrives on. `UNIVERSE` stays here for
-//! the same reason — only one rig runs at a time and both clock the one wire — and two
-//! constants that could disagree about which universe the HAT sends would be a worse failure
-//! than the sharing it avoids.
+//! These describe the *cabinet* rather than the sculpture hanging off it: the Pi, the RS-485
+//! HAT, the audio interface, the serial device, the WireGuard address a console arrives on.
 
 use std::net::Ipv4Addr;
 
@@ -56,7 +52,7 @@ pub const SACN_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 8, 0, 3);
 // breathing on the internal engine meanwhile.
 pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
-// Fixture addressing is not here: it is generated from each rig's QLC+ workspace into that
+// Fixture addressing is not here: it is generated from the rig's QLC+ workspace into the
 // rig's own `patch` module, the single source of truth for what is patched where.
 
 // ── Telemetry (the broker) ───────────────────────────────────────────────────
@@ -89,31 +85,6 @@ pub const MQTT_RETRY_MAX_S: u64 = 30;
 // the will firing and an orderly stop being recorded as a crash, so it is worth a moment — but
 // only a moment, because a wedged broker must never be able to hold up a shutdown.
 pub const MQTT_FAREWELL_MS: u64 = 500;
-
-// ── Eyeball (the vision sidecar) ─────────────────────────────────────────────
-// The landmark stream from the camera daemon. Cabinet-level like the audio device: one Pi,
-// one camera, one loopback port, whichever rig is live.
-//
-// Loopback, not the wildcard: the daemon and the brain are the same machine by construction,
-// and a wildcard bind would accept pose frames from anything that reached the Pi on any
-// interface — including the WiFi the fixtures join.
-pub const EYEBALL_BIND_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
-pub const EYEBALL_PORT: u16 = 9001;
-
-// How long a sighting stays actionable. Past this the show is being shown nobody, which is the
-// same answer for a dead daemon, a wedged one, and a lost camera — the three failures are
-// indistinguishable from here and want identical handling. Long enough to ride out several missed
-// frames at a pose rate that may only be 4–7 Hz, short enough that a dead camera does not leave
-// heads pointing at where someone used to be.
-pub const EYEBALL_STALE_US: u64 = 1_000_000;
-
-// Rebind backoff for the listener, matching the sACN receiver's: retrying rather than dying
-// means vision reappears whenever the daemon does, and the show keeps running meanwhile.
-pub const EYEBALL_BIND_RETRY_MAX_S: u64 = 30;
-
-// How often the landmark stream is logged while it is being brought up. Slower than the audio
-// status line because a pose frame is a paragraph, not a number.
-pub const EYEBALL_LOG_INTERVAL_S: f64 = 2.0;
 
 // ── Wired DMX-512 output (Zihatec RS-485 HAT; HARDWARE-DMX.md) ────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe

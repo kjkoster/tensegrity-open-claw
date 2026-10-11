@@ -12,9 +12,7 @@ use cortex::sparkle::{SparkleMapping, SparkleOut};
 
 // `patch` and `scenes`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained, and
-// there is no second copy of the patch to drift out of step with it. Generating them into
-// this crate rather than the shared one is also what keeps the rigs apart: the mage's
-// fixtures do not exist in this binary to be reached for.
+// there is no second copy of the patch to drift out of step with it.
 include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 
 fn main() {

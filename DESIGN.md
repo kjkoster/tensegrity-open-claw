@@ -9,7 +9,6 @@ workspace and changes too often to mirror in prose.
   hardware.
 - [`SHOW.md`](SHOW.md) — the show: what the sculpture actually does, and the generative
   pipeline that will drive it.
-- [`MAGE.md`](MAGE.md) — the second rig on the same cabinet, and the crate split it forced.
 - [`PET-THE-DOG.md`](PET-THE-DOG.md) — watchdog layering for unattended operation.
 - [`TODO.md`](TODO.md) — the empirical tests that settle the constants these designs assume.
 
@@ -22,10 +21,6 @@ Rust program on Linux (`brain`) that captures audio, runs a generative engine ov
 clocks the resulting universe out of an RS-485 HAT at 40 Hz. The same universe also goes out
 as E1.31 sACN over the network — no fixture listens to it, but it is what a monitor or a
 console works against, and it is the path an external override arrives on.
-
-`brain` is a symlink, not a binary: the cabinet drives two sculptures and one of them is not
-audio-driven at all. Everything this document says about the show below is the claw's;
-[`MAGE.md`](MAGE.md) covers the other rig and what the two hold in common.
 
 The Pi acts as a WiFi access point, and is reachable from the programming Mac over a
 WireGuard tunnel — which is how both deployment and console traffic get there.
@@ -207,8 +202,7 @@ the order they were written down, which is not the order they get built in — �
 The claw's heads are patched and its daemon does not touch them. Everything below assumes
 they move, so this comes first.
 
-What it takes is no longer a build of its own. The mage rig needed the same machinery sooner
-and it landed in `cortex`: pan and tilt as 16-bit pairs, travel and park values read from the
+What it takes is no longer a build of its own. The machinery is already in `cortex`: pan and tilt as 16-bit pairs, travel and park values read from the
 definitions, a rate limiter in degrees per second with the floor these heads impose. So this
 is the claw's show reaching for what already exists, plus the parts that are the claw's
 alone — the aim points of §4.8, and the signal-loss blackout confirmed on the fixtures

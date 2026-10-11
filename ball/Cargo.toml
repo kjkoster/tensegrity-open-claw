@@ -1,0 +1,39 @@
+[package]
+edition      = "2024"
+name         = "ball"
+rust-version = "1.95"
+version      = "0.1.0"
+
+[dependencies]
+esp-hal             = { version = "~1.1.0", features = ["esp32c3", "unstable"] }
+esp-rtos            = { version = "0.3.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32c3"] }
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32c3"] }
+esp-radio           = { version = "0.18.0", features = ["esp-alloc", "esp32c3", "unstable", "wifi"] }
+esp-alloc           = "0.10.0"
+
+embassy-executor = "0.10.0"
+embassy-sync     = "0.8.0"
+embassy-net      = { version = "0.9.1", features = [
+  "dhcpv4",
+  "medium-ethernet",
+  "multicast",
+  "udp",
+] }
+embassy-time     = "0.5.0"
+
+critical-section = "1.2.0"
+rtt-target       = "0.6.2"
+static_cell      = "2.1.1"
+
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug         = 2
+lto           = 'fat'
+opt-level     = 's'

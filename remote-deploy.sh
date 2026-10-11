@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 #
 # remote-deploy.sh — runs ON claw-pi (pushed there by deploy.sh).
-# Builds both rig binaries natively, installs them, optionally selects a rig, and restarts.
-#
-#   bash remote-deploy.sh                 restart whichever rig the symlink already selects
-#   bash remote-deploy.sh mage-brain      point the symlink at the mage rig, then restart
+# Builds the brain natively, installs it and restarts it, then flashes every attached MCU
+# based on its /dev/serial/by-id name.
 #
 set -euo pipefail
 
@@ -14,9 +12,18 @@ set -euo pipefail
 # second copy of the path here could disagree with the one deploy.sh rsyncs to, and the
 # result would be a clean deploy that rebuilt and reinstalled the previous sources.
 REPO="$(cd "$(dirname "$0")" && pwd)"
-RIG="${1:-}"
 
 step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
+
+# ── Device-to-binary table ────────────────────────────────────────────────────
+# Map each board's full /dev/serial/by-id name to the binary it should receive.
+# Add one entry per board; the script fails if a connected device is not listed.
+#
+# To find a board's ID: ls /dev/serial/by-id/  (while the board is plugged in)
+#
+declare -A DEVICE_MAP=(
+)
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Each Python daemon gets its own venv and its own pip install, so its requirements.txt is the
 # only statement of what it needs and the deploy is what acts on it. Separate venvs rather than
@@ -41,11 +48,6 @@ python_daemon() {
     # between a deploy that needs the uplink and one that does not.
     sudo "$venv/bin/pip" install -r "$requirements"
 }
-
-case "$RIG" in
-    ""|claw-brain|mage-brain) ;;
-    *) echo "unknown rig '$RIG' — expected claw-brain or mage-brain" >&2; exit 1 ;;
-esac
 
 # --- 1. 4G uplink watchdog -------------------------------------------------
 # Ahead of everything else, for the same reason the broker goes ahead of the build and a
@@ -99,47 +101,25 @@ else
     echo "mosquitto not installed — skipping (sudo apt install mosquitto mosquitto-clients)"
 fi
 
-# --- 3. build both rigs natively on the Pi --------------------------------
-step "build claw-brain and mage-brain"
+# --- 3. build brain natively on the Pi ------------------------------------
+step "build brain"
 ( cd "$REPO" && cargo build --release )
 
-# --- 4. install both binaries ---------------------------------------------
-# Both rigs are always built and always installed. Switching rigs means travel and setup, so
-# which one is live is a decision made on site — and made explicitly, by naming it.
-step "install rig binaries"
-sudo install -m 0755 "$REPO/target/release/claw-brain" /usr/local/bin/claw-brain
-sudo install -m 0755 "$REPO/target/release/mage-brain" /usr/local/bin/mage-brain
-
-# The symlink is the state — the service execs through it and `readlink` reports which rig is
-# live, so there is no second file to go stale. A deploy moves it only when told which rig to
-# move it to; otherwise it is left exactly as found, because a deploy that could change rigs
-# on its own would be a rig change nobody asked for.
-#
-# -L, not -e, on the existence test: -e follows the link, so a selector pointing at something
-# that is not there would read as absent and get silently repointed at the claw — the same rig
-# change, arrived at by accident. A dangling selector is a state to report, not to guess at.
-if [ -n "$RIG" ]; then
-    sudo ln -sfn "/usr/local/bin/$RIG" /usr/local/bin/brain
-    echo "selected $RIG"
-elif [ ! -L /usr/local/bin/brain ] && [ ! -e /usr/local/bin/brain ]; then
-    sudo ln -sfn /usr/local/bin/claw-brain /usr/local/bin/brain
-    echo "created /usr/local/bin/brain → claw-brain"
-elif [ ! -e /usr/local/bin/brain ]; then
-    echo "WARNING: /usr/local/bin/brain points at $(readlink /usr/local/bin/brain), which does not exist."
-    echo "         Re-run with claw-brain or mage-brain; this script will not choose for you."
-fi
-
-# --- 5. brain daemon -------------------------------------------------------
+# --- 4. brain daemon -------------------------------------------------------
 step "install and restart brain daemon"
+# Removed first, so that what lands is a file of its own whatever was there before: a symlink
+# at this path must be replaced, never written through to the binary it points at.
+sudo rm -f /usr/local/bin/brain
+sudo install -m 0755 "$REPO/target/release/brain" /usr/local/bin/brain
 sudo install -m 0644 "$REPO/brain.service" /etc/systemd/system/brain.service
 sudo systemctl daemon-reload
 sudo systemctl enable brain
 sudo systemctl restart brain
-echo "brain daemon restarted: $(readlink /usr/local/bin/brain)"
+echo "brain daemon restarted"
 
-# --- 6. Stem ---------------------------------------------------------------
-# rig_mqtt.py installs beside its importers rather than into a site-packages directory: both
-# daemons are run by absolute path, which puts /usr/local/bin first on their import path, and
+# --- 5. Stem ---------------------------------------------------------------
+# rig_mqtt.py installs beside its importer rather than into a site-packages directory: the
+# daemon is run by absolute path, which puts /usr/local/bin first on its import path, and
 # one file copy beats owning a package layout for a single shared module.
 step "install and restart Stem"
 sudo install -m 0755 "$REPO/stem/stem.py" /usr/local/bin/stem.py
@@ -154,75 +134,24 @@ else
     echo "WARNING: stem did not start — journalctl -u stem -n 40"
 fi
 
-# --- 7. eyeball's pose model -----------------------------------------------
-# MoveNet SinglePose Lightning, int8, from the TF Hub lite-model store — the same model the
-# TensorFlow Hub MoveNet tutorial uses. Fetched once and then left alone: it is a few megabytes
-# over a 4G modem, and it never changes.
-#
-# Not committed to the repository. It is a binary blob with its own licence that is reproducible
-# from a URL, which is the definition of something a checkout should not carry.
-MODEL_DIR=/usr/local/share/eyeball
-MODEL_TFLITE="$MODEL_DIR/movenet.tflite"
-# The URL the TF Hub MoveNet tutorial itself uses. tfhub.dev now redirects into Kaggle Models,
-# which is why this follows redirects and then checks what actually arrived — a redirect that
-# lands on a sign-in page returns HTTP 200 and an HTML document.
-#
-# Overridable, because this is the one line here most likely to rot: Google has moved this file
-# once already and the daemon does not care where it came from.
-MODEL_URL="${EYEBALL_MODEL_URL:-https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/tflite/int8/4?lite-format=tflite}"
-
-step "eyeball pose model"
-if [ -f "$MODEL_TFLITE" ]; then
-    echo "already present: $MODEL_TFLITE ($(stat -c %s "$MODEL_TFLITE") bytes)"
-else
-    sudo mkdir -p "$MODEL_DIR"
-    echo "fetching MoveNet SinglePose Lightning int8"
-    sudo curl -fSL --retry 3 --connect-timeout 20 -o "$MODEL_TFLITE.part" "$MODEL_URL"
-
-    # A TFLite flatbuffer carries the identifier "TFL3" at offset 4. Checking it is what turns
-    # "that URL now redirects to a sign-in page" into one legible line here, rather than into a
-    # daemon that loads an HTML document as a model and fails somewhere less obvious.
-    if [ "$(sudo head -c 8 "$MODEL_TFLITE.part" | tail -c 4)" = "TFL3" ]; then
-        sudo mv "$MODEL_TFLITE.part" "$MODEL_TFLITE"
-        echo "installed: $MODEL_TFLITE ($(stat -c %s "$MODEL_TFLITE") bytes)"
-    else
-        sudo rm -f "$MODEL_TFLITE.part"
-        echo "ERROR: what came back from $MODEL_URL is not a TFLite model." >&2
-        echo "       Google moved TF Hub to Kaggle, so this URL may have gone with it." >&2
-        echo "       Either point EYEBALL_MODEL_URL at a working one and re-run:" >&2
-        echo "         EYEBALL_MODEL_URL=... ./deploy.sh" >&2
-        echo "       or fetch MoveNet SinglePose Lightning (int8 tflite) by hand and put it at" >&2
-        echo "       $MODEL_TFLITE — the deploy then leaves it alone." >&2
-        exit 1
-    fi
-fi
-
-# --- 8. eyeball daemon -----------------------------------------------------
-# Installed and restarted alongside the brain, but never coupled to it: no ordering, no
-# dependency, in either direction. A dead eyeball is a staleness timeout the show already
-# handles, and a unit dependency would turn that degraded show into a stopped one.
-#
-# Its restart is therefore also allowed to fail without failing the deploy — a Pi with no
-# camera on the link, or without OpenCV yet, is a Pi whose rig still has to come up.
-step "install and restart eyeball daemon"
-sudo install -m 0755 "$REPO/eyeball/eyeball.py" /usr/local/bin/eyeball.py
-sudo install -m 0644 "$REPO/eyeball/eyeball.service" /etc/systemd/system/eyeball.service
-# Seeded once, never updated. The camera's whole configuration lives in this file, including the
-# password and the crop that gets retuned on site against the live preview — so a deploy that
-# copied over it would undo an evening's tuning and put a placeholder password back. A fresh card
-# gets a working file; every card after that keeps its own, and changes worth having are carried
-# back into the repository by hand.
-if [ ! -e /etc/default/eyeball ]; then
-    sudo install -m 0600 "$REPO/eyeball/eyeball.default" /etc/default/eyeball
-    echo "seeded /etc/default/eyeball — set EYEBALL_CAMERA_PASSWORD before the camera will answer"
-fi
-python_daemon /opt/eyeball/venv "$REPO/eyeball/requirements.txt"
-sudo systemctl daemon-reload
-sudo systemctl enable eyeball
-if sudo systemctl restart eyeball; then
-    echo "eyeball daemon restarted"
-else
-    echo "WARNING: eyeball did not start — journalctl -u eyeball -n 40"
-fi
+# --- 6. flash attached microcontrollers ------------------------------------
+# Last, so a board that is not in DEVICE_MAP fails the deploy only after the rig is back up.
+# Absent boards are simply skipped.
+step "flash attached microcontrollers"
+shopt -s nullglob
+found=0
+for dev in /dev/serial/by-id/*; do
+  found=1
+  name="$(basename "$dev")"
+  if [[ -v DEVICE_MAP["$name"] ]]; then
+    binary="${DEVICE_MAP[$name]}"
+    echo ">> $name  -> $binary"
+    espflash flash --port "$dev" "$REPO/binaries/$binary"
+  else
+    echo "ERROR: unknown device $name — add it to DEVICE_MAP in remote-deploy.sh" >&2
+    exit 1
+  fi
+done
+[ "$found" -eq 0 ] && echo "no MCUs attached; nothing to flash."
 
 step "remote deploy complete"

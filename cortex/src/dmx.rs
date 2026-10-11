@@ -78,8 +78,8 @@ pub fn encode(
 /// every fixture — including the highest-addressed — finds its slots and honours the flag;
 /// only the flag matters, not the contents.
 ///
-/// The width comes from the rig rather than a constant: each rig's patch spans its own
-/// number of slots, and this crate is compiled once for both.
+/// The width comes from the rig rather than a constant: how many slots the patch spans is
+/// decided in QLC+, not in this crate.
 pub fn encode_release(
     universe: u16,
     sequence: u8,

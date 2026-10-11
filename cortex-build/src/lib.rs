@@ -1,9 +1,7 @@
 //! Ingests the patch and the scenes from a QLC+ workspace at build time.
 //!
-//! One rig, one workspace: each rig crate's build script calls [`ingest`] with its own
-//! `.qxw`, and the fixtures it names are generated inside that rig's crate. A rig can
-//! therefore only reach the fixtures it patched — the other rig's constants do not exist
-//! in its address space to reach for.
+//! One rig, one workspace: the rig crate's build script calls [`ingest`] with its own
+//! `.qxw`, and the fixtures it names are generated inside that rig's crate.
 //!
 //! QLC+ stores scene values **fixture-relative**:
 //!
