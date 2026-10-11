@@ -12,26 +12,22 @@
  <Channel Name="Onboard LED" Preset="IntensityDimmer"/>
  <Channel Name="led-white" Preset="IntensityWhite"/>
  <Channel Name="led-tbd" Preset="IntensityDimmer"/>
- <Channel Name="Motor time coarse">
+ <Channel Name="Motor">
   <Group Byte="0">Speed</Group>
-  <Capability Min="0" Max="255">Motor run time, high byte (25.6 s per step)</Capability>
- </Channel>
- <Channel Name="Motor time fine">
-  <Group Byte="1">Speed</Group>
-  <Capability Min="0" Max="255">Motor run time, low byte (0.1 s per step)</Capability>
+  <Capability Min="0" Max="127">Off</Capability>
+  <Capability Min="128" Max="255">On</Capability>
  </Channel>
  <Channel Name="Keep awake">
   <Group Byte="0">Maintenance</Group>
   <Capability Min="0" Max="0">Sleep (reserved, not implemented)</Capability>
   <Capability Min="1" Max="255">Stay awake 1-255 s after last packet (reserved, not implemented)</Capability>
  </Channel>
- <Mode Name="6 channel">
+ <Mode Name="5 Channel">
   <Channel Number="0">Onboard LED</Channel>
   <Channel Number="1">led-white</Channel>
   <Channel Number="2">led-tbd</Channel>
-  <Channel Number="3">Motor time coarse</Channel>
-  <Channel Number="4">Motor time fine</Channel>
-  <Channel Number="5">Keep awake</Channel>
+  <Channel Number="3">Motor</Channel>
+  <Channel Number="4">Keep awake</Channel>
   <Head>
    <Channel>1</Channel>
    <Channel>2</Channel>

@@ -9,20 +9,46 @@ use embassy_sync::{
 /// single waker, and a second waiter on it would starve.
 pub const DMX_CONSUMERS: usize = 1;
 
-/// The shared latest DMX value, written by the sACN listener and observed by each consumer.
-pub type DmxWatch = Watch<CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
+/// The shared latest DMX state, written by the sACN listener and observed by each consumer.
+pub type DmxWatch = Watch<CriticalSectionRawMutex, DmxState, DMX_CONSUMERS>;
 /// Producer handle into [`DmxWatch`] (held by the sACN listener).
-pub type DmxSender = Sender<'static, CriticalSectionRawMutex, DmxValue, DMX_CONSUMERS>;
+pub type DmxSender = Sender<'static, CriticalSectionRawMutex, DmxState, DMX_CONSUMERS>;
+
+/// What the universe last said, or that it has stopped saying anything.
+///
+/// Losing the universe is a state of its own and not a value: a value cannot tell a sender
+/// that holds a channel steady from one that is gone, and the difference is whether the
+/// last thing it asked for still stands.
+#[derive(Clone, Copy, PartialEq)]
+pub enum DmxState {
+    Live(DmxValue),
+    Lost,
+}
 
 /// One ball's consecutive DMX slots, starting at its base address.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct DmxValue([u8; DmxValue::LEN]);
 
 impl DmxValue {
-    pub const LEN: usize = 6;
+    pub const LEN: usize = 5;
+
+    /// Where a switched channel turns on: the upper half of the range is on, the lower half
+    /// off, so a console's 0 and 255 land on the two states with the widest margin.
+    const ON_THRESHOLD: u8 = 128;
 
     pub fn new(slots: [u8; Self::LEN]) -> Self {
         Self(slots)
+    }
+
+    /// The level of the onboard status LED: the first channel of the ball's mode in
+    /// `fixtures/ball.qxf`.
+    pub fn onboard_led(self) -> u8 {
+        self.0[0]
+    }
+
+    /// Whether the motor is asked to run: the fourth channel of the mode.
+    pub fn motor(self) -> bool {
+        self.0[3] >= Self::ON_THRESHOLD
     }
 }
 

@@ -1,6 +1,3 @@
-use core::f32::consts::TAU;
-
-use embassy_time::{Duration, Ticker};
 use esp_hal::{
     gpio::DriveMode,
     ledc::{
@@ -16,9 +13,6 @@ use static_cell::StaticCell;
 /// The status LED's pin (board label D6). It doubles as the chip's default UART0 TX, so
 /// nothing in this firmware may log over UART0: every byte would show on the LED.
 pub type StatusLedPin = GPIO21<'static>;
-
-const FADE_FREQUENCY_HZ: f32 = 3.0;
-const UPDATE_RATE_HZ: u64 = 200;
 
 // 5 kHz at 13 bits is the finest resolution the 80 MHz APB clock divides down to at this
 // frequency; both are far beyond what the eye resolves as flicker or steps.
@@ -68,24 +62,5 @@ impl StatusLed {
         let duty = MAX_DUTY - u32::from(brightness) * MAX_DUTY / u32::from(u8::MAX);
         // Not `set_duty`: that takes whole percents, which fade in visible steps.
         self.channel.set_duty_hw(duty);
-    }
-}
-
-/// Brightness follows (1 + sin(2π · f · t)) / 2.
-#[embassy_executor::task]
-pub async fn sine_fade(led: StatusLed) -> ! {
-    let mut ticker = Ticker::every(Duration::from_hz(UPDATE_RATE_HZ));
-    let phase_step = TAU * FADE_FREQUENCY_HZ / UPDATE_RATE_HZ as f32;
-    let mut phase = 0.0;
-    loop {
-        let level = (1.0 + libm::sinf(phase)) / 2.0;
-        led.set_brightness(libm::roundf(level * f32::from(u8::MAX)) as u8);
-
-        phase += phase_step;
-        // Kept within one turn so the phase never grows past f32's precision.
-        if phase >= TAU {
-            phase -= TAU;
-        }
-        ticker.next().await;
     }
 }

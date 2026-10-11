@@ -2,12 +2,16 @@ use embassy_net::{
     Stack,
     udp::{PacketMetadata, UdpSocket},
 };
-use embassy_time::{Duration, with_timeout};
+use embassy_time::{Duration, Instant, with_deadline};
 use rtt_target::rprintln;
 
-use crate::models::{DmxConfig, DmxSender, DmxValue};
+use crate::models::{DmxConfig, DmxSender, DmxState, DmxValue};
 
-const UNIVERSE_TIMEOUT: u64 = 5; // seconds
+// The E1.31 network-data-loss timeout: a universe silent for this long is lost, and what
+// must not be left running on a stale value is told so.
+const DATA_LOSS_TIMEOUT: Duration = Duration::from_millis(2500);
+// A universe silent for this long is taken to be a dead socket and not a quiet sender.
+const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 
 // ACN Packet Identifier at bytes 4..16 of every E1.31 packet.
 const ACN_ID: &[u8; 12] = b"ASC-E1.17\0\0\0";
@@ -48,8 +52,9 @@ impl Buffers {
     }
 }
 
-/// Publishes to `dmx_value` whenever the DMX value at the configured address changes.
-/// Returns on timeout so the caller can call it again, which binds a fresh socket and
+/// Publishes to `dmx_state` whenever the DMX value at the configured address changes, and
+/// when the universe has been silent for the data-loss timeout.
+/// Returns on the socket timeout so the caller can call it again, which binds a fresh socket and
 /// sends a fresh IGMP join. Rejoining the multicast group on the same socket after a
 /// timeout is not sufficient: the socket may be stale from the WiFi disconnect and
 /// embassy_net may not deliver packets to it after reconnect.
@@ -64,7 +69,7 @@ impl Buffers {
 pub(crate) async fn listen(
     network_stack: Stack<'static>,
     config: DmxConfig,
-    dmx_value: &DmxSender,
+    dmx_state: &DmxSender,
     buffers: &mut Buffers,
 ) {
     let multicast = config.multicast_address();
@@ -87,34 +92,40 @@ pub(crate) async fn listen(
     rprintln!("dmx universe:   {}", config.universe());
     rprintln!("sacn multicast: {}:{}", multicast, config.sacn_port());
 
+    let publish = |state: DmxState| {
+        dmx_state.send_if_modified(|current| {
+            let changed = *current != Some(state);
+            *current = Some(state);
+            changed
+        });
+    };
+
     let mut pkt_buf = [0u8; MAX_PACKET_LEN];
+    // Counted from the last packet for our universe and not from the last datagram, so a
+    // stranger on the port cannot keep a lost universe looking alive.
+    let mut last_heard = Instant::now();
     loop {
-        match with_timeout(
-            Duration::from_secs(UNIVERSE_TIMEOUT),
-            socket.recv_from(&mut pkt_buf),
-        )
-        .await
-        {
+        let lost = last_heard.elapsed() >= DATA_LOSS_TIMEOUT;
+        let deadline = last_heard + if lost { SOCKET_TIMEOUT } else { DATA_LOSS_TIMEOUT };
+        match with_deadline(deadline, socket.recv_from(&mut pkt_buf)).await {
             Ok(Ok((n, _))) => {
                 let value = parse_e131_slots(&pkt_buf[..n], config.universe(), config.address());
                 if let Some(value) = value {
-                    dmx_value.send_if_modified(|current| {
-                        let changed = *current != Some(value);
-                        *current = Some(value);
-                        changed
-                    });
+                    last_heard = Instant::now();
+                    publish(DmxState::Live(value));
                 }
             }
             Ok(Err(e)) => {
                 rprintln!("recv_from error: {:?}", e);
             }
-            Err(_) => {
+            Err(_) if lost => {
                 rprintln!(
                     "no universe for {} seconds, recreating socket",
-                    UNIVERSE_TIMEOUT
+                    SOCKET_TIMEOUT.as_secs()
                 );
                 return;
             }
+            Err(_) => publish(DmxState::Lost),
         }
     }
 }

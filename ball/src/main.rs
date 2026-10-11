@@ -10,11 +10,13 @@
 mod config;
 mod led;
 mod models;
+mod motor;
 mod sacn;
 mod wifi;
 
 use embassy_executor::Spawner;
 use embassy_net::Stack;
+use embassy_time::with_deadline;
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
     efuse::{self, InterfaceMacAddress},
@@ -22,7 +24,7 @@ use esp_hal::{
     rng::Rng,
     timer::timg::TimerGroup,
 };
-use models::{DmxConfig, DmxWatch};
+use models::{DmxConfig, DmxState, DmxWatch};
 use rtt_target::rprintln;
 
 extern crate alloc;
@@ -37,18 +39,18 @@ fn panic(panic_info: &core::panic::PanicInfo) -> ! {
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// The latest DMX value off the wire. See `models::DMX_CONSUMERS`.
-static DMX_VALUE: DmxWatch = DmxWatch::new();
+// The latest DMX state off the wire. See `models::DMX_CONSUMERS`.
+static DMX_STATE: DmxWatch = DmxWatch::new();
 
 #[embassy_executor::task]
 async fn sacn_listener(config: DmxConfig, network_stack: Stack<'static>) -> ! {
     let mut buffers = sacn::Buffers::new();
-    let dmx_value = DMX_VALUE.sender();
+    let dmx_state = DMX_STATE.sender();
     loop {
         network_stack.wait_config_up().await;
         // listen() returns on a universe timeout; calling it again rejoins with a
         // fresh socket.
-        sacn::listen(network_stack, config, &dmx_value, &mut buffers).await;
+        sacn::listen(network_stack, config, &dmx_state, &mut buffers).await;
     }
 }
 
@@ -70,10 +72,10 @@ async fn main(spawner: Spawner) -> ! {
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    // Before anything that can wait or panic, so the fade shows the firmware is alive
-    // while the network is still coming up.
+    // Before anything that can wait or panic, so both pins are driven and the LED and the
+    // motor are held off until the rig says otherwise.
     let status_led = led::StatusLed::new(peripherals.LEDC, peripherals.GPIO21);
-    spawner.spawn(led::sine_fade(status_led).unwrap());
+    let mut motor = motor::Motor::new(peripherals.GPIO7);
 
     rprintln!("");
     rprintln!("ball firmware started");
@@ -104,9 +106,32 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
 
-    let mut dmx_value = DMX_VALUE.receiver().unwrap();
+    let mut dmx_state = DMX_STATE.receiver().unwrap();
     loop {
-        let value = dmx_value.changed().await;
-        rprintln!("dmx:            {:?}", value);
+        // A run in progress bounds the wait, because nothing arrives from a rig that simply
+        // holds the motor on, and that is the case the bound is for.
+        let state = match motor.deadline() {
+            Some(deadline) => with_deadline(deadline, dmx_state.changed()).await.ok(),
+            None => Some(dmx_state.changed().await),
+        };
+        match state {
+            Some(DmxState::Live(value)) => {
+                status_led.set_brightness(value.onboard_led());
+                motor.follow(value.motor());
+            }
+            // Only the motor: it is the one output that does harm when left running on the
+            // word of a sender that is gone.
+            Some(DmxState::Lost) => {
+                rprintln!("universe lost, stopping the motor");
+                motor.trip();
+            }
+            None => {
+                rprintln!(
+                    "motor ran for {} seconds, stopping it",
+                    motor::MAX_RUN.as_secs()
+                );
+                motor.trip();
+            }
+        }
     }
 }

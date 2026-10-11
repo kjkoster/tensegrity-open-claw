@@ -9,11 +9,15 @@ use cortex::audio_features::AudioFeatures;
 use cortex::config as cfg;
 use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
+use std::f64::consts::TAU;
 
 // `patch` and `scenes`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained, and
 // there is no second copy of the patch to drift out of step with it.
 include!(concat!(env!("OUT_DIR"), "/rig.rs"));
+
+/// How fast the ball's onboard LED fades up and down.
+const BALL_LED_HZ: f64 = 1.0;
 
 fn main() {
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
@@ -25,6 +29,7 @@ fn main() {
         cfg::SEEDS[2],
         cfg::WHITE_MODE_PERLIN_SEED,
     );
+    let mut ball_led_phase = 0.0_f64;
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
@@ -44,6 +49,14 @@ fn main() {
             fill_yara(slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
             fill_yara(slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
             fill_yara(slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
+
+            // A sine on the ball's onboard LED, so that a ball following the rig is told
+            // apart at a glance from one that is not. Kept within one turn so the phase
+            // never grows past the precision of an f64.
+            ball_led_phase = (ball_led_phase + TAU * BALL_LED_HZ * dt) % TAU;
+            patch::BALL_5
+                .onboard_led
+                .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
         }),
     })
 }

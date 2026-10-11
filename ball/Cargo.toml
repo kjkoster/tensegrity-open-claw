@@ -24,7 +24,6 @@ embassy-net      = { version = "0.9.1", features = [
 ] }
 embassy-time     = "0.5.0"
 
-libm        = "0.2.15"
 rtt-target  = "0.6.2"
 static_cell = "2.1.1"
 

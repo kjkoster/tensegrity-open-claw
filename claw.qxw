@@ -12,7 +12,7 @@
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
     <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
-     <PluginParameters UniverseChannels="205" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
+     <PluginParameters UniverseChannels="204" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
@@ -62,12 +62,12 @@
   <Fixture>
    <Manufacturer>Tensegrity</Manufacturer>
    <Model>Ball</Model>
-   <Mode>6 channel</Mode>
+   <Mode>5 Channel</Mode>
    <ID>4</ID>
    <Name>Ball [5]</Name>
    <Universe>0</Universe>
    <Address>199</Address>
-   <Channels>6</Channels>
+   <Channels>5</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>CLF</Manufacturer>
