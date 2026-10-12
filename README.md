@@ -68,9 +68,9 @@ The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs 
 
 | Repo | On the Pi |
 |---|---|
-| `4g-watchdog.sh` | `/usr/local/sbin/4g-watchdog.sh` |
-| `4g-watchdog.service` | `/etc/systemd/system/4g-watchdog.service` |
-| `4g-watchdog.timer` | `/etc/systemd/system/4g-watchdog.timer` |
+| `etc/4g-watchdog.sh` | `/usr/local/sbin/4g-watchdog.sh` |
+| `etc/4g-watchdog.service` | `/etc/systemd/system/4g-watchdog.service` |
+| `etc/4g-watchdog.timer` | `/etc/systemd/system/4g-watchdog.timer` |
 
 The timer runs the check every minute and is the only one of the two enabled — the service is
 `oneshot` and exists to be fired. On a consecutive run of failed checks it escalates, at minute
@@ -195,7 +195,7 @@ DMX **OUT** of the last device on the bus.
 
 `brain` runs as a service, installed and (re)started by `remote-deploy.sh`:
 
-- Unit `brain.service` → `/etc/systemd/system/brain.service` (`ExecStart=/usr/local/bin/brain`,
+- Unit `brain/brain.service` → `/etc/systemd/system/brain.service` (`ExecStart=/usr/local/bin/brain`,
   `Restart=always`, `RestartSec=5`, `After=network.target`, RT scheduling as above).
 - `sudo systemctl enable --now brain` / `sudo systemctl restart brain`.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
@@ -215,7 +215,7 @@ From the Mac at the repo root:
 ./deploy.sh
 ```
 
-Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `remote-deploy.sh` there, which builds
+Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `etc/remote-deploy.sh` there, which builds
 `brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
 restarts the daemon.
 
@@ -234,8 +234,13 @@ The cargo workspace is three crates:
 The rig crate is two files: a `build.rs` naming its workspace, and a `main.rs` that includes
 the generated patch and writes the show.
 
-The deploy ships **only what the Pi builds from** — the three crates, `claw.qxw`,
-`fixtures/`, `brain.service` and `remote-deploy.sh`. The list is written out in `deploy.sh`
+Beside the crates, a daemon's systemd unit lives in that daemon's directory
+(`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
+belonging to a daemon lives in `etc/`: the access point's configuration, the 4G watchdog and
+`remote-deploy.sh` itself.
+
+The deploy ships **only what the Pi builds from and installs** — the three crates,
+`claw.qxw`, `fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh`
 rather than filtered by exclusions, so adding something is a decision; the design documents,
 the reference PDFs and the git history stay on the Mac. The workspace goes because the build
 compiles **its fixture patch and its scenes** in — so saving in QLC+ and deploying is all it

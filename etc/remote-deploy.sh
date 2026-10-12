@@ -11,7 +11,7 @@ set -euo pipefail
 # Where the sources landed, asked of this script's own location rather than spelled out. A
 # second copy of the path here could disagree with the one deploy.sh rsyncs to, and the
 # result would be a clean deploy that rebuilt and reinstalled the previous sources.
-REPO="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
 
@@ -64,9 +64,9 @@ python_daemon() {
 # Only the timer is enabled. The service is `oneshot` and deliberately has no `[Install]`
 # section — something has to decide when the check runs, and that is the timer's whole job.
 step "install 4G uplink watchdog"
-sudo install -m 0755 "$REPO/4g-watchdog.sh" /usr/local/sbin/4g-watchdog.sh
-sudo install -m 0644 "$REPO/4g-watchdog.service" /etc/systemd/system/4g-watchdog.service
-sudo install -m 0644 "$REPO/4g-watchdog.timer" /etc/systemd/system/4g-watchdog.timer
+sudo install -m 0755 "$REPO/etc/4g-watchdog.sh" /usr/local/sbin/4g-watchdog.sh
+sudo install -m 0644 "$REPO/etc/4g-watchdog.service" /etc/systemd/system/4g-watchdog.service
+sudo install -m 0644 "$REPO/etc/4g-watchdog.timer" /etc/systemd/system/4g-watchdog.timer
 sudo systemctl daemon-reload
 sudo systemctl enable 4g-watchdog.timer
 # Restarted and not merely enabled, so an edited schedule takes effect on this deploy rather
@@ -123,7 +123,7 @@ step "install and restart brain daemon"
 # at this path must be replaced, never written through to the binary it points at.
 sudo rm -f /usr/local/bin/brain
 sudo install -m 0755 "$REPO/target/release/brain" /usr/local/bin/brain
-sudo install -m 0644 "$REPO/brain.service" /etc/systemd/system/brain.service
+sudo install -m 0644 "$REPO/brain/brain.service" /etc/systemd/system/brain.service
 sudo systemctl daemon-reload
 sudo systemctl enable brain
 sudo systemctl restart brain

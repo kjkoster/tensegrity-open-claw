@@ -40,10 +40,12 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 #   claw.qxw         the claw's patch (what is where) and its scenes
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
 #   stem/           the broker configuration, and whatever else Stem grows
-#   etc/            system configuration the deploy installs: the access point's
-#   brain.service    installed as the systemd unit
-#   4g-watchdog.*    the uplink watchdog: its script, its unit and its timer
+#   etc/            what the deploy installs onto the Pi that belongs to no daemon: the
+#                    access point's configuration, the uplink watchdog (its script, its
+#                    unit and its timer), and remote-deploy.sh, which does the installing
 #   attach.sh        the probe-rs wrapper, which re-execs its own copy on the Pi
+#
+# A daemon's systemd unit travels inside that daemon's directory.
 #
 # `ball/` is absent on purpose: the Pi flashes that firmware and never builds it, so it gets
 # the binary, below, and not the crate.
@@ -53,10 +55,7 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
 DIRECTORIES=(cortex cortex-build brain fixtures stem etc)
-FILES=(
-    Cargo.toml claw.qxw brain.service remote-deploy.sh
-    4g-watchdog.sh 4g-watchdog.service 4g-watchdog.timer attach.sh
-)
+FILES=(Cargo.toml claw.qxw attach.sh)
 
 step "rsync sources to $PI:$PI_DIR"
 # --checksum, not the default size+mtime check: git checkouts and editor saves bump source
@@ -81,7 +80,7 @@ rsync -az "$BALL_BINARY" "$PI:$PI_DIR/binaries/ball"
 
 # --- 3. Build, restart and flash on the Pi --------------------------------
 step "run remote deploy on $PI"
-ssh "$PI" "bash $PI_DIR/remote-deploy.sh"
+ssh "$PI" "bash $PI_DIR/etc/remote-deploy.sh"
 
 step "deploy complete"
 say "The installation of the Open Claw has completed. Go check it out"
