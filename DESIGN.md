@@ -164,6 +164,15 @@ identity.
 The engine keeps running while overridden — its noise fields, breath phase and slews stay
 continuous — so handback resumes mid-stride rather than springing out of a frozen frame.
 
+The arbitration is not the last word on a frame: the rig's **guard** is, and it runs after
+the takeover decision. The cabinet's e-stop lives there. While it is pressed, or its two
+contacts agree (a broken cable or a contact fault), every slot goes out as zero, at the
+usual rate and priority, so nothing downstream sees a lost stream and no console can light
+the rig. Releasing it must not restart machinery by itself, but the blackout has already
+sent the ball's motor the stop that clears the ball's own trip. So the guard holds the
+motor channel off after a release until the driving source sends a value in the motor's
+Off band itself.
+
 The receiver binds the address the workspace's console unicasts to — the Pi's WireGuard
 address — alone rather than the wildcard. That is not
 just narrowing: it is also what stops the brain's own multicast being delivered back to its

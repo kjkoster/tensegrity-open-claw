@@ -9,3 +9,9 @@ cortex-build = { path = "../cortex-build" }
 
 [dependencies]
 cortex = { path = "../cortex" }
+# The face, the cabinet door's buttons: rppal for the GPIO, libc only because std cannot turn
+# the time into a local wall-clock time for the trace lines.
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
+embassy-time     = { version = "0.5.0",  features = ["std"] }
+libc             = "0.2.189"
+rppal            = "0.22.1"

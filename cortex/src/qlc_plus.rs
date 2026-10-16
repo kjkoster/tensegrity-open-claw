@@ -81,6 +81,16 @@ impl Channel {
         slots[self.slot as usize]
     }
 
+    /// The band of the definition that `value` falls in, if the definition covers it.
+    ///
+    /// For asking what a value *means* rather than what it is: two values in the same band
+    /// are the same command to the fixture.
+    pub fn band(self, value: u8) -> Option<&'static Capability> {
+        self.capabilities
+            .iter()
+            .find(|capability| (capability.min..=capability.max).contains(&value))
+    }
+
     /// Writes a 0..1 value as a DMX byte. Rounds rather than truncates, to match the
     /// scaling fixtures apply on the way back out.
     pub fn set_unit(self, slots: &mut [u8], value: f64) {

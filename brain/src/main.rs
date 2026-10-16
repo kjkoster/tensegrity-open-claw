@@ -11,6 +11,9 @@ use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
 use std::f64::consts::TAU;
 
+mod ball;
+mod face;
+
 // `patch` and `scenes`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained, and
 // there is no second copy of the patch to drift out of step with it.
@@ -20,6 +23,9 @@ include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 const BALL_LED_HZ: f64 = 1.0;
 
 fn main() {
+    // First, so the lamps are dark and the inputs pulled up while everything else starts.
+    let face = face::claim();
+
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
     // onsets, with its own slow white-mode gate. One instance per fixture, so several
     // fixtures sparkle independently rather than in lock-step.
@@ -30,6 +36,7 @@ fn main() {
         cfg::WHITE_MODE_PERLIN_SEED,
     );
     let mut ball_led_phase = 0.0_f64;
+    let mut ball_interlock = ball::MotorInterlock::new(patch::BALL_5.motor);
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
@@ -57,6 +64,16 @@ fn main() {
             patch::BALL_5
                 .onboard_led
                 .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
+        }),
+        tasks: Box::new(move |spawner| face::spawn(spawner, face)),
+        // The e-stop darkens every slot, so the rig is black whether the show or a console
+        // is driving it, and the frames keep going out so nothing downstream times out.
+        guard: Box::new(move |slots: &mut [u8]| {
+            let blackout = face::estop_pressed();
+            if blackout {
+                slots.fill(0);
+            }
+            ball_interlock.apply(slots, blackout);
         }),
     })
 }

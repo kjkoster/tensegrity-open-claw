@@ -439,6 +439,9 @@ Three behaviours that are correct but surprise you the first time:
   output if that matters.
 - **Handback takes about 2.5 s, not one frame.** E1.31 has a stream-terminated bit that
   releases instantly, but QLC+ does not send it, so the timeout does the work.
+- **The e-stop beats a takeover.** While it is pressed the rig is black whatever you send,
+  and after release the ball's motor stays off until you send it a stop (a value in its
+  Off band) and then start it again.
 
 Takeover needs priority **strictly above 100**, which is what the daemon transmits at. That
 is deliberate: every sACN source ships defaulted to 100, so a laptop joining the network

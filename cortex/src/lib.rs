@@ -25,10 +25,12 @@ mod sacn_in;
 
 use audio_features::AudioFeatures;
 use config::{FRAME_RATE_HZ, SACN_PRIORITY, SACN_RELEASE_FRAMES};
-use embassy_executor::Executor;
+use embassy_executor::{Executor, Spawner};
 use qlc_plus::{PatchEntry, Sacn};
 use scenes::Scene;
-use signal_hook::{consts::SIGTERM, iterator::Signals};
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::iterator::Signals;
+use signal_hook::low_level::signal_name;
 use std::net::UdpSocket;
 
 /// The name the brain wears on the broker: its health topic and the prefix on everything else
@@ -57,6 +59,14 @@ pub struct Rig {
     /// The generated scenes, likewise.
     pub scenes: &'static [Scene],
     pub show: Box<dyn FnMut(&AudioFeatures, f64, &mut [u8])>,
+    /// The rig's own tasks, beside the frame loop. Called once, with the executor's spawner,
+    /// after the frame task is spawned. A closure so the rig can move hardware it claimed
+    /// before the brain came up into the tasks that drive it.
+    pub tasks: Box<dyn FnOnce(Spawner)>,
+    /// The rig's last word on every frame: called with the final slot buffer, after the
+    /// takeover decision and just before it goes to both outputs. What it does here holds
+    /// whoever is driving — this is where an e-stop blacks the rig out.
+    pub guard: Box<dyn FnMut(&mut [u8])>,
 }
 
 /// Slots the sACN frame spans: 1 through the last slot any patched fixture occupies.
@@ -81,7 +91,7 @@ pub(crate) fn frame_width(patch: &[PatchEntry]) -> usize {
 /// every rig: a rig with no use for the interface simply never reads the features it is
 /// handed, and a capture thread with nothing listening is cheaper than two configurations
 /// that can disagree about which device the cabinet has.
-pub fn run(rig: Rig) -> ! {
+pub fn run(mut rig: Rig) -> ! {
     let (tx, rx) = latest::latest(AudioFeatures::default());
 
     // Audio capture runs on its own OS thread, alongside Embassy.
@@ -136,17 +146,18 @@ pub fn run(rig: Rig) -> ! {
     publisher.publish("identity/fixtures", rig.patch.len().to_string(), true);
     publisher.publish("identity/scenes", rig.scenes.len().to_string(), true);
 
-    // systemd stops the brain with SIGTERM. Catch it to release the sACN source — a burst of
-    // terminate frames — so a higher-priority console or the fixtures' fallback takes over at
-    // once instead of waiting out the 2.5 s data-loss timeout. signal_hook's iterator runs on
-    // its own thread, outside async-signal context, so the log line and socket sends here are
-    // safe.
+    // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with
+    // SIGINT. Catch both to release the sACN source — a burst of terminate frames — so a
+    // higher-priority console or the fixtures' fallback takes over at once instead of waiting
+    // out the 2.5 s data-loss timeout. signal_hook's iterator runs on its own thread, outside
+    // async-signal context, so the log line and socket sends here are safe.
     let shutdown_socket = socket.try_clone().expect("socket clone failed");
     let dmx_slots = frame_width(rig.patch);
-    let mut signals = Signals::new([SIGTERM]).expect("SIGTERM registration failed");
+    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("signal registration failed");
     std::thread::spawn(move || {
-        if signals.forever().next().is_some() {
-            eprintln!("{name}: SIGTERM — releasing sACN source ({SACN_RELEASE_FRAMES} terminate frames)");
+        if let Some(signal) = signals.forever().next() {
+            let signal = signal_name(signal).unwrap_or("signal");
+            eprintln!("{name}: {signal} — releasing sACN source ({SACN_RELEASE_FRAMES} terminate frames)");
             for sequence in 0..SACN_RELEASE_FRAMES {
                 let packet = dmx::encode_release(sacn.universe, sequence, SACN_PRIORITY, &cid, dmx_slots);
                 dmx::send_multicast(&shutdown_socket, sacn.universe, sacn.port, &packet);
@@ -164,7 +175,10 @@ pub fn run(rig: Rig) -> ! {
     // that lifetime honestly — this is what the `#[embassy_executor::main]` macro does with a
     // transmute instead.
     let executor: &'static mut Executor = Box::leak(Box::new(Executor::new()));
+    // The frame task takes the rig whole, so the one-shot hook comes out of it first.
+    let tasks = std::mem::replace(&mut rig.tasks, Box::new(|_| {}));
     executor.run(|spawner| {
         spawner.spawn(orchestrator::frame_task(socket, cid, rx, takeover_rx, rig).unwrap());
+        tasks(spawner);
     })
 }
