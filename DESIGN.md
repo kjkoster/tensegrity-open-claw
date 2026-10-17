@@ -258,10 +258,20 @@ sit at the front while Stem sits at the back.
 
 ### 4.3 Telemetry: MQTT and Stem
 
-Read-only telemetry over a local MQTT broker, published by two processes: `brain` for the
-show pipeline and **Stem**, a separate health daemon that stays alive and reporting when
-`brain` is down — which is precisely when health matters. Topic tree and rates are in
-[`SHOW.md`](SHOW.md).
+Read-only telemetry over a local MQTT broker. `brain` publishes for the show pipeline;
+**Stem**, a separate health daemon, stays alive and reporting when `brain` is down — which is
+precisely when health matters. Topic tree and rates are in [`SHOW.md`](SHOW.md).
+
+Four clients each hold their own connection, announce themselves on `health/<service>`, and
+leave a will that says `gone`: `brain`, Stem, the `face` (its own client, inside the brain
+process) and the `ball` (over the AP, to the DHCP gateway). The Rust clients share their
+packets and the health words through the `rig-mqtt` crate; `stem/rig_mqtt.py` is the Python
+half. The broker keeps nothing on disk, and every client replays its retained topics on each
+connect instead.
+
+Written but not yet run on the rig: the `face` and `ball` clients, the brain client's
+retained-topic replay, and the broker without persistence. The ball's `disconnected` is only
+reachable from the deep sleep it does not have yet.
 
 Stem also absorbs the 4G watchdog that currently lives as an unversioned script on the Pi,
 so there is one health daemon rather than two overlapping ones.

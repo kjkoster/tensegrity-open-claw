@@ -1,16 +1,16 @@
-//! Brain's own connection to the broker: the health contract, and a place to publish from.
+//! The brain's connections to the broker: the health contract, and a place to publish from.
 //!
 //! Every daemon on the rig holds its own client and announces itself on `health/<service>`,
 //! so that a dead process says so without anything else having to notice. This is the brain's
 //! end of that, and the reason it cannot be delegated to Stem: only the process itself can
 //! hand the broker a will, and only a will distinguishes "stopped" from "died".
 //!
-//! MQTT 3.1.1 is encoded here rather than taken from a crate, for the same reason E1.31 is.
-//! The brain publishes, never subscribes, always at QoS 0 — which is a CONNECT, a PUBLISH, a
-//! PINGREQ and a DISCONNECT, and no session state, no inflight window, no subscription table.
-//! The crates that do this properly bring an async runtime with them, and a 1.2 GHz Pi that
-//! rebuilds on every deploy should not pay for one so a health daemon can move a few hundred
-//! bytes a second.
+//! One process may hold several clients. The face lives inside the brain but is a fixture of
+//! its own, and it gets its own client, its own health topic and its own will, so the tree
+//! reads the way the rig is built rather than the way it is compiled.
+//!
+//! The packets and the health words are `rig_mqtt`'s, shared with the ball. The brain
+//! publishes, never subscribes, always at QoS 0.
 //!
 //! Nothing here may touch frame timing. The publish queue is bounded and drops on overflow, a
 //! broker that has gone away is a reconnect on a background thread, and the frame loop's only
@@ -22,6 +22,7 @@
 //! takes a topic and a scalar and does no encoding at all — callers name the leaf.
 
 use crate::config as cfg;
+use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddrV4, TcpStream};
 use std::sync::Arc;
@@ -30,38 +31,10 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-// ── MQTT 3.1.1 control packets (OASIS mqtt-v3.1.1) ───────────────────────────
-const CONNECT: u8 = 0x10;
-const CONNACK: u8 = 0x20;
-const PUBLISH: u8 = 0x30;
-const PINGREQ: u8 = 0xC0;
-const DISCONNECT: u8 = 0xE0;
-
-const PUBLISH_RETAIN: u8 = 0x01;
-
-/// Connect flags: clean session, a will, and the will retained. The will's QoS stays 0 like
-/// everything else here, so its two flag bits are left clear.
-const CONNECT_CLEAN_SESSION: u8 = 0x02;
-const CONNECT_WILL: u8 = 0x04;
-const CONNECT_WILL_RETAIN: u8 = 0x20;
-
-const PROTOCOL_NAME: &str = "MQTT";
-const PROTOCOL_LEVEL: u8 = 0x04;
-
-/// Housekeeping reads only. The client never subscribes and has nothing to wait for, so this
-/// bounds how long the loop sits in a drain rather than how long it waits for an answer.
+/// How long a drain waits for the broker. The client never subscribes and has nothing to wait
+/// for, so this bounds how long the loop sits in a drain rather than how long it waits for an
+/// answer.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
-
-/// The three words on `health/<service>`, published retained.
-///
-/// The distinction is only meaningful because the first two come from the process and the
-/// third comes from the broker: a program cannot announce its own crash, so it hands the
-/// announcement over at connect time and the broker makes it when the connection dies without
-/// a goodbye. `DISCONNECTED` is somebody running `systemctl stop`; `GONE` is a segfault, an
-/// OOM kill, or a Pi that lost power.
-const CONNECTED: &str = "connected";
-const DISCONNECTED: &str = "disconnected";
-const GONE: &str = "gone";
 
 /// One retained-or-not message on its way to the broker.
 struct Message {
@@ -77,7 +50,7 @@ enum Command {
     Farewell,
 }
 
-/// The frame loop's end of the telemetry: a bounded queue and nothing else.
+/// A stage's end of the telemetry: a bounded queue and nothing else.
 ///
 /// Cloneable, so any stage can hold one. Every send is non-blocking and a full queue drops the
 /// message rather than waiting — a broker that has wedged must cost telemetry and never a
@@ -93,7 +66,7 @@ impl Publisher {
         Self { outgoing: None }
     }
 
-    /// Queues one message under this process's own prefix. Never blocks, never fails loudly.
+    /// Queues one message under this client's own prefix. Never blocks, never fails loudly.
     pub fn publish(&self, topic: impl Into<String>, payload: impl Into<String>, retain: bool) {
         let Some(outgoing) = &self.outgoing else {
             return;
@@ -112,7 +85,7 @@ impl Publisher {
     }
 }
 
-/// The shutdown end, held by whatever handles SIGTERM.
+/// The shutdown end of one client, held by whatever handles SIGTERM.
 ///
 /// Separate from `Publisher` because it is not something a pipeline stage should be able to
 /// reach: saying goodbye ends the connection for everybody.
@@ -122,19 +95,13 @@ pub struct Farewell {
 }
 
 impl Farewell {
-    /// Publishes the goodbye and waits, briefly, for it to actually leave.
-    ///
-    /// Waiting is the point. The caller is about to `exit`, and a goodbye still sitting in a
-    /// channel is a goodbye the broker never hears — at which point the will fires and an
-    /// orderly stop is recorded as a crash. Bounded, because a wedged broker must not be able
-    /// to hold up a shutdown: past the deadline the will fires and `gone` is, at worst,
-    /// pessimistic about a rig that really is going away.
-    pub fn say(&self) {
-        let expires = Instant::now() + Duration::from_millis(cfg::MQTT_FAREWELL_MS);
+    /// Queues the goodbye, retrying a full queue until `expires`. Returns whether it was
+    /// queued: a thread that has already exited will never say it.
+    fn ask(&self, expires: Instant) -> bool {
         let mut pending = Some(Command::Farewell);
         while let Some(command) = pending.take() {
             match self.outgoing.try_send(command) {
-                Ok(()) => break,
+                Ok(()) => return true,
                 // The queue is full because the thread is busy or the broker is slow. Hand the
                 // command back and try again until the deadline, rather than dropping the
                 // goodbye over a queue that was about to drain anyway.
@@ -142,34 +109,54 @@ impl Farewell {
                     pending = Some(returned);
                     thread::sleep(Duration::from_millis(2));
                 }
-                Err(_) => return,
+                Err(_) => return false,
             }
         }
-        while !self.said.load(Ordering::Acquire) && Instant::now() < expires {
-            thread::sleep(Duration::from_millis(2));
-        }
+        false
     }
 }
 
-/// Spawns the telemetry client and returns the handles the rest of the brain speaks through.
+/// Says every goodbye and waits, briefly, for all of them to actually leave.
 ///
-/// `service` names the health topic and prefixes every other topic this process publishes, so
-/// the tree says which process asserted a thing.
+/// Waiting is the point. The caller is about to `exit`, and a goodbye still sitting in a
+/// channel is a goodbye the broker never hears — at which point the will fires and an orderly
+/// stop is recorded as a crash. All of them share one deadline, so a second client does not
+/// double the shutdown, and it is bounded, because a wedged broker must not be able to hold up
+/// a shutdown: past it the will fires and `gone` is, at worst, pessimistic about a rig that
+/// really is going away.
+pub fn farewell(farewells: &[Farewell]) {
+    let expires = Instant::now() + Duration::from_millis(cfg::MQTT_FAREWELL_MS);
+    let asked: Vec<&Farewell> = farewells.iter().filter(|f| f.ask(expires)).collect();
+    while !asked.iter().all(|f| f.said.load(Ordering::Acquire)) && Instant::now() < expires {
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Spawns a client and returns the handles the rest of the process speaks through.
+///
+/// `service` names the health topic, is the client ID, and prefixes every other topic this
+/// client publishes, so the tree says which part of the rig asserted a thing.
 pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
     let (outgoing, incoming) = sync_channel(cfg::MQTT_QUEUE_DEPTH);
     let said = Arc::new(AtomicBool::new(false));
 
     let thread_said = said.clone();
     let handle = thread::Builder::new()
-        .name("telemetry".into())
+        .name(format!("telemetry-{service}"))
         .spawn(move || {
+            // Every retained topic this client has published, replayed on each connect.
+            //
+            // Retained state is a promise that a late subscriber sees the live picture, and a
+            // broker restart breaks it: the broker keeps nothing across one, so whatever was
+            // published once at startup would otherwise be gone for good.
+            let mut retained = BTreeMap::new();
             let mut backoff_s = 1u64;
             loop {
-                match session(service, &incoming, &thread_said) {
+                match session(service, &incoming, &thread_said, &mut retained, &mut backoff_s) {
                     // The goodbye went out and the connection was closed cleanly. There is
                     // nothing left to reconnect for; the process is on its way out.
                     Ok(()) => return,
-                    Err(e) => eprintln!("telemetry: {e}"),
+                    Err(e) => eprintln!("telemetry: {service}: {e}"),
                 }
                 thread::sleep(Duration::from_secs(backoff_s));
                 backoff_s = (backoff_s * 2).min(cfg::MQTT_RETRY_MAX_S);
@@ -191,55 +178,66 @@ fn session(
     service: &str,
     incoming: &Receiver<Command>,
     said: &AtomicBool,
+    retained: &mut BTreeMap<String, String>,
+    backoff_s: &mut u64,
 ) -> std::io::Result<()> {
-    let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, cfg::MQTT_PORT);
+    let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, rig_mqtt::PORT);
     let mut stream = TcpStream::connect(address)?;
     // Nagle would hold a small publish back waiting for company that never comes; these are
     // one-datagram-sized messages seconds apart.
     stream.set_nodelay(true)?;
 
-    let health = format!("health/{service}");
-    stream.write_all(&encode_connect(service, &health))?;
+    stream.write_all(&rig_mqtt::connect(service))?;
     read_connack(&mut stream)?;
-    eprintln!("telemetry: connected to {address} as {service}");
+    eprintln!("telemetry: {service}: connected to {address}");
+    // Only once the broker has accepted us: a broker that keeps refusing must keep backing off,
+    // and one that was simply restarted must not be waited on as if it had.
+    *backoff_s = 1;
 
-    stream.write_all(&encode_publish(&health, CONNECTED, true))?;
+    let health = rig_mqtt::health_topic(service);
+    stream.write_all(&rig_mqtt::publish(&health, rig_mqtt::CONNECTED, true))?;
+    for (topic, payload) in retained.iter() {
+        stream.write_all(&rig_mqtt::publish(topic, payload, true))?;
+    }
 
     // Half the keepalive: the broker drops a client at 1.5× the interval it was given, so
     // pinging twice per interval means one lost ping is not a disconnection.
-    let tick = Duration::from_secs(cfg::MQTT_KEEPALIVE_S / 2);
+    let tick = Duration::from_secs(u64::from(rig_mqtt::KEEPALIVE_S) / 2);
     loop {
         match incoming.recv_timeout(tick) {
             Ok(Command::Publish(message)) => {
-                stream.write_all(&encode_publish(
-                    &format!("{service}/{}", message.topic),
-                    &message.payload,
-                    message.retain,
-                ))?;
+                let topic = format!("{service}/{}", message.topic);
+                let packet = rig_mqtt::publish(&topic, &message.payload, message.retain);
+                // Recorded before the write, so a value whose write is what failed is the one
+                // the next connect replays.
+                if message.retain {
+                    retained.insert(topic, message.payload);
+                }
+                stream.write_all(&packet)?;
             }
             Ok(Command::Farewell) => {
                 // On this connection, and followed by a clean DISCONNECT. A goodbye sent over
                 // a second connection would be overwritten moments later by the will firing
                 // on this one — the broker publishes it whenever a connection drops without a
                 // DISCONNECT, and an exiting process drops all of them.
-                stream.write_all(&encode_publish(&health, DISCONNECTED, true))?;
-                stream.write_all(&[DISCONNECT, 0x00])?;
+                stream.write_all(&rig_mqtt::publish(&health, rig_mqtt::DISCONNECTED, true))?;
+                stream.write_all(&rig_mqtt::DISCONNECT)?;
                 stream.flush()?;
                 said.store(true, Ordering::Release);
                 return Ok(());
             }
             // Nothing to say. The ping is what keeps the broker from declaring the will on a
-            // rig that is simply quiet.
-            Err(RecvTimeoutError::Timeout) => stream.write_all(&[PINGREQ, 0x00])?,
-            // Every publisher has been dropped, which cannot happen while the brain runs. Keep
-            // the connection alive anyway: the health topic is still worth being true.
-            Err(RecvTimeoutError::Disconnected) => stream.write_all(&[PINGREQ, 0x00])?,
+            // client that is simply quiet. Draining only here, after the one packet that is
+            // ever answered, keeps the drain's wait off every publish.
+            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => {
+                stream.write_all(&rig_mqtt::PINGREQ)?;
+                drain(&mut stream)?;
+            }
         }
-        drain(&mut stream)?;
     }
 }
 
-/// Reads and discards whatever the broker sent — PINGRESPs, mostly — and notices a close.
+/// Reads and discards whatever the broker sent — PINGRESPs, only — and notices a close.
 ///
 /// Unread bytes are not free: a PINGRESP every fifteen seconds fills the receive buffer over
 /// days, the TCP window shuts, and the broker eventually blocks writing to a client that was
@@ -265,80 +263,19 @@ fn drain(stream: &mut TcpStream) -> std::io::Result<()> {
 }
 
 fn read_connack(stream: &mut TcpStream) -> std::io::Result<()> {
-    // A CONNACK is fixed at four bytes, so this reads exactly that rather than parsing a
-    // length it already knows. The connection is unusable until it arrives, which is why this
-    // one read waits far longer than the drain does.
+    // The connection is unusable until it arrives, which is why this one read waits far longer
+    // than the drain does.
     stream.set_read_timeout(Some(Duration::from_secs(cfg::MQTT_CONNACK_TIMEOUT_S)))?;
-    let mut packet = [0u8; 4];
+    let mut packet = [0u8; rig_mqtt::CONNACK_LEN];
     stream.read_exact(&mut packet)?;
-
-    if packet[0] != CONNACK {
-        return Err(std::io::Error::new(
+    rig_mqtt::read_connack(&packet).map_err(|refused| match refused {
+        rig_mqtt::Refused::NotConnack(header) => std::io::Error::new(
             ErrorKind::InvalidData,
-            format!("expected CONNACK, got 0x{:02x}", packet[0]),
-        ));
-    }
-    if packet[3] != 0 {
-        return Err(std::io::Error::new(
+            format!("expected CONNACK, got 0x{header:02x}"),
+        ),
+        rig_mqtt::Refused::Code(code) => std::io::Error::new(
             ErrorKind::PermissionDenied,
-            format!("broker refused the connection, code {}", packet[3]),
-        ));
-    }
-    Ok(())
-}
-
-// ── Packet encoding ──────────────────────────────────────────────────────────
-
-/// The variable-length integer MQTT uses for remaining length: seven bits per byte, the top
-/// bit marking that another follows.
-fn push_remaining_length(packet: &mut Vec<u8>, mut length: usize) {
-    loop {
-        let mut byte = (length % 128) as u8;
-        length /= 128;
-        if length > 0 {
-            byte |= 0x80;
-        }
-        packet.push(byte);
-        if length == 0 {
-            return;
-        }
-    }
-}
-
-/// Length-prefixed UTF-8, which is how MQTT carries every string.
-fn push_string(body: &mut Vec<u8>, text: &str) {
-    body.extend_from_slice(&(text.len() as u16).to_be_bytes());
-    body.extend_from_slice(text.as_bytes());
-}
-
-fn encode_connect(client_id: &str, health: &str) -> Vec<u8> {
-    let mut body = Vec::new();
-    push_string(&mut body, PROTOCOL_NAME);
-    body.push(PROTOCOL_LEVEL);
-    body.push(CONNECT_CLEAN_SESSION | CONNECT_WILL | CONNECT_WILL_RETAIN);
-    body.extend_from_slice(&(cfg::MQTT_KEEPALIVE_S as u16).to_be_bytes());
-
-    push_string(&mut body, client_id);
-    // The will, in the CONNECT packet and nowhere else: it has to be in the broker's hands
-    // before the connection can fail, or it protects nothing.
-    push_string(&mut body, health);
-    push_string(&mut body, GONE);
-
-    let mut packet = vec![CONNECT];
-    push_remaining_length(&mut packet, body.len());
-    packet.extend_from_slice(&body);
-    packet
-}
-
-fn encode_publish(topic: &str, payload: &str, retain: bool) -> Vec<u8> {
-    let mut body = Vec::new();
-    push_string(&mut body, topic);
-    // No packet identifier: that field exists only at QoS 1 and above, and everything here is
-    // fire-and-forget by design.
-    body.extend_from_slice(payload.as_bytes());
-
-    let mut packet = vec![PUBLISH | if retain { PUBLISH_RETAIN } else { 0 }];
-    push_remaining_length(&mut packet, body.len());
-    packet.extend_from_slice(&body);
-    packet
+            format!("broker refused the connection, code {code}"),
+        ),
+    })
 }

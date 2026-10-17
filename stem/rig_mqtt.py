@@ -28,7 +28,7 @@ creates an anonymous empty first level, and `health/#` then matches nothing.
 
 ## Everything else
 
-Telemetry publishes under the service's own name — `stem/specs`, `brain/identity` — so the
+Telemetry publishes under the service's own name — `stem/specs`, `brain/rig` — so the
 tree says which process asserted a thing, and a dead process's topics stop moving instead of
 being quietly taken over.
 
@@ -39,14 +39,17 @@ whole value. Nested values expand into nested topics, so a dict becomes a subtre
 downstream has to know it was ever a dict.
 """
 
-import atexit
 import os
 import signal
 import sys
 
 HOST = os.environ.get("RIG_MQTT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RIG_MQTT_PORT", "1883"))
+# The same value as `rig_mqtt::KEEPALIVE_S` on the Rust clients.
 KEEPALIVE_S = 30
+# The longest wait between reconnect attempts, matching the brain's. paho's own default is two
+# minutes, which is two minutes of a broker being back and Stem still reading as gone.
+RETRY_MAX_S = 30
 
 CONNECTED = "connected"
 DISCONNECTED = "disconnected"
@@ -126,6 +129,8 @@ class Telemetry:
         # and a will set afterwards protects only the next connection.
         client.will_set(health_topic(service), GONE, retain=True)
         client.on_connect = telemetry.on_connect
+        client.on_disconnect = telemetry.on_disconnect
+        client.reconnect_delay_set(min_delay=1, max_delay=RETRY_MAX_S)
 
         # Asynchronous, so a broker that is not up yet is a wait rather than a verdict. The
         # synchronous form raises on a refused connection, and a daemon that gave up there
@@ -136,18 +141,34 @@ class Telemetry:
         print(f"{service}: telemetry to {host}:{port}", file=sys.stderr, flush=True)
 
         # systemd stops daemons with SIGTERM, whose default disposition ends the process
-        # without running atexit — so every ordinary restart would publish nothing and read as
-        # `gone`. Catching it is what makes `disconnected` mean anything at all.
+        # without a word — so every ordinary restart would read as `gone`. Catching it is what
+        # makes `disconnected` mean anything at all.
         telemetry.arm_shutdown()
         return telemetry
 
-    def on_connect(self, client, *_):
+    def on_connect(self, client, _userdata, _flags, rc):
+        # paho calls this for a refusal too. Announcing `connected` on a connection the broker
+        # turned down would be a lie the broker itself then never corrects.
+        if rc != 0:
+            print(f"{self.service}: broker refused the connection, code {rc}",
+                  file=sys.stderr, flush=True)
+            return
+        print(f"{self.service}: connected", file=sys.stderr, flush=True)
         client.publish(health_topic(self.service), CONNECTED, retain=True)
         for topic, payload in self.retained.items():
             client.publish(topic, payload, retain=True)
 
+    def on_disconnect(self, _client, _userdata, rc):
+        # Zero is our own goodbye, which `close` already speaks for.
+        if rc != 0:
+            print(f"{self.service}: lost the broker, code {rc}, reconnecting",
+                  file=sys.stderr, flush=True)
+
     def arm_shutdown(self):
-        atexit.register(self.close)
+        # Signals only, and deliberately no `atexit`. An uncaught exception also ends the
+        # interpreter through atexit, and saying `disconnected` there would report a crash as
+        # a deliberate stop — the one confusion this contract exists to prevent. A crash must
+        # leave the connection to die unannounced, so the broker's `gone` is what is heard.
         for received in (signal.SIGTERM, signal.SIGINT):
             signal.signal(received, self.on_signal)
 

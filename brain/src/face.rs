@@ -7,7 +7,11 @@
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
 //! consecutive samples.
+//!
+//! The face is a fixture of its own on the broker, with its own client beside the brain's:
+//! `health/face`, and `face/ball_button`, `face/music_button` and `face/estop`, retained.
 
+use cortex::telemetry::Publisher;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use rppal::gpio::{Gpio, InputPin, Level, OutputPin};
@@ -42,15 +46,16 @@ pub struct Face {
     // back to its previous mode when it is dropped.
     _ball_lamp: OutputPin,
     _music_lamp: OutputPin,
+    telemetry: Publisher,
 }
 
 struct Input {
     pin: InputPin,
     name: &'static str,
-    /// A momentary button is annotated pressed/released in the trace. The e-stop contacts
-    /// are not: what a level means depends on the other contact, and the derived e-stop
-    /// line says it.
-    momentary: bool,
+    /// A momentary button's topic under `face/`, where it is published as pressed or not, and
+    /// annotated so in the trace. The e-stop contacts have none: what a level means depends
+    /// on the other contact, and the derived e-stop says it.
+    button: Option<&'static str>,
     level: Level,
     differing: u8,
 }
@@ -71,9 +76,12 @@ enum Estop {
 /// read once. Call this before anything else, so the lamps are dark, no input floats, and
 /// the very first frame already honours the e-stop.
 ///
+/// Both buttons and the e-stop are published once here, so the tree holds the face's state
+/// before anybody presses anything.
+///
 /// Panics if the GPIO cannot be opened. The brain only runs on the Pi, and a brain that
 /// cannot read its e-stop must not light the rig.
-pub fn claim() -> Face {
+pub fn claim(telemetry: Publisher) -> Face {
     let gpio = Gpio::new().unwrap_or_else(|e| panic!("face: gpio: {e}"));
     let pin = |number: u8| {
         gpio.get(number)
@@ -85,18 +93,24 @@ pub fn claim() -> Face {
     let face = Face {
         _ball_lamp: pin(BALL_LAMP).into_output_low(),
         _music_lamp: pin(MUSIC_LAMP).into_output_low(),
-        estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", false),
-        estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", false),
-        ball_button: Input::new(pin(BALL_BUTTON).into_input_pullup(), "ball", true),
-        music_button: Input::new(pin(MUSIC_BUTTON).into_input_pullup(), "music", true),
+        estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", None),
+        estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", None),
+        ball_button: Input::new(pin(BALL_BUTTON).into_input_pullup(), "ball", Some("ball_button")),
+        music_button: Input::new(
+            pin(MUSIC_BUTTON).into_input_pullup(),
+            "music",
+            Some("music_button"),
+        ),
+        telemetry,
     };
 
     for input in [&face.estop_nc, &face.estop_no, &face.ball_button, &face.music_button] {
         input.trace();
+        input.publish(&face.telemetry);
     }
     trace_pin(BALL_LAMP, "ball-lamp", Level::Low, " (dark)");
     trace_pin(MUSIC_LAMP, "music-lamp", Level::Low, " (dark)");
-    face.update_estop();
+    face.decide_estop();
 
     face
 }
@@ -115,16 +129,39 @@ pub fn estop_pressed() -> bool {
 #[embassy_executor::task]
 async fn input_task(mut face: Face) -> ! {
     let mut ticker = Ticker::every(POLL_PERIOD);
+    // The e-stop's contacts do not move together: pressing opens NC before NO closes, and
+    // releasing opens NO before NC closes, so for a moment either way both read open. Read off
+    // the first contact to settle, that moment is a cable fault on every press. The e-stop is
+    // therefore decided only once neither contact has read anything but its settled level for
+    // a full settle period, and from both levels together.
+    let mut estop_undecided = false;
+    let mut estop_quiet = 0u8;
     loop {
         ticker.next().await;
         // `|`, not `||`: both contacts must be sampled every tick, or a change on the NO
         // contact would be debounced late whenever the NC contact changed too.
-        let estop_changed = face.estop_nc.poll() | face.estop_no.poll();
+        let estop_changed =
+            face.estop_nc.poll(&face.telemetry) | face.estop_no.poll(&face.telemetry);
         if estop_changed {
-            face.update_estop();
+            // Towards stop at once, on whichever contact got there first. Only the decision
+            // waits, and only it can release.
+            if !matches!(face.estop(), Estop::Released) {
+                ESTOP_PRESSED.store(true, Ordering::Relaxed);
+            }
+            estop_undecided = true;
+            estop_quiet = 0;
+        } else if face.estop_nc.differing == 0 && face.estop_no.differing == 0 {
+            estop_quiet = estop_quiet.saturating_add(1);
+        } else {
+            estop_quiet = 0;
         }
-        face.ball_button.poll();
-        face.music_button.poll();
+        if estop_undecided && estop_quiet >= SETTLE_SAMPLES {
+            estop_undecided = false;
+            face.decide_estop();
+        }
+
+        face.ball_button.poll(&face.telemetry);
+        face.music_button.poll(&face.telemetry);
     }
 }
 
@@ -138,34 +175,37 @@ impl Face {
         }
     }
 
-    /// Hands the e-stop's state to the show, and traces it.
-    fn update_estop(&self) {
+    /// Hands the e-stop's state to the show, traces it, and publishes it.
+    fn decide_estop(&self) {
         let estop = self.estop();
         ESTOP_PRESSED.store(!matches!(estop, Estop::Released), Ordering::Relaxed);
-        let state = match estop {
-            Estop::Released => "RELEASED",
-            Estop::Pressed => "PRESSED",
-            Estop::CableFault => "CABLE FAULT (treated as pressed)",
-            Estop::ContactFault => "CONTACT FAULT (treated as pressed)",
+        // Pressed or not, like the buttons, unless the wiring says it cannot tell.
+        let (state, word) = match estop {
+            Estop::Released => ("RELEASED", rig_mqtt::boolean(false)),
+            Estop::Pressed => ("PRESSED", rig_mqtt::boolean(true)),
+            Estop::CableFault => ("CABLE FAULT (treated as pressed)", "cable_fault"),
+            Estop::ContactFault => ("CONTACT FAULT (treated as pressed)", "contact_fault"),
         };
         eprintln!("face: {}  {:<18}{state}", timestamp(), "ESTOP");
+        self.telemetry.publish("estop", word, true);
     }
 }
 
 impl Input {
-    fn new(pin: InputPin, name: &'static str, momentary: bool) -> Input {
+    fn new(pin: InputPin, name: &'static str, button: Option<&'static str>) -> Input {
         let level = pin.read();
         Input {
             pin,
             name,
-            momentary,
+            button,
             level,
             differing: 0,
         }
     }
 
-    /// Takes one sample. Returns whether it settled a new level, which is then traced.
-    fn poll(&mut self) -> bool {
+    /// Takes one sample. Returns whether it settled a new level, which is then traced and,
+    /// on a button, published.
+    fn poll(&mut self, telemetry: &Publisher) -> bool {
         if self.pin.read() == self.level {
             self.differing = 0;
             return false;
@@ -177,14 +217,22 @@ impl Input {
         self.level = !self.level;
         self.differing = 0;
         self.trace();
+        self.publish(telemetry);
         true
     }
 
+    /// A button is pulled up and closes to ground, so pressed is LOW.
+    fn publish(&self, telemetry: &Publisher) {
+        if let Some(topic) = self.button {
+            telemetry.publish(topic, rig_mqtt::boolean(self.level == Level::Low), true);
+        }
+    }
+
     fn trace(&self) {
-        let meaning = match (self.momentary, self.level) {
-            (false, _) => "",
-            (true, Level::Low) => " (pressed)",
-            (true, Level::High) => " (released)",
+        let meaning = match (self.button, self.level) {
+            (None, _) => "",
+            (Some(_), Level::Low) => " (pressed)",
+            (Some(_), Level::High) => " (released)",
         };
         trace_pin(self.pin.pin(), self.name, self.level, meaning);
     }

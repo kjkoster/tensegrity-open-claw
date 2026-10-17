@@ -43,16 +43,10 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
 // ── Telemetry (the broker) ───────────────────────────────────────────────────
 // Stem owns the broker; every daemon holds its own client and announces itself under
-// `health/`. Loopback, because the publishers are all on this Pi — what reaches the tunnel
-// and the AP is the broker's own listener, which is Stem's configuration to make, not this
-// process's to decide.
+// `health/`. Loopback, because the broker is on this Pi — what reaches the tunnel and the AP
+// is the broker's own listener, which is Stem's configuration to make, not this process's to
+// decide. The port and the keepalive are the rig's, in `rig_mqtt`.
 pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
-pub const MQTT_PORT: u16 = 1883;
-
-// The broker drops a client that has been silent for 1.5× this. The client pings twice per
-// interval, so one lost ping is not a disconnection and a genuinely dead brain is declared
-// gone inside a minute.
-pub const MQTT_KEEPALIVE_S: u64 = 30;
 
 // How long to wait for the CONNACK before treating the broker as unusable. Generous: it is a
 // loopback handshake, and the only thing that makes it slow is a broker still starting up.

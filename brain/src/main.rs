@@ -9,6 +9,7 @@ use cortex::audio_features::AudioFeatures;
 use cortex::config as cfg;
 use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
+use cortex::telemetry;
 use std::f64::consts::TAU;
 
 mod face;
@@ -22,8 +23,10 @@ include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 const BALL_LED_HZ: f64 = 1.0;
 
 fn main() {
-    // First, so the lamps are dark and the inputs pulled up while everything else starts.
-    let face = face::claim();
+    // First, so the lamps are dark and the inputs pulled up while everything else starts. Its
+    // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
+    let (_face_telemetry, face_publisher, face_farewell) = telemetry::spawn("face");
+    let face = face::claim(face_publisher);
 
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
     // onsets, with its own slow white-mode gate. One instance per fixture, so several
@@ -77,6 +80,7 @@ fn main() {
             }
         }),
         tasks: Box::new(move |spawner| face::spawn(spawner, face)),
+        farewells: vec![face_farewell],
     })
 }
 

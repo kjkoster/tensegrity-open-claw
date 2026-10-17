@@ -1,6 +1,11 @@
 [Unit]
 Description=Tensegrity Brain Daemon
 After=network.target
+# Ordered after the broker so that systemd stops the brain first: a broker stopped ahead of it
+# never hears the goodbye, and an orderly reboot reads as a crash. Wanted, not Required — a
+# broker that is down must cost telemetry and never the show.
+Wants=mosquitto.service
+After=mosquitto.service
 
 [Service]
 ExecStart=/usr/local/bin/brain
@@ -15,11 +20,11 @@ CPUSchedulingPriority=50
 # Deliberately no CPUAffinity. It belongs in the code, not here.
 #
 # What the design wants is one core kept clear for the DMX loop — a statement about one thread.
-# A unit-file affinity is a statement about the whole process, and this process runs four
-# threads: the frame loop, audio capture, the sACN receiver and the telemetry client.
-# Confining all four to one core, all at the same real-time priority, starves the ALSA capture
-# thread of the moments it needs to drain a 512-frame period, and the interface overruns —
-# which is an xrun, on a rig that listens.
+# A unit-file affinity is a statement about the whole process, and this process runs five
+# threads: the frame loop, audio capture, the sACN receiver and the brain's and the face's
+# telemetry clients. Confining all five to one core, all at the same real-time priority,
+# starves the ALSA capture thread of the moments it needs to drain a 512-frame period, and the
+# interface overruns — which is an xrun, on a rig that listens.
 #
 # Pinning only the DMX thread, from inside the process where the thread exists, is the version
 # of this that is worth having.

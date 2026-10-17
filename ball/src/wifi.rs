@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{format, string::String};
 use embassy_executor::Spawner;
 use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::{Duration, Instant, Timer};
@@ -9,14 +9,16 @@ use esp_radio::wifi::{
 use rtt_target::rprintln;
 use static_cell::StaticCell;
 
-use crate::{config::WIFI_RETRY_SILENCE, models::WifiConfig};
+use crate::{config::WIFI_RETRY_SILENCE, models::WifiConfig, telemetry};
 
 // The ball runs unattended, so a radio that stays offline this long is restarted along
 // with everything else: nobody is there to power-cycle it. Long enough for many silences,
 // because a restart does not help against a stale entry and only the silence does.
 const RESTART_AFTER: Duration = Duration::from_secs(300);
 
-static STACK_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+// DHCP, the sACN listener's UDP socket and the broker's TCP socket, and one spare: a socket
+// the stack has no room for is a panic, not an error.
+static STACK_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
 
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, Interface<'static>>) -> ! {
@@ -28,6 +30,9 @@ async fn wifi_supervision_task(
     mut controller: WifiController<'static>,
     wifi_config: WifiConfig,
 ) -> ! {
+    // Every attempt since boot. Published as it counts, though it can only leave once an
+    // attempt has succeeded: what it says is how hard getting back on was.
+    let mut attempts = 0u32;
     loop {
         rprintln!("connecting to {}...", wifi_config.ssid());
         let connecting_since = Instant::now();
@@ -45,6 +50,8 @@ async fn wifi_supervision_task(
                 }
             }
 
+            attempts += 1;
+            telemetry::publish("wifi_attempts", format!("{}", attempts));
             match controller.connect_async().await {
                 Ok(_) => break,
                 Err(e) => {

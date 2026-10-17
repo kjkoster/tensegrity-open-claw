@@ -2,6 +2,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // The rig's QLC+ workspace. A ball is a fixture patched in it like any other, so where it
 // listens is read from the same file the brain's patch is generated from.
@@ -36,8 +37,35 @@ fn main() {
         println!("cargo:rustc-env={variable}={value}");
     }
 
+    println!("cargo:rustc-env=FIRMWARE={}", firmware());
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::write(out_dir.join("patch.rs"), render_patch()).unwrap();
+}
+
+/// The crate version and the commit it was built from, `-dirty` when the tree had changes.
+///
+/// It goes on `ball/firmware`, which is how a reflash is confirmed to have landed:
+/// the version alone never changes between deploys, and the commit does.
+fn firmware() -> String {
+    // A build script that names any file reruns only when one of those changes, so the commit
+    // has to be watched for explicitly: `HEAD` moves on a checkout, the index on a commit or a
+    // stage, and the sources on an edit that would make the tree dirty.
+    for watched in ["../.git/HEAD", "../.git/index", "src", "../rig-mqtt/src"] {
+        println!("cargo:rerun-if-changed={watched}");
+    }
+    let output = Command::new("git")
+        .args(["describe", "--always", "--dirty"])
+        .output()
+        .unwrap_or_else(|e| panic!("cannot run git: {e}"));
+    if !output.status.success() {
+        panic!(
+            "git describe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let commit = String::from_utf8(output.stdout).unwrap();
+    format!("{} {}", env::var("CARGO_PKG_VERSION").unwrap(), commit.trim())
 }
 
 /// Renders one `DmxConfig` constant per ball the workspace patches.

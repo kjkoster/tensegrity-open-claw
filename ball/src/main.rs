@@ -13,8 +13,10 @@ mod led;
 mod models;
 mod motor;
 mod sacn;
+mod telemetry;
 mod wifi;
 
+use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::with_deadline;
@@ -23,6 +25,7 @@ use esp_hal::{
     efuse::{self, InterfaceMacAddress},
     interrupt::software::SoftwareInterruptControl,
     rng::Rng,
+    system::reset_reason,
     timer::timg::TimerGroup,
 };
 use models::{DmxConfig, DmxState, DmxWatch};
@@ -85,7 +88,16 @@ async fn main(spawner: Spawner) -> ! {
 
     rprintln!("");
     rprintln!("ball firmware started");
+    rprintln!("firmware:       {}", env!("FIRMWARE"));
     rprintln!("cpu:           {} MHz", cpu_clock().as_mhz());
+
+    // Why this boot happened. On a ball that runs on a pack, a brownout reset is what a sagging
+    // pack looks like, and nothing else would tell it apart from the ball simply being switched
+    // on.
+    let reset = reset_reason().map_or_else(|| "unknown".into(), |reason| format!("{:?}", reason));
+    rprintln!("reset reason:   {}", reset);
+    telemetry::publish("reset_reason", reset);
+    telemetry::publish("firmware", env!("FIRMWARE"));
 
     // A hardware test, ahead of the network: it does not need it, and it runs from boot.
     let sensors = analog::Sensors::new(peripherals.ADC1, peripherals.GPIO3, peripherals.GPIO4);
@@ -107,16 +119,35 @@ async fn main(spawner: Spawner) -> ! {
         mac_address[4],
         mac_address[5]
     );
+    telemetry::publish(
+        "mac",
+        format!(
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            mac_address[0],
+            mac_address[1],
+            mac_address[2],
+            mac_address[3],
+            mac_address[4],
+            mac_address[5]
+        ),
+    );
 
     let dmx_config = config::dmx_config_for(mac_address);
+    // Published now and sent on every connect, like everything else the ball publishes.
+    telemetry::publish("universe", format!("{}", dmx_config.universe()));
+    telemetry::publish("dmx_address", format!("{}", dmx_config.address()));
 
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
     let network_stack = wifi::connect(spawner, peripherals.WIFI, seed, config::WIFI_CONFIG).await;
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
+    spawner.spawn(telemetry::run(network_stack).unwrap());
 
     let mut dmx_state = DMX_STATE.receiver().unwrap();
+    // Whether the universe is being heard, published on the change alone: it is what tells a
+    // ball that is on the network but deaf to the multicast apart from one that is following.
+    let mut live = None;
     loop {
         // A run in progress bounds the wait, because nothing arrives from a rig that simply
         // holds the motor on, and that is the case the bound is for.
@@ -124,6 +155,13 @@ async fn main(spawner: Spawner) -> ! {
             Some(deadline) => with_deadline(deadline, dmx_state.changed()).await.ok(),
             None => Some(dmx_state.changed().await),
         };
+        if let Some(state) = state {
+            let heard = matches!(state, DmxState::Live(_));
+            if live != Some(heard) {
+                live = Some(heard);
+                telemetry::publish("dmx_live", rig_mqtt::boolean(heard));
+            }
+        }
         match state {
             Some(DmxState::Live(value)) => {
                 leds.status.set_brightness(value.onboard_led());

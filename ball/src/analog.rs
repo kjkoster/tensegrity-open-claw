@@ -1,12 +1,17 @@
-//! A hardware test for the two analog inputs: the pack voltage and whether the C terminal
-//! is live, each logged once a second.
+//! The two analog inputs: the pack voltage, and whether the C terminal is live.
+//!
+//! Each is read only when the reading is about to be published, and no more often. The pack
+//! drains over hours, so once a minute says everything about it. The C terminal is only
+//! interesting around a run: it is watched every 100 ms while the motor runs and for half a
+//! second after it stops, and not read at all otherwise.
 //!
 //! The conversion is a straight line from the raw count, with no calibration curve. Each
-//! reading logs its raw count and pin voltage beside the result, so the divider constants
-//! below can be set from a meter: the divider is the meter's reading over the logged pin
-//! voltage.
+//! pack reading logs its raw count and pin voltage beside the result, as does every change of
+//! the C terminal, so the divider constants below can be set from a meter: the divider is the
+//! meter's reading over the logged pin voltage.
 
-use embassy_time::{Duration, Ticker};
+use alloc::format;
+use embassy_time::{Duration, Instant, with_deadline};
 use esp_hal::{
     Async,
     analog::adc::{Adc, AdcCalBasic, AdcConfig, AdcPin, Attenuation},
@@ -14,12 +19,17 @@ use esp_hal::{
 };
 use rtt_target::rprintln;
 
+use crate::{motor, telemetry};
+
 /// The pack voltage, through its divider (board label D1).
 pub type PackPin = GPIO3<'static>;
 /// The C terminal, through its divider (board label D2).
 pub type PresencePin = GPIO4<'static>;
 
-const PERIOD: Duration = Duration::from_secs(1);
+const PACK_PERIOD: Duration = Duration::from_secs(60);
+const PRESENCE_PERIOD: Duration = Duration::from_millis(100);
+/// How long the C terminal is still watched after the motor stops, for the line coming down.
+const PRESENCE_LINGER: Duration = Duration::from_millis(500);
 /// Samples averaged into one reading.
 const SAMPLES: u32 = 8;
 /// The largest raw count, at the attenuation's full scale.
@@ -69,35 +79,87 @@ impl Sensors {
     }
 }
 
+/// Whether the C terminal is being read, which follows the motor.
+#[derive(Clone, Copy)]
+enum Watching {
+    Off,
+    Running,
+    Stopping { until: Instant },
+}
+
 #[embassy_executor::task]
 pub async fn sense(mut sensors: Sensors) -> ! {
-    let mut ticker = Ticker::every(PERIOD);
+    let mut motor = motor::RUNNING.receiver().unwrap();
+    let mut watching = Watching::Off;
+    let mut next_pack = Instant::now();
+    let mut next_presence = Instant::now();
+    // The last C terminal state, so only a change is logged: ten lines a second would bury
+    // everything else on the probe.
+    let mut present = None;
     loop {
-        ticker.next().await;
-
-        let raw = average(&mut sensors.adc, &mut sensors.pack).await;
-        let pin_v = volts(raw, PACK_FULL_SCALE_V);
-        rprintln!(
-            "pack {:.2} V (raw {}, pin {:.3} V)",
-            pin_v * PACK_DIVIDER,
-            raw,
-            pin_v
-        );
-
-        let raw = average(&mut sensors.adc, &mut sensors.presence).await;
-        let pin_v = volts(raw, PRESENCE_FULL_SCALE_V);
-        let state = if pin_v > PRESENCE_THRESHOLD_V {
-            "present"
-        } else {
-            "absent"
+        let next = match watching {
+            Watching::Off => next_pack,
+            Watching::Running | Watching::Stopping { .. } => next_pack.min(next_presence),
         };
-        rprintln!(
-            "c terminal {} (raw {}, pin {:.3} V, line {:.2} V)",
-            state,
-            raw,
-            pin_v,
-            pin_v * PRESENCE_DIVIDER
-        );
+        if let Ok(running) = with_deadline(next, motor.changed()).await {
+            watching = match (running, watching) {
+                (true, Watching::Off) => {
+                    next_presence = Instant::now();
+                    Watching::Running
+                }
+                (true, _) => Watching::Running,
+                (false, Watching::Off) => Watching::Off,
+                (false, _) => Watching::Stopping {
+                    until: Instant::now() + PRESENCE_LINGER,
+                },
+            };
+            continue;
+        }
+
+        let now = Instant::now();
+        if now >= next_pack {
+            next_pack += PACK_PERIOD;
+            sensors.read_pack().await;
+        }
+        if !matches!(watching, Watching::Off) && now >= next_presence {
+            next_presence += PRESENCE_PERIOD;
+            sensors.read_presence(&mut present).await;
+            if let Watching::Stopping { until } = watching
+                && now >= until
+            {
+                watching = Watching::Off;
+            }
+        }
+    }
+}
+
+impl Sensors {
+    async fn read_pack(&mut self) {
+        let raw = average(&mut self.adc, &mut self.pack).await;
+        let pin_v = volts(raw, PACK_FULL_SCALE_V);
+        let pack_v = pin_v * PACK_DIVIDER;
+        rprintln!("pack {:.2} V (raw {}, pin {:.3} V)", pack_v, raw, pin_v);
+        telemetry::publish("pack_v", format!("{:.2}", pack_v));
+        // Beside the pack voltage, so that a falling pack can be read against how long the
+        // ball has been running on it.
+        telemetry::publish("uptime_s", format!("{}", Instant::now().as_secs()));
+    }
+
+    async fn read_presence(&mut self, last: &mut Option<bool>) {
+        let raw = average(&mut self.adc, &mut self.presence).await;
+        let pin_v = volts(raw, PRESENCE_FULL_SCALE_V);
+        let present = pin_v > PRESENCE_THRESHOLD_V;
+        if *last != Some(present) {
+            *last = Some(present);
+            rprintln!(
+                "c terminal {} (raw {}, pin {:.3} V, line {:.2} V)",
+                if present { "present" } else { "absent" },
+                raw,
+                pin_v,
+                pin_v * PRESENCE_DIVIDER
+            );
+        }
+        telemetry::publish("c_terminal", rig_mqtt::boolean(present));
     }
 }
 

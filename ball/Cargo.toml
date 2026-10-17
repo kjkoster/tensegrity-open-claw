@@ -15,15 +15,20 @@ esp-radio           = { version = "0.18.0", features = ["esp-alloc", "esp32c3", 
 esp-alloc           = "0.10.0"
 
 embassy-executor = "0.10.0"
+embassy-futures  = "0.1.2"
 embassy-sync     = "0.8.0"
 embassy-net      = { version = "0.9.1", features = [
   "dhcpv4",
   "medium-ethernet",
   "multicast",
+  "tcp",
   "udp",
 ] }
 embassy-time     = "0.5.0"
+# The traits embassy-net's TcpSocket implements its reads and writes through.
+embedded-io-async = "0.7.0"
 
+rig-mqtt    = { path = "../rig-mqtt" }
 rtt-target  = "0.6.2"
 static_cell = "2.1.1"
 

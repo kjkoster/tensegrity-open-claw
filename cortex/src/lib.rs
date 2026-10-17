@@ -63,6 +63,9 @@ pub struct Rig {
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
     /// before the brain came up into the tasks that drive it.
     pub tasks: Box<dyn FnOnce(Spawner)>,
+    /// The goodbyes of the rig's own telemetry clients, said on shutdown beside the brain's.
+    /// The rig spawns those clients itself, but only the brain knows when it is stopping.
+    pub farewells: Vec<telemetry::Farewell>,
 }
 
 /// Slots the sACN frame spans: 1 through the last slot any patched fixture occupies.
@@ -133,14 +136,16 @@ pub fn run(mut rig: Rig) -> ! {
         eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
     }
 
-    // The brain's own client. What it was built as and against goes on `brain/identity`,
-    // retained, so a subscriber arriving later still gets it.
+    // The brain's own client. What it was built as and against goes under `brain/`, retained,
+    // so a subscriber arriving later still gets it.
     let (_telemetry, publisher, farewell) = telemetry::spawn(TELEMETRY_SERVICE);
-    publisher.publish("identity/rig", name, true);
-    publisher.publish("identity/universe", sacn.universe.to_string(), true);
-    publisher.publish("identity/frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
-    publisher.publish("identity/fixtures", rig.patch.len().to_string(), true);
-    publisher.publish("identity/scenes", rig.scenes.len().to_string(), true);
+    let mut farewells = std::mem::take(&mut rig.farewells);
+    farewells.push(farewell);
+    publisher.publish("rig", name, true);
+    publisher.publish("universe", sacn.universe.to_string(), true);
+    publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
+    publisher.publish("fixtures", rig.patch.len().to_string(), true);
+    publisher.publish("scenes", rig.scenes.len().to_string(), true);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with
     // SIGINT. Catch both to release the sACN source — a burst of terminate frames — so a
@@ -162,7 +167,7 @@ pub fn run(mut rig: Rig) -> ! {
             // Without this every ordinary restart would look like a crash: the will fires
             // whenever the connection dies without a goodbye, and `systemctl restart` is the
             // most common way for that to happen.
-            farewell.say();
+            telemetry::farewell(&farewells);
             std::process::exit(0);
         }
     });
