@@ -1,8 +1,8 @@
 //! The face: the buttons on the cabinet door — an e-stop, the ball button and the music
 //! button, with a lamp in each of the latter two.
 //!
-//! The e-stop is live: while it is pressed the rig is sent black, whoever is driving it.
-//! The two buttons are only traced for now, and the lamps are held dark.
+//! The e-stop is live: while it is pressed the show sends the rig black. The two buttons
+//! are only traced, and the lamps are held dark.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
@@ -27,8 +27,8 @@ const POLL_PERIOD: Duration = Duration::from_millis(10);
 /// period, longer than the contacts bounce and shorter than any deliberate press.
 const SETTLE_SAMPLES: u8 = 3;
 
-/// Whether the e-stop says stop, read by the frame loop every frame. Starts pressed, so a
-/// frame that somehow ran before the face was read would be black rather than lit.
+/// Whether the e-stop says stop, read by the show every frame. Starts pressed, so a frame
+/// that somehow ran before the face was read would be black rather than lit.
 static ESTOP_PRESSED: AtomicBool = AtomicBool::new(true);
 
 /// The face's pins, claimed and configured, waiting for [`spawn`] to hand them to their
@@ -36,8 +36,8 @@ static ESTOP_PRESSED: AtomicBool = AtomicBool::new(true);
 pub struct Face {
     estop_nc: Input,
     estop_no: Input,
-    ball: Input,
-    music: Input,
+    ball_button: Input,
+    music_button: Input,
     // Never written after the claim. Held so the pins stay driven LOW: rppal hands a pin
     // back to its previous mode when it is dropped.
     _ball_lamp: OutputPin,
@@ -87,15 +87,15 @@ pub fn claim() -> Face {
         _music_lamp: pin(MUSIC_LAMP).into_output_low(),
         estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", false),
         estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", false),
-        ball: Input::new(pin(BALL_BUTTON).into_input_pullup(), "ball", true),
-        music: Input::new(pin(MUSIC_BUTTON).into_input_pullup(), "music", true),
+        ball_button: Input::new(pin(BALL_BUTTON).into_input_pullup(), "ball", true),
+        music_button: Input::new(pin(MUSIC_BUTTON).into_input_pullup(), "music", true),
     };
 
-    for input in [&face.estop_nc, &face.estop_no, &face.ball, &face.music] {
+    for input in [&face.estop_nc, &face.estop_no, &face.ball_button, &face.music_button] {
         input.trace();
     }
-    trace_lamp(BALL_LAMP, "ball-lamp");
-    trace_lamp(MUSIC_LAMP, "music-lamp");
+    trace_pin(BALL_LAMP, "ball-lamp", Level::Low, " (dark)");
+    trace_pin(MUSIC_LAMP, "music-lamp", Level::Low, " (dark)");
     face.update_estop();
 
     face
@@ -106,7 +106,8 @@ pub fn spawn(spawner: Spawner, face: Face) {
     spawner.spawn(input_task(face).unwrap());
 }
 
-/// Whether the rig must be black: the e-stop is pressed, or its wiring is at fault.
+/// Whether the show must send the rig black: the e-stop is pressed, or its wiring is at
+/// fault.
 pub fn estop_pressed() -> bool {
     ESTOP_PRESSED.load(Ordering::Relaxed)
 }
@@ -122,8 +123,8 @@ async fn input_task(mut face: Face) -> ! {
         if estop_changed {
             face.update_estop();
         }
-        face.ball.poll();
-        face.music.poll();
+        face.ball_button.poll();
+        face.music_button.poll();
     }
 }
 
@@ -137,7 +138,7 @@ impl Face {
         }
     }
 
-    /// Hands the e-stop's state to the frame loop, and traces it.
+    /// Hands the e-stop's state to the show, and traces it.
     fn update_estop(&self) {
         let estop = self.estop();
         ESTOP_PRESSED.store(!matches!(estop, Estop::Released), Ordering::Relaxed);
@@ -185,30 +186,20 @@ impl Input {
             (true, Level::Low) => " (pressed)",
             (true, Level::High) => " (released)",
         };
-        eprintln!(
-            "face: {}  GPIO{:<2} {:<11}{}{meaning}",
-            timestamp(),
-            self.pin.pin(),
-            self.name,
-            level_name(self.level),
-        );
+        trace_pin(self.pin.pin(), self.name, self.level, meaning);
     }
 }
 
-fn trace_lamp(number: u8, name: &str) {
-    eprintln!(
-        "face: {}  GPIO{number:<2} {name:<11}{} (dark)",
-        timestamp(),
-        level_name(Level::Low),
-    );
-}
-
-/// Upper case, and padded so the annotations after it line up.
-fn level_name(level: Level) -> &'static str {
-    match level {
+fn trace_pin(number: u8, name: &str, level: Level, meaning: &str) {
+    // The level is padded to four so the annotations after it line up.
+    let level = match level {
         Level::Low => "LOW ",
         Level::High => "HIGH",
-    }
+    };
+    eprintln!(
+        "face: {}  GPIO{number:<2} {name:<11}{level}{meaning}",
+        timestamp()
+    );
 }
 
 /// Local wall-clock time to the millisecond, so a trace line can be matched against a

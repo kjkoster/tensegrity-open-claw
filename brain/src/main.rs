@@ -11,7 +11,6 @@ use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
 use std::f64::consts::TAU;
 
-mod ball;
 mod face;
 
 // `patch` and `scenes`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
@@ -36,7 +35,6 @@ fn main() {
         cfg::WHITE_MODE_PERLIN_SEED,
     );
     let mut ball_led_phase = 0.0_f64;
-    let mut ball_interlock = ball::MotorInterlock::new(patch::BALL_5.motor);
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
@@ -64,17 +62,19 @@ fn main() {
             patch::BALL_5
                 .onboard_led
                 .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
-        }),
-        tasks: Box::new(move |spawner| face::spawn(spawner, face)),
-        // The e-stop darkens every slot, so the rig is black whether the show or a console
-        // is driving it, and the frames keep going out so nothing downstream times out.
-        guard: Box::new(move |slots: &mut [u8]| {
-            let blackout = face::estop_pressed();
-            if blackout {
+
+            // The show never runs the ball's motor; only a console can.
+            patch::BALL_5.motor.set(slots, 0);
+
+            // Last, so it has the final say over this frame. It is the show's say only: a
+            // console that takes the rig over replaces the frame, e-stop included, and what
+            // it sends is the operator's responsibility. The engine above still ran, so it
+            // resumes mid-stride on release.
+            if face::estop_pressed() {
                 slots.fill(0);
             }
-            ball_interlock.apply(slots, blackout);
         }),
+        tasks: Box::new(move |spawner| face::spawn(spawner, face)),
     })
 }
 

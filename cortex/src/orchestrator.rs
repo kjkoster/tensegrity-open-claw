@@ -79,9 +79,6 @@ pub async fn frame_task(
             }
         }
 
-        // After the takeover, so nothing an external source sends can get past it.
-        (rig.guard)(&mut slots);
-
         let packet = dmx::encode(
             rig.sacn.universe,
             sequence,

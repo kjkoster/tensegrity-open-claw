@@ -63,10 +63,6 @@ pub struct Rig {
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
     /// before the brain came up into the tasks that drive it.
     pub tasks: Box<dyn FnOnce(Spawner)>,
-    /// The rig's last word on every frame: called with the final slot buffer, after the
-    /// takeover decision and just before it goes to both outputs. What it does here holds
-    /// whoever is driving — this is where an e-stop blacks the rig out.
-    pub guard: Box<dyn FnMut(&mut [u8])>,
 }
 
 /// Slots the sACN frame spans: 1 through the last slot any patched fixture occupies.

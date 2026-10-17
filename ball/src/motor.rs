@@ -10,7 +10,7 @@ pub type MotorPin = GPIO7<'static>;
 
 /// The longest the motor runs in one go, whatever the rig asks for. The rig decides how long
 /// a run is; this is the bound on a rig that has stopped deciding and holds the channel on.
-pub const MAX_RUN: Duration = Duration::from_secs(120);
+pub const MAX_RUN: Duration = Duration::from_secs(2);
 
 pub struct Motor {
     pin: Output<'static>,
