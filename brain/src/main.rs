@@ -59,8 +59,10 @@ fn main() {
             // apart at a glance from one that is not. Kept within one turn so the phase
             // never grows past the precision of an f64.
             ball_led_phase = (ball_led_phase + TAU * BALL_LED_HZ * dt) % TAU;
+            // `intensity` is the ball's onboard status LED: its definition gives that
+            // channel the IntensityDimmer preset, and the field is named after the role.
             patch::BALL_5
-                .onboard_led
+                .intensity
                 .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
 
             // The show never runs the ball's motor; only a console can.

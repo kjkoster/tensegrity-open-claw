@@ -30,7 +30,7 @@ pub enum DmxState {
 pub struct DmxValue([u8; DmxValue::LEN]);
 
 impl DmxValue {
-    pub const LEN: usize = 5;
+    pub const LEN: usize = 4;
 
     /// Where a switched channel turns on: the upper half of the range is on, the lower half
     /// off, so a console's 0 and 255 land on the two states with the widest margin.
@@ -44,6 +44,16 @@ impl DmxValue {
     /// `fixtures/ball.qxf`.
     pub fn onboard_led(self) -> u8 {
         self.0[0]
+    }
+
+    /// The level of the white power LED: the second channel of the mode.
+    pub fn white(self) -> u8 {
+        self.0[1]
+    }
+
+    /// The level of the blue power LED: the third channel of the mode.
+    pub fn blue(self) -> u8 {
+        self.0[2]
     }
 
     /// Whether the motor is asked to run: the fourth channel of the mode.

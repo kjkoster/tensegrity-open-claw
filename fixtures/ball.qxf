@@ -11,23 +11,17 @@
  <Type>Other</Type>
  <Channel Name="Onboard LED" Preset="IntensityDimmer"/>
  <Channel Name="led-white" Preset="IntensityWhite"/>
- <Channel Name="led-tbd" Preset="IntensityDimmer"/>
+ <Channel Name="Blue LED" Preset="IntensityBlue"/>
  <Channel Name="Motor">
   <Group Byte="0">Speed</Group>
   <Capability Min="0" Max="127">Off</Capability>
   <Capability Min="128" Max="255">On</Capability>
  </Channel>
- <Channel Name="Keep awake">
-  <Group Byte="0">Maintenance</Group>
-  <Capability Min="0" Max="0">Sleep (reserved, not implemented)</Capability>
-  <Capability Min="1" Max="255">Stay awake 1-255 s after last packet (reserved, not implemented)</Capability>
- </Channel>
- <Mode Name="5 Channel">
+ <Mode Name="4 Channel">
   <Channel Number="0">Onboard LED</Channel>
   <Channel Number="1">led-white</Channel>
-  <Channel Number="2">led-tbd</Channel>
+  <Channel Number="2">Blue LED</Channel>
   <Channel Number="3">Motor</Channel>
-  <Channel Number="4">Keep awake</Channel>
   <Head>
    <Channel>1</Channel>
    <Channel>2</Channel>

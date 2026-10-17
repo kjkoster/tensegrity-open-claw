@@ -62,12 +62,12 @@
   <Fixture>
    <Manufacturer>Tensegrity</Manufacturer>
    <Model>Ball</Model>
-   <Mode>5 Channel</Mode>
+   <Mode>4 Channel</Mode>
    <ID>4</ID>
    <Name>Ball [5]</Name>
    <Universe>0</Universe>
    <Address>199</Address>
-   <Channels>5</Channels>
+   <Channels>4</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>CLF</Manufacturer>

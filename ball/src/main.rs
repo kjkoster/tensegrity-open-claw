@@ -7,6 +7,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+mod analog;
 mod config;
 mod led;
 mod models;
@@ -72,14 +73,23 @@ async fn main(spawner: Spawner) -> ! {
     let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
-    // Before anything that can wait or panic, so both pins are driven and the LED and the
+    // Before anything that can wait or panic, so the pins are driven and the LEDs and the
     // motor are held off until the rig says otherwise.
-    let status_led = led::StatusLed::new(peripherals.LEDC, peripherals.GPIO21);
+    let leds = led::Leds::new(
+        peripherals.LEDC,
+        peripherals.GPIO21,
+        peripherals.GPIO20,
+        peripherals.GPIO10,
+    );
     let mut motor = motor::Motor::new(peripherals.GPIO7);
 
     rprintln!("");
     rprintln!("ball firmware started");
     rprintln!("cpu:           {} MHz", cpu_clock().as_mhz());
+
+    // A hardware test, ahead of the network: it does not need it, and it runs from boot.
+    let sensors = analog::Sensors::new(peripherals.ADC1, peripherals.GPIO3, peripherals.GPIO4);
+    spawner.spawn(analog::sense(sensors).unwrap());
 
     // Read this board's station MAC from efuse (before WiFi starts) and use it to
     // pick its compiled-in configuration. See config.rs for the why and the
@@ -116,14 +126,18 @@ async fn main(spawner: Spawner) -> ! {
         };
         match state {
             Some(DmxState::Live(value)) => {
-                status_led.set_brightness(value.onboard_led());
+                leds.status.set_brightness(value.onboard_led());
+                leds.white.set_brightness(value.white());
+                leds.blue.set_brightness(value.blue());
                 motor.follow(value.motor());
             }
-            // Only the motor: it is the one output that does harm when left running on the
-            // word of a sender that is gone.
+            // The outputs that do harm when left on at the word of a sender that is gone: the
+            // motor, and the power LEDs at full current. The status LED keeps its level.
             Some(DmxState::Lost) => {
-                rprintln!("universe lost, stopping the motor");
+                rprintln!("universe lost, stopping the motor and darkening the power leds");
                 motor.trip();
+                leds.white.set_brightness(0);
+                leds.blue.set_brightness(0);
             }
             None => {
                 rprintln!(
