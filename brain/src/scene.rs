@@ -30,7 +30,7 @@ use cortex::telemetry::Publisher;
 /// The motor runs this long, then rests, on a beat counted from the start of the show, so the
 /// show opens with a run.
 const MOTOR_RUN_S: f64 = 1.0;
-const MOTOR_REST_S: f64 = 29.0;
+const MOTOR_REST_S: f64 = 240.0;
 /// How late into its window a run may still begin: the frame loop's own jitter, and not
 /// enough for what starts to be the remainder of a run rather than a run. Past it, the window
 /// is skipped — after a release of the e-stop, after test mode hands back, or after NTP steps
