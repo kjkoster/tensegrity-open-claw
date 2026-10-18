@@ -1,3 +1,4 @@
+use embassy_time::Duration;
 use esp_hal::{
     gpio::DriveMode,
     ledc::{
@@ -29,6 +30,11 @@ const STATUS_PWM_RESOLUTION: Duty = Duty::Duty13Bit;
 const POWER_PWM_FREQUENCY: Rate = Rate::from_hz(500);
 const POWER_PWM_RESOLUTION: Duty = Duty::Duty13Bit;
 
+/// One period of the power LEDs' PWM, which is as finely as their brightness can change: a
+/// pattern that stepped any faster would only rewrite a duty the timer has not used yet.
+pub const POWER_PWM_PERIOD: Duration =
+    Duration::from_micros(1_000_000 / POWER_PWM_FREQUENCY.as_hz() as u64);
+
 // A channel borrows its timer for as long as it lives, and it lives in a task.
 static STATUS_PWM_TIMER: StaticCell<Timer<'static, LowSpeed>> = StaticCell::new();
 static POWER_PWM_TIMER: StaticCell<Timer<'static, LowSpeed>> = StaticCell::new();
@@ -53,8 +59,20 @@ pub struct Led {
 /// they are set up together.
 pub struct Leds {
     pub status: Led,
-    pub white: Led,
-    pub blue: Led,
+    pub power: PowerLeds,
+}
+
+/// The two power LEDs, which always move together: the patterns light both at once.
+pub struct PowerLeds {
+    white: Led,
+    blue: Led,
+}
+
+impl PowerLeds {
+    pub fn set_brightness(&self, white: u8, blue: u8) {
+        self.white.set_brightness(white);
+        self.blue.set_brightness(blue);
+    }
 }
 
 impl Leds {
@@ -82,18 +100,20 @@ impl Leds {
                 STATUS_PWM_RESOLUTION,
                 Polarity::ActiveLow,
             ),
-            white: Led::new(
-                ledc.channel(channel::Number::Channel1, white),
-                power_timer,
-                POWER_PWM_RESOLUTION,
-                Polarity::ActiveHigh,
-            ),
-            blue: Led::new(
-                ledc.channel(channel::Number::Channel2, blue),
-                power_timer,
-                POWER_PWM_RESOLUTION,
-                Polarity::ActiveHigh,
-            ),
+            power: PowerLeds {
+                white: Led::new(
+                    ledc.channel(channel::Number::Channel1, white),
+                    power_timer,
+                    POWER_PWM_RESOLUTION,
+                    Polarity::ActiveHigh,
+                ),
+                blue: Led::new(
+                    ledc.channel(channel::Number::Channel2, blue),
+                    power_timer,
+                    POWER_PWM_RESOLUTION,
+                    Polarity::ActiveHigh,
+                ),
+            },
         }
     }
 }

@@ -1,0 +1,10 @@
+[package]
+edition      = "2024"
+name         = "ball-dmx"
+rust-version = "1.95"
+version      = "0.1.0"
+
+# What a ball's DMX values mean where `fixtures/ball.qxf` cannot say it, shared by the brain
+# that sends them and the ball that renders them. No dependencies, and no std: the ball builds
+# it for an ESP32-C3.
+[dependencies]

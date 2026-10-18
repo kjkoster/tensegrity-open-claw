@@ -17,11 +17,26 @@
   <Capability Min="0" Max="127">Off</Capability>
   <Capability Min="128" Max="255">On</Capability>
  </Channel>
- <Mode Name="4 Channel">
+ <Channel Name="Pattern">
+  <Group Byte="0">Effect</Group>
+  <Capability Min="0" Max="84">Direct</Capability>
+  <Capability Min="85" Max="169">Pulse</Capability>
+  <Capability Min="170" Max="255">Strobe</Capability>
+ </Channel>
+ <Channel Name="Strobe on">
+  <Group Byte="0">Shutter</Group>
+ </Channel>
+ <Channel Name="Strobe off">
+  <Group Byte="0">Shutter</Group>
+ </Channel>
+ <Mode Name="7 Channel">
   <Channel Number="0">Onboard LED</Channel>
   <Channel Number="1">led-white</Channel>
   <Channel Number="2">Blue LED</Channel>
   <Channel Number="3">Motor</Channel>
+  <Channel Number="4">Pattern</Channel>
+  <Channel Number="5">Strobe on</Channel>
+  <Channel Number="6">Strobe off</Channel>
   <Head>
    <Channel>1</Channel>
    <Channel>2</Channel>

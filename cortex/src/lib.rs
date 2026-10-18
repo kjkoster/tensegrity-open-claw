@@ -7,6 +7,7 @@
 //! and the takeover arbitration for it.
 
 pub mod audio_features;
+pub mod calendar;
 pub mod clock;
 pub mod config;
 pub mod envelope;
@@ -34,8 +35,8 @@ use signal_hook::low_level::signal_name;
 use std::net::UdpSocket;
 
 /// The name the brain wears on the broker: its health topic and the prefix on everything else
-/// it publishes.
-const TELEMETRY_SERVICE: &str = "brain";
+/// it publishes. The rig spawns the client under it, so its show can publish there as well.
+pub const TELEMETRY_SERVICE: &str = "brain";
 
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
 ///
@@ -63,8 +64,13 @@ pub struct Rig {
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
     /// before the brain came up into the tasks that drive it.
     pub tasks: Box<dyn FnOnce(Spawner)>,
-    /// The goodbyes of the rig's own telemetry clients, said on shutdown beside the brain's.
-    /// The rig spawns those clients itself, but only the brain knows when it is stopping.
+    /// The brain's own client, spawned by the rig under [`TELEMETRY_SERVICE`] so that both the
+    /// rig's show and everything here can publish under `brain/`: the show is built before
+    /// the brain comes up, and one service cannot have two clients.
+    pub telemetry: telemetry::Publisher,
+    /// The goodbyes of every telemetry client the rig spawned, the brain's included, said on
+    /// shutdown. The rig spawns those clients itself, but only the brain knows when it is
+    /// stopping.
     pub farewells: Vec<telemetry::Farewell>,
 }
 
@@ -81,6 +87,45 @@ pub(crate) fn frame_width(patch: &[PatchEntry]) -> usize {
         .map(|channel| channel.slot())
         .max()
         .map_or(0, |slot| slot + 1)
+}
+
+/// What the brain runs on, in the `sys` subtree every part of the rig publishes its own under:
+/// the board as its device tree names it, the cores, the top CPU frequency in MHz, the
+/// installed RAM in KB, and the target triplet the brain was compiled for. A reading the
+/// board does not offer is left out rather than published as a guess.
+fn publish_system(publisher: &telemetry::Publisher) {
+    if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
+        publisher.publish("sys/board", model.trim_end_matches('\0').trim(), true);
+    }
+    if let Some(kb) = installed_ram_kb() {
+        publisher.publish("sys/ram_kb", kb.to_string(), true);
+    }
+    if let Ok(cores) = std::thread::available_parallelism() {
+        publisher.publish("sys/cores", cores.to_string(), true);
+    }
+    let max_khz = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq";
+    if let Some(khz) = std::fs::read_to_string(max_khz)
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+    {
+        publisher.publish("sys/cpu_frequency_mhz", (khz / 1000).to_string(), true);
+    }
+    publisher.publish("sys/triplet", env!("TRIPLET"), true);
+}
+
+/// The RAM fitted to a Raspberry Pi, decoded from the revision code in `/proc/cpuinfo`.
+///
+/// Not the kernel's `MemTotal`, which is what is left once the GPU and the kernel have taken
+/// their share. A new-style code (bit 23) carries the size in bits 20–22, as 256 MB doubled
+/// that many times; an old-style code does not say, and is left out.
+fn installed_ram_kb() -> Option<u64> {
+    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+    let revision = cpuinfo
+        .lines()
+        .find_map(|line| line.strip_prefix("Revision")?.split(':').nth(1))?;
+    let code = u32::from_str_radix(revision.trim(), 16).ok()?;
+    let new_style = code & (1 << 23) != 0;
+    new_style.then(|| (256 * 1024) << ((code >> 20) & 0x7))
 }
 
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
@@ -136,16 +181,16 @@ pub fn run(mut rig: Rig) -> ! {
         eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
     }
 
-    // The brain's own client. What it was built as and against goes under `brain/`, retained,
-    // so a subscriber arriving later still gets it.
-    let (_telemetry, publisher, farewell) = telemetry::spawn(TELEMETRY_SERVICE);
-    let mut farewells = std::mem::take(&mut rig.farewells);
-    farewells.push(farewell);
+    // What the brain was built as and against goes under `brain/`, retained, so a subscriber
+    // arriving later still gets it.
+    let publisher = &rig.telemetry;
+    let farewells = std::mem::take(&mut rig.farewells);
     publisher.publish("rig", name, true);
-    publisher.publish("universe", sacn.universe.to_string(), true);
+    publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("fixtures", rig.patch.len().to_string(), true);
     publisher.publish("scenes", rig.scenes.len().to_string(), true);
+    publish_system(publisher);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with
     // SIGINT. Catch both to release the sACN source — a burst of terminate frames — so a

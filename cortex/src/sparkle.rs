@@ -9,7 +9,6 @@
 //! never a crossfade (§4, §5).
 
 use crate::audio_features::AudioFeatures;
-use crate::clock::now_us;
 use crate::config as cfg;
 use crate::perlin::{fbm2, noise1d};
 
@@ -135,8 +134,7 @@ impl SparkleMapping {
     pub fn frame(&mut self, af: &AudioFeatures, dt: f64) -> SparkleOut {
         // Crossfade: a stalled or absent producer reads as silence (§5), decaying our
         // own effective music_amount so the sculpture falls back to breathing.
-        let stale = now_us().saturating_sub(af.timestamp_us) > cfg::STALE_US;
-        let target = if stale { 0.0 } else { af.music_amount as f64 };
+        let target = if af.is_stale() { 0.0 } else { af.music_amount as f64 };
         let rate = if target > self.eff_music {
             dt / cfg::FADE_UP_S as f64
         } else {

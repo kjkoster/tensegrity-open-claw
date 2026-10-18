@@ -4,13 +4,23 @@ name         = "cortex-build"
 rust-version = "1.96"
 version      = "0.1.0"
 
-# The QLC+ ingest. Its own crate rather than a module of cortex because a build script may
-# use only its build-dependencies: this needs an XML reader and nothing else, and putting
-# ALSA, the executor and an FFT onto the host build graph to read a patch file would be a
-# poor trade.
+# The QLC+ ingest and the show calendar. Its own crate rather than a module of cortex because
+# a build script may use only its build-dependencies, and putting ALSA, the executor and an
+# FFT onto the host build graph to read a patch file would be a poor trade.
 #
 # roxmltree is a read-only DOM with no dependencies of its own, and it reports local tag
 # names with the namespace already stripped — which is what keeps QLC+'s default XML
 # namespace from silently matching nothing.
+#
+# The calendar's crates are all offline, because the build runs on the Pi behind a 4G link:
+# `cities` is a static table of about ten thousand cities, `tzf-rs` maps coordinates to a
+# zone from polygons it bundles, `jiff` resolves local times in that zone from the system's
+# time-zone database, and `sunrise` computes civil twilight. `chrono` is only there to name
+# the date type `sunrise` takes.
 [dependencies]
+chrono    = { version = "0.4", default-features = false }
+cities    = "0.2.0"
+jiff      = "0.2.38"
 roxmltree = "0.21"
+sunrise   = "3.0.0"
+tzf-rs    = { version = "2.1.3", default-features = false, features = ["bundled"] }

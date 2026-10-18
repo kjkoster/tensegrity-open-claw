@@ -169,6 +169,11 @@ would make every rsynced source look newer than every build artifact and rebuild
 keeps its own. Note there is still a window after each boot — before timesyncd reaches a
 server — where the clock comes from `fake-hwclock` and is stale.
 
+The brain does not wait out that window: it judges the [show times](#show-times) against
+the clock as it stands, and corrects itself the frame after NTP steps it. Its log says which
+clock it is on (`show: the clock is NTP-synchronised`, or `is not`), and prints the show
+table again the moment that changes.
+
 ## Zihatec HAT — DIP switches (manual DE/RE via GPIO18)
 
 `brain` generates the DMX break itself, so use manual direction on GPIO18:
@@ -223,23 +228,25 @@ Before any of that, `deploy.sh` builds the `ball` firmware on the Mac. Only the 
 the Pi, as `tensegrity-open-claw/binaries/ball`, and the last thing `remote-deploy.sh` does is
 flash it onto every board it finds under `/dev/serial/by-id`.
 
-The cargo workspace is three crates:
+The cargo workspace is five crates:
 
 | | |
 |---|---|
-| `cortex/` | everything under the show: capture, features, noise, both transports, the frame loop |
-| `cortex-build/` | the QLC+ ingest, a build-dependency of the rig crate |
-| `brain/` | the claw: `claw.qxw`'s patch and the sparkle show |
+| `cortex/` | everything under the show: capture, features, noise, both transports, the frame loop, the show calendar |
+| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
+| `brain/` | the claw: `claw.qxw`'s patch, its show times, and the show |
+| `rig-mqtt/` | the MQTT conventions the brain and the ball share |
+| `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, shared by the brain and the ball |
 
-The rig crate is two files: a `build.rs` naming its workspace, and a `main.rs` that includes
-the generated patch and writes the show.
+The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
+`main.rs` includes the generated patch and calendar and writes the show.
 
 Beside the crates, a daemon's systemd unit lives in that daemon's directory
 (`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
 belonging to a daemon lives in `etc/`: the access point's configuration, the 4G watchdog and
 `remote-deploy.sh` itself.
 
-The deploy ships **only what the Pi builds from and installs** — the three crates,
+The deploy ships **only what the Pi builds from and installs** — the five crates,
 `claw.qxw`, `fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh`
 rather than filtered by exclusions, so adding something is a decision; the design documents,
 the reference PDFs and the git history stay on the Mac. The workspace goes because the build
@@ -293,6 +300,8 @@ offsets, drift is caught by the compiler in every direction:
 | patch a fixture outside the first universe | fails — the daemon sends exactly one universe |
 | change the E1.31 output's universe or port | the brain listens and sends there, and so does every ball once re-flashed |
 | change the E1.31 output's unicast address | the brain's receiver binds that address instead |
+| change the ball's channels or bands in `ball.qxf` | the brain and the ball firmware both follow, once re-flashed |
+| patch two balls in different modes | fails — every board runs the same firmware, so they must share one |
 | switch the E1.31 output to multicast | fails — the brain only receives a console by unicast |
 | remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
 | delete or rename a ball a board is provisioned as | the ball firmware stops compiling at that board's row |
@@ -319,6 +328,61 @@ brain:   front_wash_warm (18 values)
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
+
+### Show times
+
+The rig plays only during the shows listed in `brain/shows.rs`: a `CITY`, and local
+`(start, stop)` pairs in that city's time, in order. Edit it and deploy. Outside a show the
+rig is black except for the ball's status LED.
+
+During a show the ball's motor runs for one second every 30 seconds, the first run as the
+show opens. From civil dusk to civil dawn its power LEDs pulse in silence and strobe to the
+music.
+
+The build looks the city up, finds its zone, and works out every show's instants and dark
+stretches, all offline. It fails on:
+
+| | |
+|---|---|
+| a city it does not know | fails, naming it |
+| a city name more than one country has | fails, listing the `"City, Country"` spellings to use instead |
+| a time it cannot read | fails, with the expected form, `"2026-10-21 13:00"` |
+| a time in the hour the clocks skip, or the one they pass twice | fails — move it out of that hour |
+| a stop that is not after its start | fails, naming the show |
+| a show starting before the one above it ends | fails, naming the show |
+
+**Confirming it landed.** The startup log lists the site and every show yet to end, with its
+dark stretches, each time with its offset and season:
+
+```
+show: Amsterdam, Netherlands (52.3731°, 4.8999°), Europe/Amsterdam
+show: the clock is NTP-synchronised
+show: 3 of 3 shows to come
+show:   2026-10-21 13:00 CEST (+02:00, summer time) → 2026-10-21 22:00 CEST (+02:00, summer time)
+show:     dark 19:08 → 22:00
+```
+
+The brain publishes its state as `brain/scene` (`estop`, `blackout`, `daylight`, `pulse` or
+`strobe`) and `brain/testmode`, retained, and a `show: scene …` or `show: test mode …` line in the
+log on every change.
+
+### Test mode
+
+To try each scene without a console or waiting for dusk, use the cabinet door:
+
+| | |
+|---|---|
+| hold both buttons for 2 s | test mode on, starting from the scene the rig is in; both lamps light |
+| left button | the next scene: blackout → daylight → pulse → strobe → blackout |
+| right button | one motor run, there and then |
+| hold both buttons for 2 s again | test mode off; the calendar has the rig again |
+
+The calendar and the sun are ignored while it is on, but the audio is not: the strobe still
+follows the room. The motor runs only when the right button asks, never on its beat. The
+e-stop still wins, and cancels a run in progress. The buttons are published as
+`face/left_button` and `face/right_button`. Test mode turns itself off after 15
+minutes without a press, so a rig left in it cannot ignore the calendar for the rest of the
+event.
 
 ---
 
@@ -440,9 +504,8 @@ Three behaviours that are correct but surprise you the first time:
 - **Handback takes about 2.5 s, not one frame.** E1.31 has a stream-terminated bit that
   releases instantly, but QLC+ does not send it, so the timeout does the work.
 - **A takeover beats the e-stop.** The e-stop only blacks out the generative engine;
-  your universe goes out as you send it, e-stop pressed or not. The engine never runs the
-  ball's motor, so a running motor is always yours: pull its fader down before you release
-  the e-stop, or it carries on.
+  your universe goes out as you send it, e-stop pressed or not. A motor you run is yours:
+  pull its fader down before you release the e-stop, or it carries on.
 
 Takeover needs priority **strictly above 100**, which is what the daemon transmits at. That
 is deliberate: every sACN source ships defaulted to 100, so a laptop joining the network

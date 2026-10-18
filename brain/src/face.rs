@@ -1,51 +1,88 @@
-//! The face: the buttons on the cabinet door — an e-stop, the ball button and the music
-//! button, with a lamp in each of the latter two.
+//! The face: the buttons on the cabinet door — an e-stop, and a left and a right button with
+//! a lamp in each.
 //!
-//! The e-stop is live: while it is pressed the show sends the rig black. The two buttons
-//! are only traced, and the lamps are held dark.
+//! The e-stop is live: while it is pressed the show is in its e-stop scene. The two buttons
+//! are read as gestures for the show's test mode, and the lamps say whether it is on.
+//!
+//! A gesture is counted on release, not on press, because only the release tells a button
+//! pressed alone from one that became half of a chord: holding both for two seconds toggles
+//! test mode, and neither of the presses that made the chord counts as a gesture of its own.
+//! Gestures are counters rather than flags, so a show that reads them once per frame cannot
+//! miss one that came and went between two frames.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
 //! consecutive samples.
 //!
 //! The face is a fixture of its own on the broker, with its own client beside the brain's:
-//! `health/face`, and `face/ball_button`, `face/music_button` and `face/estop`, retained.
+//! `health/face`, and `face/left_button`, `face/right_button` and `face/estop`, retained.
 
 use cortex::telemetry::Publisher;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use rppal::gpio::{Gpio, InputPin, Level, OutputPin};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // BCM numbers. The RS-485 HAT owns 14, 15 and 18; none of those may appear here.
 const ESTOP_NC: u8 = 23;
 const ESTOP_NO: u8 = 24;
-const BALL_BUTTON: u8 = 25;
-const MUSIC_BUTTON: u8 = 27;
-const BALL_LAMP: u8 = 12;
-const MUSIC_LAMP: u8 = 13;
+const LEFT_BUTTON: u8 = 27;
+const RIGHT_BUTTON: u8 = 25;
+const LEFT_LAMP: u8 = 13;
+const RIGHT_LAMP: u8 = 12;
 
 const POLL_PERIOD: Duration = Duration::from_millis(10);
 /// Consecutive samples a new level must hold before it is accepted: 30 ms at the poll
 /// period, longer than the contacts bounce and shorter than any deliberate press.
 const SETTLE_SAMPLES: u8 = 3;
+/// How long both buttons are held to make a chord: 2 s at the poll period, long enough that
+/// leaning on the door does not do it.
+const CHORD_SAMPLES: u16 = 200;
 
 /// Whether the e-stop says stop, read by the show every frame. Starts pressed, so a frame
 /// that somehow ran before the face was read would be black rather than lit.
 static ESTOP_PRESSED: AtomicBool = AtomicBool::new(true);
+
+static CHORDS: AtomicU32 = AtomicU32::new(0);
+static LEFT_RELEASES: AtomicU32 = AtomicU32::new(0);
+static RIGHT_RELEASES: AtomicU32 = AtomicU32::new(0);
+
+/// Whether the show wants the lamps lit.
+static LAMPS: AtomicBool = AtomicBool::new(false);
+
+/// How many of each gesture the face has seen since it started. Only the differences between
+/// two readings mean anything.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Gestures {
+    /// Both buttons held for the chord's length.
+    pub chords: u32,
+    /// The left button pressed and released on its own.
+    pub left: u32,
+    /// The right button pressed and released on its own.
+    pub right: u32,
+}
+
+/// Tracks the chord across polls.
+#[derive(Default)]
+struct Chord {
+    /// Consecutive polls with both buttons down.
+    held: u16,
+    /// Whether each button has been half of a chord since it was last pressed, which takes
+    /// its release out of the count.
+    left_in_chord: bool,
+    right_in_chord: bool,
+}
 
 /// The face's pins, claimed and configured, waiting for [`spawn`] to hand them to their
 /// polling task.
 pub struct Face {
     estop_nc: Input,
     estop_no: Input,
-    ball_button: Input,
-    music_button: Input,
-    // Never written after the claim. Held so the pins stay driven LOW: rppal hands a pin
-    // back to its previous mode when it is dropped.
-    _ball_lamp: OutputPin,
-    _music_lamp: OutputPin,
+    left_button: Input,
+    right_button: Input,
+    left_lamp: OutputPin,
+    right_lamp: OutputPin,
     telemetry: Publisher,
 }
 
@@ -91,25 +128,25 @@ pub fn claim(telemetry: Publisher) -> Face {
     // rppal writes the level before switching the pin to output, so a lamp cannot flash on
     // while it is being claimed.
     let face = Face {
-        _ball_lamp: pin(BALL_LAMP).into_output_low(),
-        _music_lamp: pin(MUSIC_LAMP).into_output_low(),
+        left_lamp: pin(LEFT_LAMP).into_output_low(),
+        right_lamp: pin(RIGHT_LAMP).into_output_low(),
         estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", None),
         estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", None),
-        ball_button: Input::new(pin(BALL_BUTTON).into_input_pullup(), "ball", Some("ball_button")),
-        music_button: Input::new(
-            pin(MUSIC_BUTTON).into_input_pullup(),
-            "music",
-            Some("music_button"),
+        left_button: Input::new(pin(LEFT_BUTTON).into_input_pullup(), "left", Some("left_button")),
+        right_button: Input::new(
+            pin(RIGHT_BUTTON).into_input_pullup(),
+            "right",
+            Some("right_button"),
         ),
         telemetry,
     };
 
-    for input in [&face.estop_nc, &face.estop_no, &face.ball_button, &face.music_button] {
+    for input in [&face.estop_nc, &face.estop_no, &face.left_button, &face.right_button] {
         input.trace();
         input.publish(&face.telemetry);
     }
-    trace_pin(BALL_LAMP, "ball-lamp", Level::Low, " (dark)");
-    trace_pin(MUSIC_LAMP, "music-lamp", Level::Low, " (dark)");
+    trace_pin(LEFT_LAMP, "left-lamp", Level::Low, " (dark)");
+    trace_pin(RIGHT_LAMP, "right-lamp", Level::Low, " (dark)");
     face.decide_estop();
 
     face
@@ -126,6 +163,19 @@ pub fn estop_pressed() -> bool {
     ESTOP_PRESSED.load(Ordering::Relaxed)
 }
 
+pub fn gestures() -> Gestures {
+    Gestures {
+        chords: CHORDS.load(Ordering::Relaxed),
+        left: LEFT_RELEASES.load(Ordering::Relaxed),
+        right: RIGHT_RELEASES.load(Ordering::Relaxed),
+    }
+}
+
+/// Lights both lamps, or darkens them, from the next poll on.
+pub fn light_lamps(lit: bool) {
+    LAMPS.store(lit, Ordering::Relaxed);
+}
+
 #[embassy_executor::task]
 async fn input_task(mut face: Face) -> ! {
     let mut ticker = Ticker::every(POLL_PERIOD);
@@ -136,6 +186,8 @@ async fn input_task(mut face: Face) -> ! {
     // a full settle period, and from both levels together.
     let mut estop_undecided = false;
     let mut estop_quiet = 0u8;
+    let mut chord = Chord::default();
+    let mut lamps = false;
     loop {
         ticker.next().await;
         // `|`, not `||`: both contacts must be sampled every tick, or a change on the NO
@@ -160,8 +212,55 @@ async fn input_task(mut face: Face) -> ! {
             face.decide_estop();
         }
 
-        face.ball_button.poll(&face.telemetry);
-        face.music_button.poll(&face.telemetry);
+        let left_changed = face.left_button.poll(&face.telemetry);
+        let right_changed = face.right_button.poll(&face.telemetry);
+        chord.observe(
+            face.left_button.pressed(),
+            face.right_button.pressed(),
+            left_changed,
+            right_changed,
+        );
+
+        let lit = LAMPS.load(Ordering::Relaxed);
+        if lit != lamps {
+            lamps = lit;
+            let level = if lit { Level::High } else { Level::Low };
+            let meaning = if lit { " (lit)" } else { " (dark)" };
+            face.left_lamp.write(level);
+            face.right_lamp.write(level);
+            trace_pin(LEFT_LAMP, "left-lamp", level, meaning);
+            trace_pin(RIGHT_LAMP, "right-lamp", level, meaning);
+        }
+    }
+}
+
+impl Chord {
+    /// Counts the gestures one poll completes, from the buttons' settled levels and whether
+    /// each just changed.
+    fn observe(&mut self, left: bool, right: bool, left_changed: bool, right_changed: bool) {
+        if left && right {
+            self.left_in_chord = true;
+            self.right_in_chord = true;
+            self.held = self.held.saturating_add(1);
+            // Equality rather than at-least, so a chord held on counts once.
+            if self.held == CHORD_SAMPLES {
+                CHORDS.fetch_add(1, Ordering::Relaxed);
+            }
+        } else {
+            self.held = 0;
+        }
+        if left_changed && !left {
+            if !self.left_in_chord {
+                LEFT_RELEASES.fetch_add(1, Ordering::Relaxed);
+            }
+            self.left_in_chord = false;
+        }
+        if right_changed && !right {
+            if !self.right_in_chord {
+                RIGHT_RELEASES.fetch_add(1, Ordering::Relaxed);
+            }
+            self.right_in_chord = false;
+        }
     }
 }
 
@@ -222,9 +321,13 @@ impl Input {
     }
 
     /// A button is pulled up and closes to ground, so pressed is LOW.
+    fn pressed(&self) -> bool {
+        self.level == Level::Low
+    }
+
     fn publish(&self, telemetry: &Publisher) {
         if let Some(topic) = self.button {
-            telemetry.publish(topic, rig_mqtt::boolean(self.level == Level::Low), true);
+            telemetry.publish(topic, rig_mqtt::boolean(self.pressed()), true);
         }
     }
 

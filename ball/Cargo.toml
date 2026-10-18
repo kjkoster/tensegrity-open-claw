@@ -13,6 +13,11 @@ esp-rtos            = { version = "0.3.0", features = ["embassy", "esp-alloc", "
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32c3"] }
 esp-radio           = { version = "0.18.0", features = ["esp-alloc", "esp32c3", "unstable", "wifi"] }
 esp-alloc           = "0.10.0"
+# The chip's facts — its name, its core count — as esp-hal itself knows them, for `ball/sys/`.
+esp-metadata-generated = { version = "0.4.0", features = ["esp32c3"] }
+# The flash chip's size, for `ball/sys/flash`, through the trait that carries `capacity`.
+esp-storage         = { version = "0.9.0", features = ["esp32c3"] }
+embedded-storage    = "0.3.1"
 
 embassy-executor = "0.10.0"
 embassy-futures  = "0.1.2"
@@ -28,6 +33,7 @@ embassy-time     = "0.5.0"
 # The traits embassy-net's TcpSocket implements its reads and writes through.
 embedded-io-async = "0.7.0"
 
+ball-dmx    = { path = "../ball-dmx" }
 rig-mqtt    = { path = "../rig-mqtt" }
 rtt-target  = "0.6.2"
 static_cell = "2.1.1"

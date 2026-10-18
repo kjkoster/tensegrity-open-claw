@@ -13,6 +13,9 @@ mod spectral;
 
 pub use pipeline::FeaturePipeline;
 
+use crate::clock::now_us;
+use crate::config as cfg;
+
 /// Written by the capture thread at block rate, read by the DMX loop at the frame
 /// rate. All features are nominally 0..1 (post-AGC, post-floor) unless noted.
 #[derive(Clone, Copy, Default)]
@@ -55,4 +58,20 @@ pub struct AudioFeatures {
     pub noise_floor: f32,
     pub agc_ref: f32,
     pub xrun_count: u64,
+}
+
+impl AudioFeatures {
+    /// The `state` the pipeline reports while it hears music.
+    pub const MUSIC: u8 = 1;
+
+    /// Whether this snapshot is too old to believe: a capture that has stalled must read as
+    /// silence, not as the last thing it heard.
+    pub fn is_stale(&self) -> bool {
+        now_us().saturating_sub(self.timestamp_us) > cfg::STALE_US
+    }
+
+    /// Whether the room has music in it, by the state machine's discrete call.
+    pub fn hears_music(&self) -> bool {
+        !self.is_stale() && self.state == Self::MUSIC
+    }
 }

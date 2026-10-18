@@ -62,6 +62,18 @@ const fn number(setting: &str) -> u64 {
 /// and a margin on top.
 pub const WIFI_RETRY_SILENCE: Duration = Duration::from_secs(AP_MAX_INACTIVITY_S + 5);
 
+// ── The power LEDs' pulse ──────────────────────────────────────────────────────
+// The shape the rig asks for with the `Pulse` pattern. It is the ball's to draw rather than
+// the rig's, because the hold is shorter than one of the rig's frames, so the timings are
+// fixed here and only the peak comes off the wire.
+
+/// The rise from dark to the peak.
+pub const PULSE_RISE: Duration = Duration::from_millis(100);
+/// How long the peak holds before the LEDs snap dark, with no fade down.
+pub const PULSE_HOLD: Duration = Duration::from_millis(10);
+/// How long they stay dark before the next rise.
+pub const PULSE_DARK: Duration = Duration::from_millis(1000);
+
 // ── The balls the workspace patches ────────────────────────────────────────────
 mod patch {
     use crate::models::DmxConfig;

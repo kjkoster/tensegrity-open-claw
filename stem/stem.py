@@ -6,9 +6,10 @@ publishes, and it does nothing else — no watchdog petting, no restarting, no r
 Those duties are designed but not built here yet, and keeping them out means Stem's death
 costs telemetry and never uptime.
 
-Two subtrees, both retained, because both answer questions asked after the interesting moment:
+Three subtrees, all retained, because all answer questions asked after the interesting moment:
 
-    stem/specs/…   what this machine is — written once, never changes while it runs
+    stem/sys/…     the hardware: board, cores, CPU frequency and installed RAM — written once
+    stem/specs/…   the rest of what this machine is — written once, never changes while it runs
     stem/stats/…   how it is doing — temperature, throttling, memory, load, uplink
 
 One field per topic: `stem/stats/temperature_c`, `stem/stats/throttling/since_boot/under_voltage`.
@@ -84,6 +85,43 @@ def cpu_field(name):
     return found.group(1).strip() if found else None
 
 
+def system():
+    """The hardware, under the `sys` subtree every part of the rig publishes its own under.
+    Published once, retained, like the specs. Stem is not compiled, so unlike the Rust parts it
+    has no target triplet to report.
+    """
+    return {
+        "board": read("/proc/device-tree/model"),
+        "cores": os.cpu_count(),
+        "cpu_frequency_mhz": cpu_frequency_mhz(),
+        "ram_kb": installed_ram_kb(),
+    }
+
+
+def installed_ram_kb():
+    """The RAM fitted, in KB, decoded from the board's revision code.
+
+    Not `MemTotal`, which is what is left once the GPU and the kernel have taken their share. A
+    new-style code (bit 23) carries the size in bits 20–22, as 256 MB doubled that many times;
+    an old-style code does not say, and is left out.
+    """
+    revision = cpu_field("Revision")
+    try:
+        code = int(revision, 16)
+    except (TypeError, ValueError):
+        return None
+    if not code & (1 << 23):
+        return None
+    return (256 * 1024) << ((code >> 20) & 0x7)
+
+
+def cpu_frequency_mhz():
+    """The top frequency the CPU is allowed to run at, which is what it can sustain when the
+    rig is busy, rather than wherever the governor happens to have it at the moment."""
+    khz = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+    return int(khz) // 1000 if khz and khz.isdigit() else None
+
+
 def total_memory_mb():
     found = re.search(r"^MemTotal:\s+(\d+) kB", read("/proc/meminfo", ""), re.MULTILINE)
     return round(int(found.group(1)) / 1024) if found else None
@@ -102,14 +140,12 @@ def specs():
     command line.
     """
     return {
-        "model": read("/proc/device-tree/model"),
         "revision": cpu_field("Revision"),
         "serial": cpu_field("Serial"),
         "kernel": platform.release(),
         "architecture": platform.machine(),
         "word_size": 64 if sys.maxsize > 2**32 else 32,
         "os": os_name(),
-        "cores": os.cpu_count(),
         "memory_mb": total_memory_mb(),
         "python": platform.python_version(),
         "firmware": run(["vcgencmd", "version"]),
@@ -210,9 +246,11 @@ def stats():
 def main():
     telemetry = rig_mqtt.Telemetry.connect(SERVICE)
 
+    hardware = system()
+    telemetry.publish("sys", hardware, retain=True)
     inventory = specs()
     telemetry.publish("specs", inventory, retain=True)
-    log(f"{inventory['model']} — {inventory['os']}, {inventory['cores']} cores, "
+    log(f"{hardware['board']} — {inventory['os']}, {hardware['cores']} cores, "
         f"{inventory['memory_mb']} MB, python {inventory['python']}")
 
     # Latched flags are worth a line in the journal the first time they are seen, because a

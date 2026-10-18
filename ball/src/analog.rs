@@ -41,6 +41,8 @@ const PACK_FULL_SCALE_V: f32 = 2.5;
 /// Pack voltage over logged pin voltage. Nominally 11.0 for 100 kΩ over 10 kΩ; this is
 /// measured instead — a metered 19.78 V pack logged a 1.587 V pin — so it also absorbs the
 /// ADC's own gain error, and the logged pin voltage is not what a meter on the pin reads.
+/// A second metered point, 16.03 V at raw 2093, reads 15.92 V through it, so a ratio through
+/// zero holds across the pack's working range without an offset term.
 const PACK_DIVIDER: f32 = 19.78 / 1.587;
 
 // The line is 3.3–4.0 V while the grinder runs, 0.76–0.92 V on the pin, inside the

@@ -1,4 +1,6 @@
+use ball_dmx::STROBE_STEP_MS;
 use embassy_net::Ipv4Address;
+use embassy_time::Duration;
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     watch::{Sender, Watch},
@@ -25,41 +27,109 @@ pub enum DmxState {
     Lost,
 }
 
+/// Where each channel sits among a ball's slots and which bands it declares, generated from
+/// `fixtures/ball.qxf` under the names the brain's `Ball` uses.
+#[allow(
+    dead_code,
+    reason = "it names everything the definition declares, and the firmware reads only what it acts on"
+)]
+mod layout {
+    use super::Band;
+
+    include!(concat!(env!("OUT_DIR"), "/layout.rs"));
+}
+
+/// One band of a channel's range, as the definition declares it.
+pub struct Band {
+    min: u8,
+    max: u8,
+}
+
+impl Band {
+    const fn new(min: u8, max: u8) -> Self {
+        Self { min, max }
+    }
+
+    fn contains(&self, value: u8) -> bool {
+        (self.min..=self.max).contains(&value)
+    }
+}
+
 /// One ball's consecutive DMX slots, starting at its base address.
 #[derive(Clone, Copy, PartialEq)]
 pub struct DmxValue([u8; DmxValue::LEN]);
 
 impl DmxValue {
-    pub const LEN: usize = 4;
-
-    /// Where a switched channel turns on: the upper half of the range is on, the lower half
-    /// off, so a console's 0 and 255 land on the two states with the widest margin.
-    const ON_THRESHOLD: u8 = 128;
+    pub const LEN: usize = layout::LEN;
 
     pub fn new(slots: [u8; Self::LEN]) -> Self {
         Self(slots)
     }
 
-    /// The level of the onboard status LED: the first channel of the ball's mode in
-    /// `fixtures/ball.qxf`.
+    /// The level of the onboard status LED.
     pub fn onboard_led(self) -> u8 {
-        self.0[0]
+        self.0[layout::INTENSITY]
     }
 
-    /// The level of the white power LED: the second channel of the mode.
-    pub fn white(self) -> u8 {
-        self.0[1]
-    }
-
-    /// The level of the blue power LED: the third channel of the mode.
-    pub fn blue(self) -> u8 {
-        self.0[2]
-    }
-
-    /// Whether the motor is asked to run: the fourth channel of the mode.
+    /// Whether the motor is asked to run.
     pub fn motor(self) -> bool {
-        self.0[3] >= Self::ON_THRESHOLD
+        layout::MOTOR_ON.contains(self.0[layout::MOTOR])
     }
+
+    /// What the power LEDs are asked to do. A pattern value in no band the definition
+    /// declares reads as direct, which is what a console that knows nothing of patterns sends.
+    pub fn look(self) -> Look {
+        let pattern = self.0[layout::PATTERN];
+        let pattern = if layout::PATTERN_STROBE.contains(pattern) {
+            Pattern::Strobe
+        } else if layout::PATTERN_PULSE.contains(pattern) {
+            Pattern::Pulse
+        } else {
+            Pattern::Direct
+        };
+        Look {
+            pattern,
+            white: self.0[layout::WHITE],
+            blue: self.0[layout::BLUE],
+            strobe_on: strobe_length(self.0[layout::STROBE_ON]),
+            strobe_off: strobe_length(self.0[layout::STROBE_OFF]),
+        }
+    }
+}
+
+fn strobe_length(value: u8) -> Duration {
+    Duration::from_millis(u64::from(value) * u64::from(STROBE_STEP_MS))
+}
+
+/// How the power LEDs read their levels.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Pattern {
+    /// The levels are the brightness, held.
+    Direct,
+    /// The levels are the peak of a repeating pulse: a rise, a hold, and a snap to dark.
+    Pulse,
+    /// The levels are the flashes of a square wave, with the lengths off the wire.
+    Strobe,
+}
+
+/// Everything the power LEDs render from.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Look {
+    pub pattern: Pattern,
+    pub white: u8,
+    pub blue: u8,
+    pub strobe_on: Duration,
+    pub strobe_off: Duration,
+}
+
+impl Look {
+    pub const DARK: Look = Look {
+        pattern: Pattern::Direct,
+        white: 0,
+        blue: 0,
+        strobe_on: Duration::from_millis(0),
+        strobe_off: Duration::from_millis(0),
+    };
 }
 
 #[derive(Clone, Copy)]

@@ -91,8 +91,9 @@ well: what the brain listens for, what it sends, and what a ball listens for. Th
 that output unicasts to is the one the brain's receiver binds.
 
 **A ball is a fixture in that patch like any other**, and its firmware is built from the
-workspace too. The firmware build reads the addressing alone and turns every patched ball
-into a constant; a board is provisioned by naming the one it is.
+workspace too. A ball is whatever the workspace patches through `fixtures/ball.qxf`: the
+firmware build turns every one into a constant carrying its address, and reads the channel
+layout and bands out of the definition; a board is provisioned by naming the one it is.
 
 The workspace is strictly a **build artifact**: it is consumed at build time and never crosses
 into the running program, not even as a filename. A rig has exactly one, so naming the rig in
@@ -167,9 +168,12 @@ continuous — so handback resumes mid-stride rather than springing out of a fro
 The cabinet's e-stop is part of the **show**, not of the arbitration: a console that takes
 over replaces the frame, e-stop included, and what it sends is the operator's
 responsibility. While the e-stop is pressed, or its two contacts agree (a broken cable or
-a contact fault), the show sends every slot as zero, at the usual rate and priority, so
-nothing downstream sees a lost stream. The show never runs the ball's motor at all — the
-face's ball button is wired but drives nothing — so releasing the e-stop cannot start it.
+a contact fault), the show is in its e-stop scene, which beats every other scene and test
+mode: every slot zero, at the usual rate and priority, so nothing downstream sees a lost
+stream. Being a scene, it is reported as one, on `brain/scene`. The show runs the ball's motor on a beat (§2.6), and
+a run starts only at the head of its window, so releasing the e-stop partway through one
+waits for the next rather than running the remainder. The face's two buttons drive only test
+mode (§2.6), which runs the motor only when asked.
 
 The receiver binds the address the workspace's console unicasts to — the Pi's WireGuard
 address — alone rather than the wildcard. That is not
@@ -190,6 +194,49 @@ Standard Rust on Trixie Raspbian Linux, `std`.
   producers — audio capture, and the sACN receiver — on their own OS threads feeding it
   through a lock-free latest-value seam. A blocking `recv` on the executor's thread would
   stall the frame loop, so anything that blocks stays off it.
+
+### 2.6 Show times and the ball show
+
+The rig runs to a fixed list of shows in local time, one scene at a time, chosen each frame
+by one state machine: the e-stop scene (§2.4) first, then test mode's, then the calendar's.
+Outside a show it is in blackout: black but for the ball's status LED, which keeps breathing
+so a ball that hears the rig can be told apart from one that does not. Inside one, the
+ball's motor runs on a beat counted from the show's start; until civil dusk that is the
+daylight scene, and after it the ball's power LEDs pulse in silence and strobe with the
+music. The other fixtures are left as they were.
+
+**All of the time work happens at build time.** The table names a city and lists local
+start/stop pairs; the build turns that into coordinates, a zone, UTC instants with their
+offsets, and the civil dusk-to-dawn stretches inside each show. The brain only ever sees a
+complete set of timestamps — no time-zone database, no solar arithmetic, nothing that can
+disagree between the Mac and the Pi at run time. It also makes the hard cases build errors
+rather than show-night surprises: a show night can straddle the autumn clock change, and a
+local time in the hour that happens twice, or in the hour that never happens, has no single
+meaning.
+
+**Civil dusk, not sunset,** because the light reads only once it is actually dark.
+
+**The brain does not wait for NTP.** The Pi has no RTC and the 4G link can take a minute.
+After a reboot the restored clock is behind, never ahead — by the reboot on a clean restart,
+by the outage plus up to an hour on a power cut — and behind is the safe direction: the
+startup listing keeps too much rather than dropping a show to come, and the per-frame
+decision corrects itself when NTP steps the clock.
+
+**The ball draws its own waveforms.** At 40 Hz a frame is 25 ms, longer than the pulse's
+hold, and multicast over WiFi arrives bunched. So the brain sends a pattern and its
+parameters, and the ball renders them once per period of its 500 Hz PWM. The brain still
+modulates the strobe live, through the flash and gap lengths. Those lengths are a unit a
+`.qxf` cannot express, so it lives in `ball-dmx`, the one crate both sides read it from.
+Everything the `.qxf` can express — which channel sits where, and the bands of the motor and
+the pattern — the firmware's build reads out of the definition, as §2.3 asks.
+
+**Test mode is on the door, not on a console.** Testing a scene should not wait for dusk,
+for silence, or for a laptop on the network, so the face's two buttons can take the scene
+over: a two-second chord toggles test mode, and the buttons then step the scene and fire a
+single motor run. Gestures are counted on release, which is what tells a lone press from
+half of a chord. The motor runs only when asked, so stepping scenes cannot start it by
+surprise, and test mode ends itself after fifteen quiet minutes, because a rig left in it
+would ignore the calendar unattended.
 
 ---
 
@@ -412,6 +459,16 @@ Two halves. The continuous parameter vector is half-wired already by §4.10, whi
 modulation from energy; completing it is giving it the full vector and the long time constant
 that turns estimator flaps into course corrections. The discrete mood id — tempo bands,
 corroborating energy, hysteresis — is the other half, and is what stage 4 reads at home.
+
+### 4.14 Show times and the ball show
+
+The design is §2.6. Written but not yet run on the rig: the calendar, the scenes, test mode
+and the door's lamps, the ball's pulse and strobe, and the brain's `scene` and `testmode`
+topics.
+
+1. **Flash-rate cap.** The strobe's flash and gap ranges reach 12.5 Hz, inside the 3–30 Hz
+   band that can set off photosensitive seizures. Settle whether the gap needs a floor that
+   keeps the strobe below 3 Hz; the ranges carry a `TODO` until then.
 
 ---
 

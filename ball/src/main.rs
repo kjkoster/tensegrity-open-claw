@@ -12,6 +12,7 @@ mod config;
 mod led;
 mod models;
 mod motor;
+mod pattern;
 mod sacn;
 mod telemetry;
 mod wifi;
@@ -20,6 +21,7 @@ use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::with_deadline;
+use embedded_storage::ReadStorage;
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
     efuse::{self, InterfaceMacAddress},
@@ -28,7 +30,7 @@ use esp_hal::{
     system::reset_reason,
     timer::timg::TimerGroup,
 };
-use models::{DmxConfig, DmxState, DmxWatch};
+use models::{DmxConfig, DmxState, DmxWatch, Look};
 use rtt_target::rprintln;
 
 extern crate alloc;
@@ -85,6 +87,8 @@ async fn main(spawner: Spawner) -> ! {
         peripherals.GPIO10,
     );
     let mut motor = motor::Motor::new(peripherals.GPIO7);
+    spawner.spawn(pattern::render(leds.power).unwrap());
+    let look = pattern::LOOK.sender();
 
     rprintln!("");
     rprintln!("ball firmware started");
@@ -98,6 +102,24 @@ async fn main(spawner: Spawner) -> ! {
     rprintln!("reset reason:   {}", reset);
     telemetry::publish("reset_reason", reset);
     telemetry::publish("firmware", env!("FIRMWARE"));
+
+    // What this ball is, in the `sys` subtree every part of the rig publishes its own under.
+    telemetry::publish("sys/board", esp_metadata_generated::chip_pretty!());
+    telemetry::publish(
+        "sys/cores",
+        format!("{}", esp_metadata_generated::property!("cores")),
+    );
+    telemetry::publish("sys/cpu_frequency_mhz", format!("{}", cpu_clock().as_mhz()));
+    telemetry::publish("sys/triplet", env!("TRIPLET"));
+    // The SRAM the chip maps as data RAM: all of it but the part that caches the flash.
+    let dram = esp_metadata_generated::memory_range!("DRAM");
+    telemetry::publish("sys/ram_kb", format!("{}", (dram.end - dram.start) / 1024));
+    // The flash size the bootloader's header records, which espflash writes from the chip it
+    // flashed. Nothing else in the firmware touches the flash, so the peripheral is taken here
+    // and let go again.
+    let flash = esp_storage::FlashStorage::new(peripherals.FLASH);
+    telemetry::publish("sys/flash_kb", format!("{}", flash.capacity() / 1024));
+    drop(flash);
 
     // A hardware test, ahead of the network: it does not need it, and it runs from boot.
     let sensors = analog::Sensors::new(peripherals.ADC1, peripherals.GPIO3, peripherals.GPIO4);
@@ -134,8 +156,8 @@ async fn main(spawner: Spawner) -> ! {
 
     let dmx_config = config::dmx_config_for(mac_address);
     // Published now and sent on every connect, like everything else the ball publishes.
-    telemetry::publish("universe", format!("{}", dmx_config.universe()));
-    telemetry::publish("dmx_address", format!("{}", dmx_config.address()));
+    telemetry::publish("dmx/universe", format!("{}", dmx_config.universe()));
+    telemetry::publish("dmx/address", format!("{}", dmx_config.address()));
 
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
@@ -165,8 +187,7 @@ async fn main(spawner: Spawner) -> ! {
         match state {
             Some(DmxState::Live(value)) => {
                 leds.status.set_brightness(value.onboard_led());
-                leds.white.set_brightness(value.white());
-                leds.blue.set_brightness(value.blue());
+                look.send(value.look());
                 motor.follow(value.motor());
             }
             // The outputs that do harm when left on at the word of a sender that is gone: the
@@ -174,8 +195,7 @@ async fn main(spawner: Spawner) -> ! {
             Some(DmxState::Lost) => {
                 rprintln!("universe lost, stopping the motor and darkening the power leds");
                 motor.trip();
-                leds.white.set_brightness(0);
-                leds.blue.set_brightness(0);
+                look.send(Look::DARK);
             }
             None => {
                 rprintln!(

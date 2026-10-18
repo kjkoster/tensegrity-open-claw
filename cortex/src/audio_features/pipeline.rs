@@ -281,7 +281,7 @@ impl FeaturePipeline {
             energy_3min,
             quiet_seconds: self.quiet_seconds,
             music_amount: self.music_amount,
-            state: if self.state == State::Music { 1 } else { 0 },
+            state: if self.state == State::Music { AudioFeatures::MUSIC } else { 0 },
             noise_floor: effective_floor,
             agc_ref,
             xrun_count: self.xrun_count,

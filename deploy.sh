@@ -36,7 +36,7 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 # so adding something is a decision instead of an oversight — the design documents, the
 # reference PDFs, the editor config and the git history all stay on the Mac.
 #
-#   the four crates  the members of the cargo workspace
+#   the five crates  the members of the cargo workspace
 #   claw.qxw         the claw's patch (what is where) and its scenes
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
 #   stem/           the broker configuration, and whatever else Stem grows
@@ -54,7 +54,7 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 # resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build rig-mqtt brain fixtures stem etc)
+DIRECTORIES=(ball-dmx cortex cortex-build rig-mqtt brain fixtures stem etc)
 FILES=(Cargo.toml claw.qxw attach.sh)
 
 step "rsync sources to $PI:$PI_DIR"

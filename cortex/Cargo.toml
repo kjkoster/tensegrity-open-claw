@@ -12,6 +12,8 @@ arc-swap = "1.7"
 signal-hook = "0.3"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.0",  features = ["std"] }
+# For whether the kernel holds the clock as synchronised, which std has no call for.
+libc = "0.2.189"
 rig-mqtt = { path = "../rig-mqtt" }
 rusb = "0.9.4"
 rustfft = "6.2"

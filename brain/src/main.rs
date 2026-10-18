@@ -1,8 +1,10 @@
 //! The claw: the tensegrity sculpture's rig, driven by the sound in the room.
 //!
-//! Everything below the show is `cortex`. What lives here is this rig's patch, its scenes,
-//! and the per-frame fill that turns audio features into slots — the sparkle engine on the
-//! pinspot, with the three Yara pars pinned to hard R/G/B primaries for bring-up.
+//! Everything below the show is `cortex`. What lives here is this rig's patch, its QLC+
+//! scenes, its calendar, and the per-frame fill that turns audio features into slots. The
+//! show picks a scene each frame, from the calendar or from test mode. In blackout the rig is
+//! black; in the others the sparkle engine is on the pinspot, the three Yara pars are pinned to
+//! hard R/G/B primaries for bring-up, and the ball does what the scene asks of it.
 
 use cortex::Rig;
 use cortex::audio_features::AudioFeatures;
@@ -10,14 +12,22 @@ use cortex::config as cfg;
 use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
 use cortex::telemetry;
+use patch::Vdplps36b2LedPinspotPar36;
+use scene::{Director, Scene};
 use std::f64::consts::TAU;
 
+mod ball_show;
 mod face;
+mod scene;
+mod test_mode;
 
 // `patch` and `scenes`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained, and
 // there is no second copy of the patch to drift out of step with it.
 include!(concat!(env!("OUT_DIR"), "/rig.rs"));
+
+// `shows`, generated from `shows.rs`: every show as instants, with its dark stretches.
+include!(concat!(env!("OUT_DIR"), "/shows.rs"));
 
 /// How fast the ball's onboard LED fades up and down.
 const BALL_LED_HZ: f64 = 1.0;
@@ -27,6 +37,9 @@ fn main() {
     // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
     let (_face_telemetry, face_publisher, face_farewell) = telemetry::spawn("face");
     let face = face::claim(face_publisher);
+    let (_brain_telemetry, brain_publisher, brain_farewell) =
+        telemetry::spawn(cortex::TELEMETRY_SERVICE);
+    let mut director = Director::new(&shows::CALENDAR, brain_publisher.clone());
 
     // The sparkle engine: silence breathing under a colour drift, glinting on musical
     // onsets, with its own slow white-mode gate. One instance per fixture, so several
@@ -47,40 +60,53 @@ fn main() {
         // Every fixture named here comes from the QLC+ patch, so this closure is also the
         // record of which patched fixtures the daemon actually drives.
         show: Box::new(move |features: &AudioFeatures, dt: f64, slots: &mut [u8]| {
-            fill_sparkle(slots, &patch::PINSPOT, &pinspot_map.frame(features, dt));
-            // The pinspot's other two channels are its own, not the engine's: Effect below
-            // 64 is what hands the emitters to the colour channels at all, and Speed only
-            // feeds the internal programs that Effect would start.
-            patch::PINSPOT.effect.set(slots, 0);
-            patch::PINSPOT.speed.set(slots, 0);
+            let cue = director.cue(cortex::calendar::now(), features);
 
-            fill_yara(slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
-            fill_yara(slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
-            fill_yara(slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
+            // The engine and the status LED's sine run in every scene, so either resumes
+            // mid-stride rather than out of a frozen frame. The sine is kept within one turn
+            // so the phase never grows past the precision of an f64.
+            let sparkle = pinspot_map.frame(features, dt);
+            ball_led_phase = (ball_led_phase + TAU * BALL_LED_HZ * dt) % TAU;
+
+            if cue.scene == Scene::Estop {
+                slots.fill(0);
+                return;
+            }
+            if cue.scene != Scene::Blackout {
+                fill_sparkle(slots, &patch::PINSPOT, &sparkle);
+                // The pinspot's other two channels are its own, not the engine's: the Effect
+                // band for RGB control is what hands the emitters to the colour channels at
+                // all, and Speed only feeds the internal programs that Effect would start.
+                patch::PINSPOT.effect.set(
+                    slots,
+                    Vdplps36b2LedPinspotPar36::EFFECT_RGB_CONTROL_VIA_THE_RED_GREEN_AND_BLUE_CHANNELS
+                        .center(),
+                );
+                patch::PINSPOT.speed.park(slots);
+
+                fill_yara(slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
+                fill_yara(slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
+                fill_yara(slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
+            } else {
+                slots.fill(0);
+            }
+
+            ball_show::fill(slots, cue, features);
 
             // A sine on the ball's onboard LED, so that a ball following the rig is told
-            // apart at a glance from one that is not. Kept within one turn so the phase
-            // never grows past the precision of an f64.
-            ball_led_phase = (ball_led_phase + TAU * BALL_LED_HZ * dt) % TAU;
-            // `intensity` is the ball's onboard status LED: its definition gives that
-            // channel the IntensityDimmer preset, and the field is named after the role.
+            // apart at a glance from one that is not — which is why it breathes in blackout
+            // as well. `intensity` is that LED: its definition gives the channel the
+            // IntensityDimmer preset, and the field is named after the role.
             patch::BALL_5
                 .intensity
                 .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
-
-            // The show never runs the ball's motor; only a console can.
-            patch::BALL_5.motor.set(slots, 0);
-
-            // Last, so it has the final say over this frame. It is the show's say only: a
-            // console that takes the rig over replaces the frame, e-stop included, and what
-            // it sends is the operator's responsibility. The engine above still ran, so it
-            // resumes mid-stride on release.
-            if face::estop_pressed() {
-                slots.fill(0);
-            }
         }),
-        tasks: Box::new(move |spawner| face::spawn(spawner, face)),
-        farewells: vec![face_farewell],
+        tasks: Box::new(move |spawner| {
+            face::spawn(spawner, face);
+            cortex::calendar::spawn(spawner, &shows::CALENDAR);
+        }),
+        telemetry: brain_publisher,
+        farewells: vec![face_farewell, brain_farewell],
     })
 }
 

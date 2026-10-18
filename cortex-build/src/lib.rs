@@ -1,4 +1,5 @@
-//! Ingests the patch and the scenes from a QLC+ workspace at build time.
+//! Ingests the patch and the scenes from a QLC+ workspace at build time, and resolves the
+//! show calendar (see [`calendar`]).
 //!
 //! One rig, one workspace: the rig crate's build script calls [`ingest`] with its own
 //! `.qxw`, and the fixtures it names are generated inside that rig's crate.
@@ -39,6 +40,10 @@
 //!     universe and the port that output names are the rig's own as well — the ones the
 //!     daemon listens and sends on, and the ones a wireless fixture listens on.
 
+mod calendar;
+
+pub use calendar::calendar;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
@@ -61,18 +66,38 @@ pub struct Sacn {
     pub address: Ipv4Addr,
 }
 
-/// Where one patched fixture sits, for a build that needs the addressing and not the
-/// channels.
+/// Where one patched fixture sits and what its channels are, for a build that is not the rig
+/// but has to agree with it: firmware that is itself the fixture.
 pub struct Addressed {
     /// The fixture's name in the workspace.
     pub name: String,
     /// The Rust constant that name becomes — the same one the rig's generated patch uses.
     pub ident: String,
-    pub manufacturer: String,
-    pub model: String,
+    /// The `.qxf` it resolved through.
+    pub definition: PathBuf,
     /// 1-based DMX start address, as it is on the wire.
     pub address: u16,
     pub channels: u16,
+    /// The patched mode's channels, in mode order.
+    pub fields: Vec<AddressedField>,
+}
+
+/// One channel of a patched fixture's mode, named as the rig's generated struct names it.
+#[derive(PartialEq)]
+pub struct AddressedField {
+    /// The rig's field name.
+    pub name: String,
+    /// 0-based offset from the fixture's start address.
+    pub offset: u16,
+    /// The bands the definition declares, each with the identifier its constant gets.
+    pub bands: Vec<Band>,
+}
+
+#[derive(PartialEq)]
+pub struct Band {
+    pub ident: String,
+    pub min: u8,
+    pub max: u8,
 }
 
 /// A workspace's addressing: the universe it is on, and every fixture patched into it, in
@@ -99,6 +124,8 @@ struct Patched {
     mode: String,
     address: u32,
     channels: u32,
+    /// The `.qxf` the fixture resolved through. Empty until `resolve_definitions` fills it in.
+    definition: PathBuf,
     /// The mode's channels, resolved against the fixture definition, in mode order. Empty
     /// until `resolve_definitions` fills it in. This stays the wire's view of the fixture:
     /// one entry per DMX slot it occupies, whatever the generated struct groups together.
@@ -218,12 +245,7 @@ pub fn ingest(workspace: &Path) {
 
     // The workspace names a definition; the definition says what the channels mean. Both
     // are needed before a fixture can be given typed channels, so this runs before render.
-    let fixtures_dir = workspace
-        .parent()
-        .unwrap_or_else(|| panic!("{} has no parent directory", workspace.display()))
-        .join("fixtures");
-    println!("cargo:rerun-if-changed={}", fixtures_dir.display());
-    resolve_definitions(&mut patch, &fixtures_dir);
+    resolve_definitions(&mut patch, &fixtures_dir(workspace));
     assign_type_names(&mut patch);
 
     // The generated file names the workspace it came from, so a stray copy found on its own
@@ -237,32 +259,77 @@ pub fn ingest(workspace: &Path) {
     fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &scenes, source)).unwrap();
 }
 
-/// Reads one QLC+ workspace for its addressing alone, and generates nothing.
+/// Reads one QLC+ workspace for its addressing and its fixtures' channels, and generates
+/// nothing.
 ///
-/// For a build that has to agree with the rig about where a fixture sits without being the
-/// rig: firmware that is itself a patched fixture and needs its own address. It goes through
-/// the same patch checks as [`ingest`], so both builds refuse the same workspaces.
+/// For a build that has to agree with the rig about a fixture without being the rig:
+/// firmware that is itself a patched fixture, and needs its own address and what its channels
+/// mean. It goes through the same patch and definition checks as [`ingest`], so both builds
+/// refuse the same workspaces.
 pub fn addressing(workspace: &Path) -> Addressing {
     let xml = read_workspace(workspace);
     let doc = parse_workspace(&xml, workspace);
     let engine = engine_of(&doc, workspace);
 
     let sacn = parse_sacn(engine, workspace);
-    let mut fixtures: Vec<Addressed> = parse_patch(engine)
+    let mut patch = parse_patch(engine);
+    resolve_definitions(&mut patch, &fixtures_dir(workspace));
+    let mut fixtures: Vec<Addressed> = patch
         .into_values()
-        .map(|fixture| Addressed {
-            ident: ident_of(&fixture.name),
-            name: fixture.name,
-            manufacturer: fixture.manufacturer,
-            model: fixture.model,
-            // Both fit: `parse_patch` holds every fixture inside the universe.
-            address: (fixture.address + 1) as u16,
-            channels: fixture.channels as u16,
+        .map(|fixture| {
+            let mut fields = Vec::new();
+            for field in &fixture.fields {
+                let (head, fine) = match field {
+                    Field::Single { index, .. } => (*index, None),
+                    Field::Pair { coarse, fine, .. } => (*coarse, Some(*fine)),
+                };
+                let bands = fixture.resolved[head]
+                    .capabilities
+                    .iter()
+                    .map(|capability| Band {
+                        ident: ident_of(&capability.name),
+                        min: capability.min,
+                        max: capability.max,
+                    })
+                    .collect();
+                // Offsets fit: `parse_patch` holds every fixture inside the universe.
+                let offset = |index: usize| (fixture.resolved[index].slot - fixture.address) as u16;
+                fields.push(AddressedField {
+                    name: field.name().to_string(),
+                    offset: offset(head),
+                    bands,
+                });
+                if let Some(fine) = fine {
+                    fields.push(AddressedField {
+                        name: format!("{}_fine", field.name()),
+                        offset: offset(fine),
+                        bands: Vec::new(),
+                    });
+                }
+            }
+            Addressed {
+                ident: ident_of(&fixture.name),
+                name: fixture.name,
+                definition: fixture.definition,
+                address: (fixture.address + 1) as u16,
+                channels: fixture.channels as u16,
+                fields,
+            }
         })
         .collect();
     fixtures.sort_by_key(|fixture| fixture.address);
 
     Addressing { sacn, fixtures }
+}
+
+/// The definitions directory beside a workspace, watched for changes.
+fn fixtures_dir(workspace: &Path) -> PathBuf {
+    let dir = workspace
+        .parent()
+        .unwrap_or_else(|| panic!("{} has no parent directory", workspace.display()))
+        .join("fixtures");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    dir
 }
 
 fn read_workspace(workspace: &Path) -> String {
@@ -727,6 +794,7 @@ fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
         }
 
         fixture.focus = definition.focus.clone();
+        fixture.definition = definition.path.clone();
         fixture.resolved = resolved;
         fixture.fields = fields;
     }
@@ -1006,6 +1074,7 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
                 mode: field("Mode"),
                 address,
                 channels,
+                definition: PathBuf::new(),
                 resolved: Vec::new(),
                 fields: Vec::new(),
                 focus: None,

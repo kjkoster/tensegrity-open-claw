@@ -8,7 +8,8 @@ version      = "0.1.0"
 cortex-build = { path = "../cortex-build" }
 
 [dependencies]
-cortex = { path = "../cortex" }
+ball-dmx = { path = "../ball-dmx" }
+cortex   = { path = "../cortex" }
 # The face, the cabinet door's buttons: rppal for the GPIO, libc only because std cannot turn
 # the time into a local wall-clock time for the trace lines.
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
