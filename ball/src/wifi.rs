@@ -1,10 +1,11 @@
-use alloc::{format, string::String};
+use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{peripherals::WIFI, system::software_reset};
 use esp_radio::wifi::{
-    ControllerConfig, Interface, PowerSaveMode, WifiController, WifiError, sta::StationConfig,
+    AuthenticationMethodConfig, ControllerConfig, Interface, PowerSaveMode, WifiController,
+    WifiError, sta::StationConfig,
 };
 use rtt_target::rprintln;
 use static_cell::StaticCell;
@@ -21,7 +22,7 @@ const RESTART_AFTER: Duration = Duration::from_secs(300);
 static STACK_RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
 
 #[embassy_executor::task]
-async fn net_task(mut runner: Runner<'static, Interface<'static>>) -> ! {
+async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
 }
 
@@ -88,11 +89,11 @@ pub async fn connect(
 ) -> Stack<'static> {
     let controller_config =
         ControllerConfig::default().with_country_info(wifi_config.country());
-    let (mut controller, interfaces) = esp_radio::wifi::new(wifi, controller_config)
+    let mut controller = WifiController::new(wifi, controller_config)
         .unwrap_or_else(|e| panic!("failed to initialize wi-fi: {:?}", e));
 
     let (network_stack, runner) = embassy_net::new(
-        interfaces.station,
+        Interface::station(),
         embassy_net::Config::dhcpv4(Default::default()),
         STACK_RESOURCES.init(StackResources::new()),
         seed,
@@ -102,11 +103,18 @@ pub async fn connect(
     controller
         .set_config(&esp_radio::wifi::Config::Station(
             StationConfig::default()
-                .with_ssid(wifi_config.ssid())
+                .with_ssid(wifi_config.ssid().try_into().unwrap())
+                // The access point itself, so the driver goes straight to authenticating with
+                // it rather than first taking whichever answers to the name.
+                .with_bssid(wifi_config.bssid())
                 // Where the scan starts, so the access point is found on the first
                 // channel tried. The other channels are still scanned if it is not there.
                 .with_channel(wifi_config.channel())
-                .with_password(String::from(wifi_config.password())),
+                // WPA2-PSK, as `etc/hostapd.conf` sets the access point up, given the key
+                // rather than the passphrase.
+                .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
+                    wifi_config.psk().try_into().unwrap(),
+                )),
         ))
         .unwrap();
 

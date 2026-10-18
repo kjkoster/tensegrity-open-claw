@@ -149,21 +149,44 @@ fi
 # --- 7. flash attached microcontrollers ------------------------------------
 # Last, so a board that is not in DEVICE_MAP fails the deploy only after the rig is back up.
 # Absent boards are simply skipped.
+#
+# A board is left in its bootloader after flashing rather than reset at once. Its radio went
+# dead the moment flashing began, without a goodbye, so the access point still lists it as
+# associated and would ignore its attempts to rejoin until that entry timed out. With every
+# board flashed and quiet, the access point is told to drop its stations — the fixtures and
+# any laptop alike, which the hostapd restart above already did once — and only then are the
+# boards reset, so each one is let straight back in on its first attempt.
 step "flash attached microcontrollers"
 shopt -s nullglob
-found=0
+flashed=()
 for dev in /dev/serial/by-id/*; do
-  found=1
   name="$(basename "$dev")"
   if [[ -v DEVICE_MAP["$name"] ]]; then
     binary="${DEVICE_MAP[$name]}"
     echo ">> $name  -> $binary"
-    espflash flash --port "$dev" "$REPO/binaries/$binary"
+    espflash flash --after no-reset --port "$dev" "$REPO/binaries/$binary"
+    flashed+=("$dev")
   else
     echo "ERROR: unknown device $name — add it to DEVICE_MAP in remote-deploy.sh" >&2
     exit 1
   fi
 done
-[ "$found" -eq 0 ] && echo "no MCUs attached; nothing to flash."
+
+if [ "${#flashed[@]}" -eq 0 ]; then
+  echo "no MCUs attached; nothing to flash."
+else
+  step "drop stations from the access point, then start the flashed boards"
+  # The interface from the configuration rather than spelled out here, so the two cannot
+  # disagree about which one hostapd is serving. The repository's copy, which is the one just
+  # installed: the installed one is root's alone, for the passphrase in it.
+  iface="$(sed -n 's/^interface=//p' "$REPO/etc/hostapd.conf")"
+  for station in $(sudo hostapd_cli -i "$iface" list_sta); do
+    echo ">> deauthenticate $station"
+    sudo hostapd_cli -i "$iface" deauthenticate "$station"
+  done
+  for dev in "${flashed[@]}"; do
+    espflash reset --port "$dev"
+  done
+fi
 
 step "remote deploy complete"

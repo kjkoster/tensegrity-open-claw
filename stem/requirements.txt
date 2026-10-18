@@ -6,4 +6,6 @@
 # dependency tree. Everything else it needs — /proc, /sys, ip, vcgencmd — is the operating
 # system, which is why this list is one line long and should stay that way.
 
-paho-mqtt
+# Pinned, so a deploy moves it: pip without --upgrade leaves a satisfied unpinned requirement
+# alone forever, while a changed pin is installed on the next deploy.
+paho-mqtt==2.1.0

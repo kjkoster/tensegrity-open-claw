@@ -48,9 +48,15 @@ macOS.
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
   `10.0.10.1`, leased from `10.0.10.10+`. `etc/hostapd.conf` is the only source of truth
   for the access point: every deploy installs it over the Pi's copy and restarts `hostapd`,
-  which drops every WiFi client for a few seconds. The balls have the SSID and passphrase
-  compiled in, read from that same file when the firmware is built, so changing either
-  takes a deploy with every ball plugged in to be re-flashed.
+  which drops every WiFi client for a few seconds. The balls have the access point's BSSID,
+  SSID, channel and passphrase compiled in, read from that same file when the firmware is
+  built, so changing any of them takes a deploy with every ball plugged in to be re-flashed.
+  The BSSID is the Pi's own wlan0 MAC (`cat /sys/class/net/wlan0/address`): moving to a
+  different Pi means updating it there first.
+- **A silent station is dropped after 6 s** (`ap_max_inactivity`, with `skip_inactivity_poll`),
+  so a ball that lost power without a goodbye can rejoin quickly; a connected ball pings the
+  broker every 5 s to stay well clear of it. A laptop left idle that long is dropped too and
+  rejoins by itself.
 - The **Ethernet port** is exposed to a dev laptop for SSH.
 
 ### 4G uplink
@@ -236,7 +242,10 @@ restarts the daemon.
 
 Before any of that, `deploy.sh` builds the `ball` firmware on the Mac. Only the binary goes to
 the Pi, as `tensegrity-open-claw/binaries/ball`, and the last thing `remote-deploy.sh` does is
-flash it onto every board it finds under `/dev/serial/by-id`.
+flash it onto every board it finds under `/dev/serial/by-id`. The boards are left in their
+bootloader until all are flashed; then the access point is told to drop its stations (every
+WiFi client, briefly), and only then are the boards reset — so each rejoins on its first
+attempt instead of waiting for the access point to forget it.
 
 The cargo workspace is five crates:
 

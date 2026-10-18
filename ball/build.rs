@@ -18,10 +18,11 @@ const DEFINITION: &str = "../fixtures/ball.qxf";
 // access point on from here, so the two cannot drift apart.
 const HOSTAPD_CONF: &str = "../etc/hostapd.conf";
 
-// hostapd setting -> the environment variable the firmware reads it from with `env!`.
+// hostapd setting -> the environment variable the firmware reads it from with `env!`. The
+// passphrase is not among them: the firmware gets the key derived from it instead.
 const SETTINGS: &[(&str, &str)] = &[
     ("ssid", "WIFI_SSID"),
-    ("wpa_passphrase", "WIFI_PASSPHRASE"),
+    ("bssid", "WIFI_BSSID"),
     ("country_code", "WIFI_COUNTRY"),
     ("channel", "WIFI_CHANNEL"),
     ("ap_max_inactivity", "AP_MAX_INACTIVITY"),
@@ -38,6 +39,10 @@ fn main() {
             .unwrap_or_else(|| panic!("{HOSTAPD_CONF} has no `{key}=` line"));
         println!("cargo:rustc-env={variable}={value}");
     }
+    let ssid = setting(&conf, "ssid").unwrap();
+    let passphrase = setting(&conf, "wpa_passphrase")
+        .unwrap_or_else(|| panic!("{HOSTAPD_CONF} has no `wpa_passphrase=` line"));
+    println!("cargo:rustc-env=WIFI_PSK={}", wpa2_psk(ssid, passphrase));
 
     println!("cargo:rustc-env=TRIPLET={}", env::var("TARGET").unwrap());
 
@@ -121,6 +126,18 @@ fn render_layout(balls: &[&Addressed]) -> String {
         }
     }
     out
+}
+
+/// The WPA2 pre-shared key for `ssid` and `passphrase`, as the 64 hex digits a station may be
+/// given instead of the passphrase.
+///
+/// Derived here because it is the same on every boot and costly to derive: PBKDF2-HMAC-SHA1
+/// over 4096 rounds took the ball 1.7 s at 80 MHz, on every power-on, before it could even
+/// start to authenticate. Handed the key, the driver skips that step.
+fn wpa2_psk(ssid: &str, passphrase: &str) -> String {
+    let mut key = [0u8; 32];
+    pbkdf2::pbkdf2_hmac::<sha1::Sha1>(passphrase.as_bytes(), ssid.as_bytes(), 4096, &mut key);
+    key.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The value of a `key=value` line, verbatim: hostapd does not trim or unquote it either.

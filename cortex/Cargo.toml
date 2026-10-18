@@ -1,15 +1,15 @@
 [package]
 edition      = "2024"
 name         = "cortex"
-rust-version = "1.96"
+rust-version = "1.99"
 version      = "0.1.0"
 
 # Everything under the show: audio capture and features, the noise fields, the sACN transports,
 # the frame loop.
 [dependencies]
-alsa = "0.11.0"
+alsa = "0.12.1"
 arc-swap = "1.7"
-signal-hook = "0.3"
+signal-hook = "0.4.5"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.0",  features = ["std"] }
 # For whether the kernel holds the clock as synchronised, which std has no call for.

@@ -1,7 +1,7 @@
 [package]
 edition      = "2024"
 name         = "rig-mqtt"
-rust-version = "1.95"
+rust-version = "1.99"
 version      = "0.1.0"
 
 # The rig's MQTT conventions and the packets they travel in, shared by the brain and the ball.

@@ -46,7 +46,7 @@ import sys
 HOST = os.environ.get("RIG_MQTT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RIG_MQTT_PORT", "1883"))
 # The same value as `rig_mqtt::KEEPALIVE_S` on the Rust clients.
-KEEPALIVE_S = 30
+KEEPALIVE_S = 10
 # The longest wait between reconnect attempts, matching the brain's. paho's own default is two
 # minutes, which is two minutes of a broker being back and Stem still reading as gone.
 RETRY_MAX_S = 30
@@ -117,12 +117,8 @@ class Telemetry:
             print(f"{service}: no paho-mqtt installed, telemetry disabled", file=sys.stderr, flush=True)
             return cls(service)
 
-        # Debian's paho is 2.x, which requires a callback API version; 1.x has no such enum.
-        # Asking for the version 1 callbacks on both keeps one set of signatures here.
-        try:
-            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=service)
-        except AttributeError:
-            client = mqtt.Client(client_id=service)
+        # requirements.txt pins paho 2.x, so the current callback API and nothing else.
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=service)
 
         telemetry = cls(service, client)
         # Before connect, not after: the will has to reach the broker in the CONNECT packet,
@@ -146,11 +142,11 @@ class Telemetry:
         telemetry.arm_shutdown()
         return telemetry
 
-    def on_connect(self, client, _userdata, _flags, rc):
+    def on_connect(self, client, _userdata, _flags, reason, _properties):
         # paho calls this for a refusal too. Announcing `connected` on a connection the broker
         # turned down would be a lie the broker itself then never corrects.
-        if rc != 0:
-            print(f"{self.service}: broker refused the connection, code {rc}",
+        if reason.is_failure:
+            print(f"{self.service}: broker refused the connection: {reason}",
                   file=sys.stderr, flush=True)
             return
         print(f"{self.service}: connected", file=sys.stderr, flush=True)
@@ -158,10 +154,10 @@ class Telemetry:
         for topic, payload in self.retained.items():
             client.publish(topic, payload, retain=True)
 
-    def on_disconnect(self, _client, _userdata, rc):
-        # Zero is our own goodbye, which `close` already speaks for.
-        if rc != 0:
-            print(f"{self.service}: lost the broker, code {rc}, reconnecting",
+    def on_disconnect(self, _client, _userdata, _flags, reason, _properties):
+        # Success is our own goodbye, which `close` already speaks for.
+        if reason.is_failure:
+            print(f"{self.service}: lost the broker: {reason}, reconnecting",
                   file=sys.stderr, flush=True)
 
     def arm_shutdown(self):

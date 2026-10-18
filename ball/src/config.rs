@@ -42,7 +42,10 @@ use crate::models::{DmxConfig, WifiConfig};
 // Read out of `etc/hostapd.conf` by `build.rs`, so the firmware is always built against
 // the access point configuration that is deployed alongside it.
 const SSID: &str = env!("WIFI_SSID");
-const PASSWORD: &str = env!("WIFI_PASSPHRASE");
+// The access point's own MAC, so the ball joins it directly instead of looking for it by name.
+const BSSID: [u8; 6] = mac(env!("WIFI_BSSID"));
+// The WPA2 key `build.rs` derives from the passphrase, so the ball need not derive it itself.
+const PSK: &str = env!("WIFI_PSK");
 const COUNTRY: &str = env!("WIFI_COUNTRY");
 const CHANNEL: u64 = number(env!("WIFI_CHANNEL"));
 // Seconds of silence after which the access point forgets a station.
@@ -55,12 +58,37 @@ const fn number(setting: &str) -> u64 {
     }
 }
 
+/// A MAC address written the way hostapd writes one, `b8:27:eb:46:e4:b7`.
+const fn mac(setting: &str) -> [u8; 6] {
+    let text = setting.as_bytes();
+    assert!(text.len() == 17, "a MAC in etc/hostapd.conf must be six colon-separated hex bytes");
+    let mut mac = [0u8; 6];
+    let mut i = 0;
+    while i < 6 {
+        assert!(i == 5 || text[i * 3 + 2] == b':', "a MAC in etc/hostapd.conf must be colon-separated");
+        mac[i] = hex_digit(text[i * 3]) << 4 | hex_digit(text[i * 3 + 1]);
+        i += 1;
+    }
+    mac
+}
+
+const fn hex_digit(digit: u8) -> u8 {
+    match digit {
+        b'0'..=b'9' => digit - b'0',
+        b'a'..=b'f' => digit - b'a' + 10,
+        b'A'..=b'F' => digit - b'A' + 10,
+        _ => panic!("a MAC in etc/hostapd.conf has a character that is not a hex digit"),
+    }
+}
+
 /// How long the radio stays quiet between connection attempts. An access point that still
 /// lists this ball as associated from before a restart does not answer its attempts to
-/// join, and every attempt it hears keeps that stale entry alive. It only forgets a station
-/// that has been silent for its `ap_max_inactivity`, so the ball stays silent for that long
-/// and a margin on top.
-pub const WIFI_RETRY_SILENCE: Duration = Duration::from_secs(AP_MAX_INACTIVITY_S + 5);
+/// join, and every attempt it hears — even one it ignores — counts as activity and keeps that
+/// stale entry alive. It forgets a station once it has been silent for its
+/// `ap_max_inactivity`, but only when its own timer next checks, which can be most of another
+/// period later. Twice the period covers both, so the attempt after a silence is the one that
+/// gets in.
+pub const WIFI_RETRY_SILENCE: Duration = Duration::from_secs(2 * AP_MAX_INACTIVITY_S);
 
 // ── The power LEDs' pulse ──────────────────────────────────────────────────────
 // The shape the rig asks for with the `Pulse` pattern. It is the ball's to draw rather than
@@ -117,5 +145,5 @@ pub fn dmx_config_for(mac: [u8; 6]) -> DmxConfig {
 /// build instead of the board.
 pub const WIFI_CONFIG: WifiConfig = {
     assert!(CHANNEL <= u8::MAX as u64, "WiFi channel must be 1-13");
-    WifiConfig::new(SSID, PASSWORD, COUNTRY, CHANNEL as u8)
+    WifiConfig::new(SSID, BSSID, PSK, COUNTRY, CHANNEL as u8)
 };

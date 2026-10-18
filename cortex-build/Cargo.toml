@@ -1,7 +1,7 @@
 [package]
 edition      = "2024"
 name         = "cortex-build"
-rust-version = "1.96"
+rust-version = "1.99"
 version      = "0.1.0"
 
 # The QLC+ ingest and the show calendar. Its own crate rather than a module of cortex because

@@ -21,11 +21,9 @@ use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::with_deadline;
-use embedded_storage::ReadStorage;
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
     efuse::{self, InterfaceMacAddress},
-    interrupt::software::SoftwareInterruptControl,
     rng::Rng,
     system::reset_reason,
     timer::timg::TimerGroup,
@@ -77,8 +75,7 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(config);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
+    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Before anything that can wait or panic, so the pins are driven and the LEDs and the
     // motor are held off until the rig says otherwise.

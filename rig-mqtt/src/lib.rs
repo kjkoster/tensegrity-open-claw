@@ -41,9 +41,13 @@ pub const GONE: &str = "gone";
 pub const PORT: u16 = 1883;
 
 /// The broker publishes a client's will once it has heard nothing for 1.5× this, so a dead
-/// client is declared gone inside 45 seconds. The same value as `rig_mqtt.KEEPALIVE_S`, and
+/// client is declared gone inside 15 seconds. The same value as `rig_mqtt.KEEPALIVE_S`, and
 /// every client pings at half of it, so one lost ping is not a disconnection.
-pub const KEEPALIVE_S: u16 = 30;
+///
+/// Short for the ball's sake: a ball only receives the universe, which as multicast it never
+/// acknowledges, so its ping every five seconds is what shows the access point it is alive,
+/// inside the access point's `ap_max_inactivity`.
+pub const KEEPALIVE_S: u16 = 10;
 
 /// The packets that are nothing but a fixed header. A PINGRESP is the only thing a broker
 /// sends a publish-only client once it is connected, so it is also the whole of what one
