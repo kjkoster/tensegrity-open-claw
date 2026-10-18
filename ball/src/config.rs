@@ -90,7 +90,7 @@ struct Board {
 }
 
 const BOARDS: &[Board] = &[
-    Board { mac: [0x40, 0x4C, 0xCA, 0xFB, 0x79, 0x10], dmx: patch::BALL_5 },
+    Board { mac: [0x40, 0x4C, 0xCA, 0xFB, 0x79, 0x10], dmx: patch::BALL },
 ];
 
 /// Returns the DMX configuration for the board with the given station MAC.

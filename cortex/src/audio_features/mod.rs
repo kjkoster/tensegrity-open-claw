@@ -1,9 +1,9 @@
-//! The audio-features pipeline stage (SPARKLE.md §0.1, §0.3): per-block feature
+//! The audio-features pipeline stage: per-block feature
 //! extraction (`pipeline`, with its DSP and spectral building blocks) and the
 //! `AudioFeatures` snapshot it produces.
 //!
-//! `AudioFeatures` (formerly `ControlState`) is the published contract between the
-//! capture/feature thread and its consumers (SOUND.md §6, §8.1): a single Copy
+//! `AudioFeatures` is the published contract between the
+//! capture/feature thread and its consumers: a single Copy
 //! struct carried over a latest-value `Latest` seam. The producer never waits;
 //! consumers never block.
 
@@ -52,7 +52,7 @@ pub struct AudioFeatures {
     pub energy_3min: f32,
     pub quiet_seconds: f32,
     // state machine
-    pub music_amount: f32, // 0..1 crossfade, see §7
+    pub music_amount: f32, // 0..1 crossfade between silence and music
     pub state: u8,         // 0 = SILENCE, 1 = MUSIC (informational)
     // diagnostics
     pub noise_floor: f32,

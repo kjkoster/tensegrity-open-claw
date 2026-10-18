@@ -1,4 +1,4 @@
-//! DSP building blocks for the audio fast path (SOUND.md §4).
+//! DSP building blocks for the audio fast path.
 
 /// RBJ biquad, Direct Form 1 (the safe choice for streaming use).
 /// One instance per filter per signal path.
@@ -121,7 +121,7 @@ impl OnePole {
 }
 
 /// Running-minimum noise floor over a sliding window, implemented as
-/// sub-window minima so it is O(1) per block (SOUND.md §4.5).
+/// sub-window minima so it is O(1) per block.
 /// Adaptation is frozen while in MUSIC state.
 pub struct NoiseFloor {
     minima: Vec<f32>,
@@ -176,7 +176,7 @@ impl NoiseFloor {
 }
 
 /// Slow loudness reference: rises quickly toward peaks, decays very slowly —
-/// a streaming approximation of a high percentile (SOUND.md §4.6).
+/// a streaming approximation of a high percentile.
 /// Frozen whenever the state machine is not in MUSIC.
 pub struct AgcRef {
     reference: f32,

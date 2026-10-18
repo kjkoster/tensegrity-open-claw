@@ -6,7 +6,7 @@
 //! pattern, how bright, and — for the strobe — how long its flashes and gaps are, which is how
 //! the music still reaches it.
 
-use crate::patch::{BALL_5, Ball};
+use crate::patch::{BALL, Ball};
 use crate::scene::{Cue, Scene};
 use ball_dmx::STROBE_STEP_MS;
 use cortex::audio_features::AudioFeatures;
@@ -25,7 +25,7 @@ const STROBE_OFF_MS: (f64, f64) = (600.0, 60.0);
 
 pub fn fill(slots: &mut [u8], cue: Cue, features: &AudioFeatures) {
     let motor = if cue.motor { Ball::MOTOR_ON } else { Ball::MOTOR_OFF };
-    BALL_5.motor.set(slots, motor.center());
+    BALL.motor.set(slots, motor.center());
 
     let (pattern, level, on_ms, off_ms) = match cue.scene {
         Scene::Estop | Scene::Blackout | Scene::Daylight => (Ball::PATTERN_DIRECT, 0.0, 0.0, 0.0),
@@ -37,11 +37,11 @@ pub fn fill(slots: &mut [u8], cue: Cue, features: &AudioFeatures) {
             mix(STROBE_OFF_MS, features.energy),
         ),
     };
-    BALL_5.pattern.set(slots, pattern.center());
-    BALL_5.white.set_unit(slots, level);
-    BALL_5.blue.set_unit(slots, level);
-    BALL_5.strobe_on.set(slots, strobe_steps(on_ms));
-    BALL_5.strobe_off.set(slots, strobe_steps(off_ms));
+    BALL.pattern.set(slots, pattern.center());
+    BALL.white.set_unit(slots, level);
+    BALL.blue.set_unit(slots, level);
+    BALL.strobe_on.set(slots, strobe_steps(on_ms));
+    BALL.strobe_off.set(slots, strobe_steps(off_ms));
 }
 
 /// `range.0` at `amount` 0, `range.1` at 1.

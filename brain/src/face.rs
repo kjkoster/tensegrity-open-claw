@@ -1,28 +1,37 @@
-//! The face: the buttons on the cabinet door — an e-stop, and a left and a right button with
-//! a lamp in each.
+//! The face: the cabinet door — an e-stop, and a left and a right button with a green lamp in
+//! each.
 //!
-//! The e-stop is live: while it is pressed the show is in its e-stop scene. The two buttons
-//! are read as gestures for the show's test mode, and the lamps say whether it is on.
+//! The door is a fixture both ways. Its inputs go to the show as a [`FaceState`], published
+//! once per poll; its lamps are patched in the workspace like any other fixture, and are driven
+//! from the frame that actually goes out. So a console that takes the rig over drives them,
+//! and the e-stop scene darkens them with everything else.
 //!
-//! Holding both for two seconds toggles test mode. A left press is counted on release, not on
+//! Holding both buttons for two seconds is a chord. A left press is counted on release, not on
 //! press, because only the release tells a button pressed alone from one that became half of
 //! a chord, and neither of the presses that made a chord counts on its own. Presses and chords
-//! are counters rather than flags, so a show that reads them once per frame cannot miss one
-//! that came and went between two frames. The right button is read as held instead, for as
-//! long as it is down on its own: it drives the motor for exactly that long.
+//! are counters rather than flags, so a show that reads the state once per frame cannot miss
+//! one that came and went between two frames. The right button is read as held instead, for
+//! as long as it is down on its own.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
 //! consecutive samples.
 //!
+//! The lamps dim through the Pi's two hardware PWM channels, not a software PWM: that is a
+//! busy-waiting real-time thread per pin, competing with audio capture and the DMX timing.
+//!
 //! The face is a fixture of its own on the broker, with its own client beside the brain's:
 //! `health/face`, and `face/left_button`, `face/right_button` and `face/estop`, retained.
 
+use crate::patch;
+use cortex::Frame;
+use cortex::latest::{LatestRx, LatestTx, latest};
+use cortex::qlc_plus::Channel;
 use cortex::telemetry::Publisher;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
-use rppal::gpio::{Gpio, InputPin, Level, OutputPin};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use rppal::gpio::{Gpio, InputPin, Level};
+use rppal::pwm::{self, Polarity, Pwm};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // BCM numbers. The RS-485 HAT owns 14, 15 and 18; none of those may appear here.
@@ -30,8 +39,9 @@ const ESTOP_NC: u8 = 23;
 const ESTOP_NO: u8 = 24;
 const LEFT_BUTTON: u8 = 27;
 const RIGHT_BUTTON: u8 = 25;
-const LEFT_LAMP: u8 = 13;
-const RIGHT_LAMP: u8 = 12;
+// The lamps' pins, with the hardware PWM channel each is routed to.
+const LEFT_LAMP: (u8, pwm::Channel) = (13, pwm::Channel::Pwm1);
+const RIGHT_LAMP: (u8, pwm::Channel) = (12, pwm::Channel::Pwm0);
 
 const POLL_PERIOD: Duration = Duration::from_millis(10);
 /// Consecutive samples a new level must hold before it is accepted: 30 ms at the poll
@@ -40,27 +50,33 @@ const SETTLE_SAMPLES: u8 = 3;
 /// How long both buttons are held to make a chord: 2 s at the poll period, long enough that
 /// leaning on the door does not do it.
 const CHORD_SAMPLES: u16 = 200;
+/// Far above anything the eye sees as flicker, and slow enough for the lamps' drivers.
+const LAMP_PWM_HZ: f64 = 1000.0;
 
-/// Whether the e-stop says stop, read by the show every frame. Starts pressed, so a frame
-/// that somehow ran before the face was read would be black rather than lit.
-static ESTOP_PRESSED: AtomicBool = AtomicBool::new(true);
-
-static CHORDS: AtomicU32 = AtomicU32::new(0);
-static LEFT_RELEASES: AtomicU32 = AtomicU32::new(0);
-/// Whether the right button is held on its own, not as half of a chord.
-static RIGHT_HELD: AtomicBool = AtomicBool::new(false);
-
-/// Whether the show wants the lamps lit.
-static LAMPS: AtomicBool = AtomicBool::new(false);
-
-/// How many of each gesture the face has seen since it started. Only the differences between
-/// two readings mean anything.
-#[derive(Clone, Copy, PartialEq)]
-pub struct Gestures {
-    /// Both buttons held for the chord's length.
+/// What the door says, as of the face's last poll.
+#[derive(Clone, Copy)]
+pub struct FaceState {
+    /// Whether the show must be in its e-stop scene: the e-stop is pressed, or its wiring is
+    /// at fault.
+    pub estop: bool,
+    /// Chords so far. Like the presses below, a count whose differences are what mean
+    /// anything.
     pub chords: u32,
-    /// The left button pressed and released on its own.
-    pub left: u32,
+    /// Left presses so far, each pressed and released on its own.
+    pub left_presses: u32,
+    /// Whether the right button is down on its own, not as half of a chord.
+    pub right_held: bool,
+}
+
+impl FaceState {
+    /// Before the face has been read: pressed, so a frame that somehow ran first would be in
+    /// the e-stop scene rather than lit.
+    const UNREAD: FaceState = FaceState {
+        estop: true,
+        chords: 0,
+        left_presses: 0,
+        right_held: false,
+    };
 }
 
 /// Tracks the chord across polls.
@@ -81,9 +97,24 @@ pub struct Face {
     estop_no: Input,
     left_button: Input,
     right_button: Input,
-    left_lamp: OutputPin,
-    right_lamp: OutputPin,
+    left_lamp: Lamp,
+    right_lamp: Lamp,
+    /// The frames as they go out, which the lamps take their levels from.
+    frames: LatestRx<Frame>,
+    state: FaceState,
+    states: LatestTx<FaceState>,
     telemetry: Publisher,
+}
+
+/// One lamp: its slot in the frame, and the PWM channel that dims it.
+struct Lamp {
+    gpio: u8,
+    name: &'static str,
+    channel: Channel,
+    /// `None` when the PWM channel could not be opened. The lamps only tell an operator what
+    /// the show is doing, so the show goes on without them.
+    pwm: Option<Pwm>,
+    level: u8,
 }
 
 struct Input {
@@ -109,27 +140,27 @@ enum Estop {
     ContactFault,
 }
 
-/// Claims the face's pins: the lamps driven LOW and the inputs pulled up, and the e-stop
-/// read once. Call this before anything else, so the lamps are dark, no input floats, and
-/// the very first frame already honours the e-stop.
+/// Claims the face: the lamps dark and the inputs pulled up, and the e-stop read once. Call
+/// this before anything else, so the lamps are dark, no input floats, and the very first
+/// frame already honours the e-stop. Returns the face, and the reader of its state for the
+/// show.
 ///
 /// Both buttons and the e-stop are published once here, so the tree holds the face's state
 /// before anybody presses anything.
 ///
 /// Panics if the GPIO cannot be opened. The brain only runs on the Pi, and a brain that
 /// cannot read its e-stop must not light the rig.
-pub fn claim(telemetry: Publisher) -> Face {
+pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<FaceState>) {
     let gpio = Gpio::new().unwrap_or_else(|e| panic!("face: gpio: {e}"));
     let pin = |number: u8| {
         gpio.get(number)
             .unwrap_or_else(|e| panic!("face: GPIO{number}: {e}"))
     };
 
-    // rppal writes the level before switching the pin to output, so a lamp cannot flash on
-    // while it is being claimed.
-    let face = Face {
-        left_lamp: pin(LEFT_LAMP).into_output_low(),
-        right_lamp: pin(RIGHT_LAMP).into_output_low(),
+    let (states, state_reader) = latest(FaceState::UNREAD);
+    let mut face = Face {
+        left_lamp: Lamp::open(LEFT_LAMP, "left-lamp", patch::FACE.left_lamp),
+        right_lamp: Lamp::open(RIGHT_LAMP, "right-lamp", patch::FACE.right_lamp),
         estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", None),
         estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", None),
         left_button: Input::new(pin(LEFT_BUTTON).into_input_pullup(), "left", Some("left_button")),
@@ -138,6 +169,9 @@ pub fn claim(telemetry: Publisher) -> Face {
             "right",
             Some("right_button"),
         ),
+        frames,
+        state: FaceState::UNREAD,
+        states,
         telemetry,
     };
 
@@ -145,39 +179,15 @@ pub fn claim(telemetry: Publisher) -> Face {
         input.trace();
         input.publish(&face.telemetry);
     }
-    trace_pin(LEFT_LAMP, "left-lamp", Level::Low, " (dark)");
-    trace_pin(RIGHT_LAMP, "right-lamp", Level::Low, " (dark)");
-    face.decide_estop();
+    face.state.estop = face.decide_estop();
+    face.states.publish(face.state);
 
-    face
+    (face, state_reader)
 }
 
-/// Starts polling the inputs.
+/// Starts polling the inputs and driving the lamps.
 pub fn spawn(spawner: Spawner, face: Face) {
     spawner.spawn(input_task(face).unwrap());
-}
-
-/// Whether the show must send the rig black: the e-stop is pressed, or its wiring is at
-/// fault.
-pub fn estop_pressed() -> bool {
-    ESTOP_PRESSED.load(Ordering::Relaxed)
-}
-
-pub fn gestures() -> Gestures {
-    Gestures {
-        chords: CHORDS.load(Ordering::Relaxed),
-        left: LEFT_RELEASES.load(Ordering::Relaxed),
-    }
-}
-
-/// Whether the right button is down on its own, as of the last poll.
-pub fn right_held() -> bool {
-    RIGHT_HELD.load(Ordering::Relaxed)
-}
-
-/// Lights both lamps, or darkens them, from the next poll on.
-pub fn light_lamps(lit: bool) {
-    LAMPS.store(lit, Ordering::Relaxed);
 }
 
 #[embassy_executor::task]
@@ -191,7 +201,6 @@ async fn input_task(mut face: Face) -> ! {
     let mut estop_undecided = false;
     let mut estop_quiet = 0u8;
     let mut chord = Chord::default();
-    let mut lamps = false;
     loop {
         ticker.next().await;
         // `|`, not `||`: both contacts must be sampled every tick, or a change on the NO
@@ -202,7 +211,7 @@ async fn input_task(mut face: Face) -> ! {
             // Towards stop at once, on whichever contact got there first. Only the decision
             // waits, and only it can release.
             if !matches!(face.estop(), Estop::Released) {
-                ESTOP_PRESSED.store(true, Ordering::Relaxed);
+                face.state.estop = true;
             }
             estop_undecided = true;
             estop_quiet = 0;
@@ -213,57 +222,94 @@ async fn input_task(mut face: Face) -> ! {
         }
         if estop_undecided && estop_quiet >= SETTLE_SAMPLES {
             estop_undecided = false;
-            face.decide_estop();
+            face.state.estop = face.decide_estop();
         }
 
         let left_changed = face.left_button.poll(&face.telemetry);
         face.right_button.poll(&face.telemetry);
         chord.observe(
+            &mut face.state,
             face.left_button.pressed(),
             face.right_button.pressed(),
             left_changed,
         );
+        face.states.publish(face.state);
 
-        let lit = LAMPS.load(Ordering::Relaxed);
-        if lit != lamps {
-            lamps = lit;
-            let level = if lit { Level::High } else { Level::Low };
-            let meaning = if lit { " (lit)" } else { " (dark)" };
-            face.left_lamp.write(level);
-            face.right_lamp.write(level);
-            trace_pin(LEFT_LAMP, "left-lamp", level, meaning);
-            trace_pin(RIGHT_LAMP, "right-lamp", level, meaning);
-        }
+        let frame = face.frames.snapshot();
+        face.left_lamp.follow(&frame);
+        face.right_lamp.follow(&frame);
     }
 }
 
 impl Chord {
     /// Counts the gestures one poll completes and notes whether the right button is held on
     /// its own, from the buttons' settled levels and whether the left one just changed.
-    fn observe(&mut self, left: bool, right: bool, left_changed: bool) {
+    fn observe(&mut self, state: &mut FaceState, left: bool, right: bool, left_changed: bool) {
         if left && right {
             self.left_in_chord = true;
             self.right_in_chord = true;
             self.held = self.held.saturating_add(1);
             // Equality rather than at-least, so a chord held on counts once.
             if self.held == CHORD_SAMPLES {
-                CHORDS.fetch_add(1, Ordering::Relaxed);
+                state.chords = state.chords.wrapping_add(1);
             }
         } else {
             self.held = 0;
         }
         if left_changed && !left {
             if !self.left_in_chord {
-                LEFT_RELEASES.fetch_add(1, Ordering::Relaxed);
+                state.left_presses = state.left_presses.wrapping_add(1);
             }
             self.left_in_chord = false;
         }
         if !right {
             self.right_in_chord = false;
         }
-        // A press that turns into a chord drives the motor until the left button joins it, a
+        // A press that turns into a chord counts as held until the left button joins it, a
         // poll or a few at most.
-        RIGHT_HELD.store(right && !self.right_in_chord, Ordering::Relaxed);
+        state.right_held = right && !self.right_in_chord;
+    }
+}
+
+impl Lamp {
+    /// Opens the lamp's PWM channel, dark. A channel that will not open is reported and left
+    /// out; the usual cause is the overlay that routes PWM to the lamps' pins missing from
+    /// `config.txt`.
+    fn open((gpio, pwm_channel): (u8, pwm::Channel), name: &'static str, channel: Channel) -> Lamp {
+        let pwm = match Pwm::with_frequency(pwm_channel, LAMP_PWM_HZ, 0.0, Polarity::Normal, true)
+        {
+            Ok(pwm) => Some(pwm),
+            Err(e) => {
+                eprintln!("face: {} GPIO{gpio} {name}: no PWM ({e}), so the lamp stays dark", timestamp());
+                None
+            }
+        };
+        trace_lamp(gpio, name, 0);
+        Lamp {
+            gpio,
+            name,
+            channel,
+            pwm,
+            level: 0,
+        }
+    }
+
+    /// Takes the lamp's level from `frame`. Traced only as it turns on or off, so a console
+    /// fading it does not fill the log.
+    fn follow(&mut self, frame: &Frame) {
+        let level = self.channel.get(frame);
+        if level == self.level {
+            return;
+        }
+        if (level == 0) != (self.level == 0) {
+            trace_lamp(self.gpio, self.name, level);
+        }
+        self.level = level;
+        if let Some(pwm) = &self.pwm
+            && let Err(e) = pwm.set_duty_cycle(f64::from(level) / f64::from(u8::MAX))
+        {
+            eprintln!("face: {} GPIO{} {}: {e}", timestamp(), self.gpio, self.name);
+        }
     }
 }
 
@@ -277,10 +323,10 @@ impl Face {
         }
     }
 
-    /// Hands the e-stop's state to the show, traces it, and publishes it.
-    fn decide_estop(&self) {
+    /// Decides the e-stop from both contacts, traces it, publishes it, and returns whether
+    /// the show must be in its e-stop scene.
+    fn decide_estop(&self) -> bool {
         let estop = self.estop();
-        ESTOP_PRESSED.store(!matches!(estop, Estop::Released), Ordering::Relaxed);
         // Pressed or not, like the buttons, unless the wiring says it cannot tell.
         let (state, word) = match estop {
             Estop::Released => ("RELEASED", rig_mqtt::boolean(false)),
@@ -290,6 +336,7 @@ impl Face {
         };
         eprintln!("face: {}  {:<18}{state}", timestamp(), "ESTOP");
         self.telemetry.publish("estop", word, true);
+        !matches!(estop, Estop::Released)
     }
 }
 
@@ -352,6 +399,14 @@ fn trace_pin(number: u8, name: &str, level: Level, meaning: &str) {
     };
     eprintln!(
         "face: {}  GPIO{number:<2} {name:<11}{level}{meaning}",
+        timestamp()
+    );
+}
+
+fn trace_lamp(gpio: u8, name: &str, level: u8) {
+    let meaning = if level == 0 { "dark" } else { "lit" };
+    eprintln!(
+        "face: {}  GPIO{gpio:<2} {name:<11}{level:<4}({meaning})",
         timestamp()
     );
 }

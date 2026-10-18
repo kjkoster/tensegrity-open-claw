@@ -38,6 +38,12 @@ use std::net::UdpSocket;
 /// it publishes. The rig spawns the client under it, so its show can publish there as well.
 pub const TELEMETRY_SERVICE: &str = "brain";
 
+/// One universe's worth of slots, as the frame loop fills and sends it.
+pub type Frame = [u8; zihatec_rs_485_dmx::SLOTS];
+
+/// Every slot zero: the frame before any has been sent.
+pub const DARK: Frame = [0; zihatec_rs_485_dmx::SLOTS];
+
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
 ///
 /// The workspace itself is not here and never crosses into the running program. It is a
@@ -64,6 +70,10 @@ pub struct Rig {
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
     /// before the brain came up into the tasks that drive it.
     pub tasks: Box<dyn FnOnce(Spawner)>,
+    /// Where every frame goes once it is final — after the takeover has had its say — for
+    /// the rig's fixtures that live inside the brain process and read their own channels
+    /// out of it rather than off the wire.
+    pub frames: latest::LatestTx<Frame>,
     /// The brain's own client, spawned by the rig under [`TELEMETRY_SERVICE`] so that both the
     /// rig's show and everything here can publish under `brain/`: the show is built before
     /// the brain comes up, and one service cannot have two clients.

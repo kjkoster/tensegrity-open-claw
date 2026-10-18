@@ -79,6 +79,8 @@ pub async fn frame_task(
             }
         }
 
+        rig.frames.publish(slots);
+
         let packet = dmx::encode(
             rig.sacn.universe,
             sequence,

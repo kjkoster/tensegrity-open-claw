@@ -1,5 +1,5 @@
-//! Slow path: FFT-derived spectral statistics (SOUND.md §5.4) and tempo
-//! estimation (§5.5). Runs inline on the audio thread every ~250 ms; nothing
+//! Slow path: FFT-derived spectral statistics and tempo
+//! estimation. Runs inline on the audio thread every ~250 ms; nothing
 //! here sits on the latency-critical loudness→intensity path.
 
 use crate::config as cfg;

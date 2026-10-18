@@ -3,22 +3,19 @@
 Code and hardware configuration for the Tensegrity Open Claw sculpture. **This is the single
 setup reference** — everything you must configure on the Pi and the fixtures lives here.
 
-The system is two parts:
+The system is three parts:
 
 - **Pi controller (`claw-pi`)** — a Raspberry Pi running the `brain` daemon. Captures audio,
-  runs the generative engine, and emits one DMX universe **two ways** at 40 Hz: out the wired
-  RS-485 HAT as raw DMX-512, and over the network as E1.31 sACN. The wire is what drives the
-  rig; the sACN copy is there for monitoring and for QLC+ to work against.
+  runs the show, and emits one DMX universe **two ways** at 40 Hz: out the wired RS-485 HAT
+  as raw DMX-512, and over the network as E1.31 sACN. The wire drives the wired fixtures; the
+  sACN copy drives the ball, and is what a monitor or QLC+ works against.
 - **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg,
   plus a pinspot. What is patched where lives in `claw.qxw`, not in this file.
+- **The ball** — an ESP32-C3 on the Pi's WiFi, following the sACN universe.
 
-Deep dives. None of them describe what the code does today — that is what this file and the
-code itself are for:
-
-- [`DESIGN.md`](DESIGN.md) — the system's architectural decisions, and what is not built yet.
-- [`SHOW.md`](SHOW.md) — the show: moods, behaviours, and the pipeline that will drive them.
-- [`PET-THE-DOG.md`](PET-THE-DOG.md) — watchdog layering for unattended operation.
-- [`TODO.md`](TODO.md) — the empirical tests, and open items.
+[`DESIGN.md`](DESIGN.md) holds the system's architectural decisions and what is not built
+yet. It does not describe what the code does today — that is what this file and the code
+itself are for.
 
 ---
 
@@ -119,6 +116,7 @@ records is *how* you set them on each model, which does not change.
 | 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
 | ESP32-C3 MCUs (the balls) | USB serial/JTAG | Flashed by `deploy.sh` while plugged into the Pi; see [Ball fixtures](#ball-fixtures-esp32-c3). Not needed for `brain` itself. |
 | HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Mode *and* address are DIP switches, not a menu — set the binary pattern from the datasheet in `reference/`. |
+| Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. |
 
 ## OS configuration (once)
 
@@ -139,6 +137,16 @@ from the login console.
 
 `brain` opens `/dev/serial0` through the `zihatec-rs-485-dmx` crate, which preflights both of
 these at startup and panics with the remediation if they're wrong.
+
+### Face lamps (hardware PWM)
+
+The two green lamps in the cabinet door's buttons dim through the Pi's two hardware PWM
+channels, which have to be routed to their pins. In `/boot/firmware/config.txt`, add:
+
+- `dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4` — PWM0 on GPIO12, PWM1 on GPIO13.
+
+Reboot, then confirm `ls /sys/class/pwm/pwmchip0`. Without it `brain` still runs, logs
+`no PWM` for each lamp at startup, and leaves the lamps dark.
 
 ### DMX timing hardening
 
@@ -207,10 +215,9 @@ DMX **OUT** of the last device on the bus.
 - The WiFi bring-up units belong here too once documented; the 4G watchdog's are above.
 
 `remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf` and
-the 4G watchdog's unit and timer (above). The systemd watchdog settings designed in
-[`PET-THE-DOG.md`](PET-THE-DOG.md) are **not built** — when they land, how to configure them
-belongs in this file. Folding the 4G watchdog's job into Stem, so there is one health daemon
-rather than two overlapping ones, is an open item in [`TODO.md`](TODO.md).
+the 4G watchdog's unit and timer (above). Folding the 4G watchdog's job into Stem, so there is
+one health daemon rather than two overlapping ones, is an open item in
+[`DESIGN.md`](DESIGN.md).
 
 ## Build & deploy
 
@@ -409,7 +416,7 @@ A board has to be known in two places, under two different MACs:
    mapped to `ball`, and deploy again.
 2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
    `Board` row to paste, then panics. Add the row to `BOARDS` in `ball/src/config.rs`, name
-   the fixture it is in `claw.qxw` — `Ball [5]` there is `patch::BALL_5` here — and deploy
+   the fixture it is in `claw.qxw` — `Ball` there is `patch::BALL` here — and deploy
    once more. The address, the universe and the port come with the fixture.
 
 ## Watching a board

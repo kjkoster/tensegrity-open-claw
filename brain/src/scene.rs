@@ -21,7 +21,7 @@
 //! The state is the brain's own: `brain/scene` and `brain/testmode`, retained, published on
 //! every change, and logged alongside.
 
-use crate::face;
+use crate::face::FaceState;
 use crate::test_mode::TestMode;
 use cortex::audio_features::AudioFeatures;
 use cortex::calendar::{Calendar, Show};
@@ -80,6 +80,8 @@ impl Scene {
 pub struct Cue {
     pub scene: Scene,
     pub motor: bool,
+    /// Whether test mode is on, which the face's lamps show.
+    pub testing: bool,
 }
 
 pub struct Director {
@@ -103,12 +105,12 @@ impl Director {
         }
     }
 
-    /// The cue for the moment `now`, in Unix seconds.
+    /// The cue for the moment `now`, in Unix seconds, given what the room sounds like and
+    /// what the door says.
     ///
-    /// The e-stop cancels a motor run outright rather than pausing it, so releasing it never
-    /// starts the motor partway through its second.
-    pub fn cue(&mut self, now: f64, features: &AudioFeatures) -> Cue {
-        let estop = face::estop_pressed();
+    /// The e-stop cancels a beat's motor run outright rather than pausing it, so releasing it
+    /// never starts the motor partway through its second.
+    pub fn cue(&mut self, now: f64, features: &AudioFeatures, face: &FaceState) -> Cue {
         // Test mode starts from the scene the rig is in, unless that is the e-stop, which it
         // cannot hold; it then starts from blackout.
         let current = match self.reported {
@@ -116,12 +118,13 @@ impl Director {
             Some((scene, _)) => scene,
         };
         // Every frame, e-stop or not, so test mode keeps up with the buttons and its timeout.
-        let test = self.test.frame(current);
-        let cue = if estop {
+        let test = self.test.frame(current, face);
+        let cue = if face.estop {
             self.running = false;
             Cue {
                 scene: Scene::Estop,
                 motor: false,
+                testing: self.test.is_on(),
             }
         } else if let Some(cue) = test {
             self.running = false;
@@ -129,7 +132,7 @@ impl Director {
         } else {
             self.from_calendar(now, features)
         };
-        self.report(cue.scene, self.test.is_on());
+        self.report(cue.scene, cue.testing);
         cue
     }
 
@@ -145,6 +148,7 @@ impl Director {
         Cue {
             scene,
             motor: self.running,
+            testing: false,
         }
     }
 
@@ -162,7 +166,6 @@ impl Director {
         if self.reported.is_none_or(|(_, was)| was != test) {
             eprintln!("show: test mode {}", if test { "on" } else { "off" });
             self.telemetry.publish("testmode", rig_mqtt::boolean(test), true);
-            face::light_lamps(test);
         }
         if self.reported.is_none_or(|(was, _)| was != scene) {
             match self.reported {

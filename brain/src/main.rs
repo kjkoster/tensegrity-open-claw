@@ -9,6 +9,7 @@
 use cortex::Rig;
 use cortex::audio_features::AudioFeatures;
 use cortex::config as cfg;
+use cortex::latest::latest;
 use cortex::qlc_plus::{Rgb, White};
 use cortex::sparkle::{SparkleMapping, SparkleOut};
 use cortex::telemetry;
@@ -35,8 +36,10 @@ const BALL_LED_HZ: f64 = 1.0;
 fn main() {
     // First, so the lamps are dark and the inputs pulled up while everything else starts. Its
     // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
+    // It reads its lamps out of the frames the brain sends, and the show reads its state.
     let (_face_telemetry, face_publisher, face_farewell) = telemetry::spawn("face");
-    let face = face::claim(face_publisher);
+    let (frames, sent_frames) = latest(cortex::DARK);
+    let (face, face_state) = face::claim(face_publisher, sent_frames);
     let (_brain_telemetry, brain_publisher, brain_farewell) =
         telemetry::spawn(cortex::TELEMETRY_SERVICE);
     let mut director = Director::new(&shows::CALENDAR, brain_publisher.clone());
@@ -60,7 +63,7 @@ fn main() {
         // Every fixture named here comes from the QLC+ patch, so this closure is also the
         // record of which patched fixtures the daemon actually drives.
         show: Box::new(move |features: &AudioFeatures, dt: f64, slots: &mut [u8]| {
-            let cue = director.cue(cortex::calendar::now(), features);
+            let cue = director.cue(cortex::calendar::now(), features, &face_state.snapshot());
 
             // The engine and the status LED's sine run in every scene, so either resumes
             // mid-stride rather than out of a frozen frame. The sine is kept within one turn
@@ -93,11 +96,16 @@ fn main() {
 
             ball_show::fill(slots, cue, features);
 
+            // The door's lamps say test mode is on.
+            let lamps = if cue.testing { 1.0 } else { 0.0 };
+            patch::FACE.left_lamp.set_unit(slots, lamps);
+            patch::FACE.right_lamp.set_unit(slots, lamps);
+
             // A sine on the ball's onboard LED, so that a ball following the rig is told
             // apart at a glance from one that is not — which is why it breathes in blackout
             // as well. `intensity` is that LED: its definition gives the channel the
             // IntensityDimmer preset, and the field is named after the role.
-            patch::BALL_5
+            patch::BALL
                 .intensity
                 .set_unit(slots, (1.0 + ball_led_phase.sin()) / 2.0);
         }),
@@ -105,6 +113,7 @@ fn main() {
             face::spawn(spawner, face);
             cortex::calendar::spawn(spawner, &shows::CALENDAR);
         }),
+        frames,
         telemetry: brain_publisher,
         farewells: vec![face_farewell, brain_farewell],
     })

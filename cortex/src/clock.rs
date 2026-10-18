@@ -1,4 +1,4 @@
-//! The shared monotonic clock used across every pipeline stage (SPARKLE.md §0.2):
+//! The shared monotonic clock used across every pipeline stage:
 //! `now_us` stamps each `AudioFeatures` snapshot and every consumer's staleness
 //! check reads against the same epoch.
 

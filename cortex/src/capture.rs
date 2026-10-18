@@ -1,4 +1,4 @@
-//! Audio capture on a dedicated OS thread (SOUND.md §3, §8.2): blocking ALSA
+//! Audio capture on a dedicated OS thread: blocking ALSA
 //! reads pace the fast path, which publishes a fresh AudioFeatures per period.
 //! The thread never dies — xruns recover in place, a lost device is reopened
 //! with backoff, and the sculpture keeps breathing on stale snapshots.

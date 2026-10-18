@@ -1,20 +1,20 @@
-//! The sparkle / breathing mapping (SPARKLE.md §1–§5): pure per-frame
+//! The sparkle / breathing mapping: pure per-frame
 //! arithmetic from an `AudioFeatures` snapshot to six output channels —
 //! intensity, R, G, B, white, gobo — each in 0..1, converted to DMX at slot-fill.
 //!
-//! The physical model (§1) splits the work by timescale: the LED carries the fast
+//! The physical model splits the work by timescale: the LED carries the fast
 //! sparkle (per-onset glints over an intensity floor, plus colour), while the slowly
 //! rotating gobo is a spatial mask whose drift only reshuffles which fibres are lit —
 //! onsets never touch it. White and RGB are modal: a hard cut masked to a dark frame,
-//! never a crossfade (§4, §5).
+//! never a crossfade.
 
 use crate::audio_features::AudioFeatures;
 use crate::config as cfg;
 use crate::perlin::{fbm2, noise1d};
 
 /// A glint contribution below this is "off" for the dark-frame test, and the level
-/// the steady intensity must sit under, that together mask the hard RGB↔White cut
-/// (SPARKLE.md §4): between glints, with the bundle near its floor, the next flash
+/// the steady intensity must sit under, that together mask the hard RGB↔White cut:
+/// between glints, with the bundle near its floor, the next flash
 /// simply appears in the new mode with no visible colour jump.
 const GLINT_DARK_EPS: f64 = 0.02;
 
@@ -22,7 +22,7 @@ const GLINT_DARK_EPS: f64 = 0.02;
 /// and forces its exit when music leaves, so white sparkle is a music-only phrase.
 const MUSIC_PRESENT: f64 = 0.5;
 
-/// Warm and cool endpoints of the centroid→hue ramp (§3.4): amber at the warm end,
+/// Warm and cool endpoints of the centroid→hue ramp: amber at the warm end,
 /// an icy blue-white at the cool end. Display-space 0..1, scaled to a byte at fill.
 const WARM_RGB: [f64; 3] = [1.00, 0.45, 0.10];
 const COOL_RGB: [f64; 3] = [0.60, 0.75, 1.00];
@@ -36,7 +36,7 @@ pub struct SparkleOut {
     pub gobo: f64,
 }
 
-/// Symmetric one-pole slew limiter — the last-line flicker defense (SPARKLE.md §5).
+/// Symmetric one-pole slew limiter — the last-line flicker defense.
 struct Slew {
     tau_s: f64,
     y: f64,
@@ -53,7 +53,7 @@ impl Slew {
     }
 }
 
-/// Asymmetric slew for the gobo (§3.3): ease into motion, coast slowly to rest so
+/// Asymmetric slew for the gobo: ease into motion, coast slowly to rest so
 /// the sparkle pattern settles after music. The slowest slew of all the channels.
 struct GoboSlew {
     y: f64,
@@ -87,19 +87,19 @@ pub struct SparkleMapping {
     last_onset_count: u64,
     accent_strength: f64,
     since_onset_s: f64,
-    // own breath clock (§2, §6) and colour-drift phase
+    // own breath clock and colour-drift phase
     breath_s: f64,
     colour_t: f64,
     // per-fixture noise seeds, so two fixtures never share a colour field
     seed_r: u64,
     seed_g: u64,
     seed_b: u64,
-    // white-mode state machine (§4)
+    // white-mode state machine
     white_mode: WhiteMode,
     white_dwell_s: f64,
     white_gate_phase: f64,
     white_seed: u64,
-    // slews (§5): white is deliberately un-slewed (the modal switch)
+    // slews: white is deliberately un-slewed (the modal switch)
     intensity: Slew,
     r: Slew,
     g: Slew,
@@ -132,7 +132,7 @@ impl SparkleMapping {
     }
 
     pub fn frame(&mut self, af: &AudioFeatures, dt: f64) -> SparkleOut {
-        // Crossfade: a stalled or absent producer reads as silence (§5), decaying our
+        // Crossfade: a stalled or absent producer reads as silence, decaying our
         // own effective music_amount so the sculpture falls back to breathing.
         let target = if af.is_stale() { 0.0 } else { af.music_amount as f64 };
         let rate = if target > self.eff_music {
@@ -143,7 +143,7 @@ impl SparkleMapping {
         self.eff_music += (target - self.eff_music).clamp(-rate, rate);
         let m = self.eff_music;
 
-        // Glint (§3.1): a flash held for the on-time floor, then an instant-attack
+        // Glint: a flash held for the on-time floor, then an instant-attack
         // exponential afterglow. The brevity lives in the decay because a sub-frame
         // on-time is not commandable at the frame rate.
         if af.onset_count != self.last_onset_count {
@@ -160,20 +160,20 @@ impl SparkleMapping {
         };
         let glint = cfg::SPARKLE_ACCENT_GAIN * self.accent_strength * env * m;
 
-        // Intensity (§2, §3.2): silence breath crossfaded with the music glow floor,
+        // Intensity: silence breath crossfaded with the music glow floor,
         // each slewed; the glint is added on top un-slewed for a sharp attack.
         self.breath_s += dt;
         let phase = 2.0 * std::f64::consts::PI * self.breath_s / cfg::SPARKLE_BREATH_PERIOD_S;
         let breath = cfg::SPARKLE_BREATH_FLOOR
             + (cfg::SPARKLE_BREATH_CEIL - cfg::SPARKLE_BREATH_FLOOR) * 0.5 * (1.0 + phase.sin());
         // In music the steady field is dark (MUSIC_INTENSITY_FLOOR, default 0) and the
-        // glints are the only light, flashing against black (§3.1). There is no
+        // glints are the only light, flashing against black. There is no
         // energy-driven glow: that tracked sustained loudness and kept the bundle lit
         // straight through loud passages, which read as "always on".
         let base = self.intensity.step(mix(breath, cfg::MUSIC_INTENSITY_FLOOR, m), dt);
         let intensity = (base + glint).clamp(0.0, 1.0);
 
-        // Colour (§3.4): a slow Perlin wander in silence, crossfading to centroid
+        // Colour: a slow Perlin wander in silence, crossfading to centroid
         // warmth with an onset-driven second-octave shimmer in music.
         let drift_speed = mix(cfg::SPARKLE_SILENCE_DRIFT, music_colour_speed(af), m);
         self.colour_t += drift_speed * dt;
@@ -191,7 +191,7 @@ impl SparkleMapping {
         let g = self.g.step(mix(silence_rgb[1], music_rgb[1], m), dt);
         let b = self.b.step(mix(silence_rgb[2], music_rgb[2], m), dt);
 
-        // Gobo (§3.3): slow reshuffle inside a slow band, nudged by energy_slow blended
+        // Gobo: slow reshuffle inside a slow band, nudged by energy_slow blended
         // with onset_density (optional tempo scaling, gated on confidence), rising from a
         // gentle silence idle into the music band, then asym-slewed. Onsets never touch it.
         let busy = 0.5 * (af.energy_slow as f64).clamp(0.0, 1.0)
@@ -206,7 +206,7 @@ impl SparkleMapping {
         }
         let gobo = self.gobo.step(mix(cfg::GOBO_DRIFT_SILENCE, drift, m), dt);
 
-        // White-sparkle mode (§4): a slow Perlin gate makes a window eligible; a
+        // White-sparkle mode: a slow Perlin gate makes a window eligible; a
         // sustained-density musical event commits the entry; both the entry and the
         // exit flip only on a dark frame so the hard cut is invisible.
         self.white_gate_phase += cfg::WHITE_MODE_PERLIN_SPEED * dt;
@@ -276,7 +276,7 @@ fn perlin_unit(t: f64, seed: u64, oct2: f64) -> f64 {
 
 /// Centroid warmth → RGB along the amber↔blue-white ramp, with a small onset-driven
 /// Perlin shimmer (`oct2`) riding on top so busy music roils and calm music stays
-/// smooth (§3.4).
+/// smooth.
 fn warmth_to_rgb(warmth: f64, t: f64, seed: u64, oct2: f64) -> [f64; 3] {
     let shimmer = oct2 * noise1d(t * 2.0, seed ^ 0x9e37_79b9_7f4a_7c15);
     [

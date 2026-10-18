@@ -1,5 +1,5 @@
-//! Fast path: per-block feature extraction (SOUND.md §4–§5) and the
-//! silence ↔ music state machine (§7). Runs on the audio capture thread,
+//! Fast path: per-block feature extraction and the
+//! silence ↔ music state machine. Runs on the audio capture thread,
 //! once per ALSA period. FFT-free; the slow path lives in spectral.rs.
 
 use super::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole};
@@ -19,31 +19,31 @@ enum State {
 
 pub struct FeaturePipeline {
     rate: f32,
-    // §4.2–§4.3 filters
+    // filters
     hpf: Biquad,
     lp_low: Biquad,
     hp_mid: Biquad,
     lp_mid: Biquad,
     hp_high: Biquad,
-    // §4.4 envelope followers (per sample)
+    // envelope followers (per sample)
     env_broad: EnvFollower,
     env_low: EnvFollower,
     env_mid: EnvFollower,
     env_high: EnvFollower,
     env_fast: EnvFollower, // onset detector input, not blunted by display smoothing
-    // §4.5 / §4.6
+    // noise floor and AGC
     floor: NoiseFloor,
     agc: AgcRef,
-    // §5.1 block-rate smoothers
+    // block-rate smoothers
     energy_slow: OnePole,
     bass_ratio: OnePole,
     tilt: OnePole,
-    // §5.2 dynamics
+    // dynamics
     peak_smooth: OnePole,
     rms_smooth: OnePole,
     rms_mean: OnePole,
     rms_sq: OnePole,
-    // §5.3 onsets
+    // onsets
     prev_env_fast: f32,
     onset_mean: OnePole,
     onset_sq: OnePole,
@@ -51,10 +51,10 @@ pub struct FeaturePipeline {
     onset_count: u64,
     last_onset_strength: f32,
     onset_times: VecDeque<f64>,
-    // §5.6 long horizon
+    // long horizon
     energy_3min: OnePole,
     quiet_seconds: f32,
-    // §7 state machine
+    // state machine
     state: State,
     above_s: f32,
     below_s: f32,
@@ -125,7 +125,7 @@ impl FeaturePipeline {
         let dt = frames as f32 / self.rate;
         self.clock_s += dt as f64;
 
-        // §4.1 mono sum + per-sample filter and envelope chain
+        // mono sum + per-sample filter and envelope chain
         let mut sum_sq = 0.0f32;
         let mut block_peak = 0.0f32;
         self.mono.clear();
@@ -152,7 +152,7 @@ impl FeaturePipeline {
         let eh = self.env_high.value();
         let ef = self.env_fast.value();
 
-        // §4.5 noise floor (frozen in MUSIC) and §4.6 AGC (frozen outside MUSIC)
+        // noise floor (frozen in MUSIC) and AGC (frozen outside MUSIC)
         self.floor.frozen = self.state == State::Music;
         self.floor.update(eb);
         let effective_floor = self.floor.floor() * cfg::FLOOR_MARGIN;
@@ -165,7 +165,7 @@ impl FeaturePipeline {
                 .clamp(0.0, cfg::NORM_HEADROOM)
         };
 
-        // §5.1 energy family
+        // energy family
         let energy = norm(eb);
         let energy_low = norm(el);
         let energy_mid = norm(em);
@@ -174,7 +174,7 @@ impl FeaturePipeline {
         let bass_ratio = self.bass_ratio.process(el / (eb + EPS));
         let tilt = self.tilt.process((eh - el) / (eh + el + EPS));
 
-        // §5.2 dynamics
+        // dynamics
         let peak = self.peak_smooth.process(block_peak);
         let rms = self.rms_smooth.process(block_rms);
         let crest_db = 20.0 * ((peak + EPS) / (rms + EPS)).log10();
@@ -183,7 +183,7 @@ impl FeaturePipeline {
         let m2 = self.rms_sq.process(block_rms * block_rms);
         let rms_var = ((m2 - m * m).max(0.0).sqrt() / (m + EPS)).clamp(0.0, 1.0);
 
-        // §5.3 onsets: rectified derivative of the fast envelope, adaptive threshold
+        // onsets: rectified derivative of the fast envelope, adaptive threshold
         let onset_strength = ((ef - self.prev_env_fast).max(0.0) / (agc_ref + EPS)).min(4.0);
         self.prev_env_fast = ef;
         let omean = self.onset_mean.process(onset_strength);
@@ -207,7 +207,7 @@ impl FeaturePipeline {
             / cfg::ONSET_DENSITY_FULL_HZ)
             .clamp(0.0, 1.0);
 
-        // §5.6 long horizon
+        // long horizon
         let energy_3min = self.energy_3min.process(energy.min(1.0));
         if energy > cfg::UP_THRESHOLD {
             self.quiet_seconds = 0.0;
@@ -215,10 +215,10 @@ impl FeaturePipeline {
             self.quiet_seconds += dt;
         }
 
-        // §5.4 / §5.5 slow path (FFT + tempo), inline every Nth block
+        // slow path (FFT + tempo), inline every Nth block
         let (spec, tempo) = self.spectral.update(&self.mono, onset_strength, dt);
 
-        // §7 state machine with hysteresis and hold times
+        // state machine with hysteresis and hold times
         match self.state {
             State::Silence => {
                 self.above_s = if energy > cfg::UP_THRESHOLD {

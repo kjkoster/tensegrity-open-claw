@@ -64,7 +64,7 @@
    <Model>Ball</Model>
    <Mode>7 Channel</Mode>
    <ID>4</ID>
-   <Name>Ball [5]</Name>
+   <Name>Ball</Name>
    <Universe>0</Universe>
    <Address>199</Address>
    <Channels>7</Channels>
@@ -98,6 +98,16 @@
    <Universe>0</Universe>
    <Address>112</Address>
    <Channels>4</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Tensegrity</Manufacturer>
+   <Model>Face</Model>
+   <Mode>2 Channel</Mode>
+   <ID>8</ID>
+   <Name>Face</Name>
+   <Universe>0</Universe>
+   <Address>209</Address>
+   <Channels>2</Channels>
   </Fixture>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>

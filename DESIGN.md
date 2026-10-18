@@ -5,12 +5,8 @@ not built yet. It deliberately does *not* describe what the code currently does 
 says that better — and it does not restate fixture addressing, which lives in the QLC+
 workspace and changes too often to mirror in prose.
 
-- [`README.md`](README.md) — the operator manual: everything you set on the Pi or on live
-  hardware.
-- [`SHOW.md`](SHOW.md) — the show: what the sculpture actually does, and the generative
-  pipeline that will drive it.
-- [`PET-THE-DOG.md`](PET-THE-DOG.md) — watchdog layering for unattended operation.
-- [`TODO.md`](TODO.md) — the empirical tests that settle the constants these designs assume.
+[`README.md`](README.md) is the operator manual: everything you set on the Pi or on live
+hardware.
 
 ---
 
@@ -19,8 +15,8 @@ workspace and changes too often to mirror in prose.
 The rig is a **Raspberry Pi driving one DMX-512 universe of wired fixtures**. The Pi runs a
 Rust program on Linux (`brain`) that captures audio, runs a generative engine over it, and
 clocks the resulting universe out of an RS-485 HAT at 40 Hz. The same universe also goes out
-as E1.31 sACN over the network — no fixture listens to it, but it is what a monitor or a
-console works against, and it is the path an external override arrives on.
+as E1.31 sACN over the network — the ball listens to it, it is what a monitor or a console
+works against, and it is the path an external override arrives on.
 
 The Pi acts as a WiFi access point, and is reachable from the programming Mac over a
 WireGuard tunnel — which is how both deployment and console traffic get there.
@@ -41,9 +37,8 @@ WireGuard tunnel — which is how both deployment and console traffic get there.
                     (see claw.qxw for the patch)
 ```
 
-The fixtures themselves — one wash and one moving head per leg, plus the pinspot — are
-described in [`SHOW.md`](SHOW.md), which is where the reasoning about what each one is *for*
-belongs.
+The fixtures are one wash and one moving head per leg, the pinspot, the ball on the network,
+and the cabinet door's two lamps — the face, a fixture inside the brain process (§2.7).
 
 ---
 
@@ -122,8 +117,8 @@ So the ingest keeps growing to read more of the definition, and the code asks th
 rather than spelling a number out. Where the definition does not carry the fact yet — a gobo
 channel with one undivided "fixed gobo" band, a strobe channel with no capabilities at all —
 the fix is to measure it and put it in the `.qxf`, not to add a constant next to the code
-that wanted it. Each of those measurements is a [`TODO.md`](TODO.md) item, and landing one
-makes the code that reads it work on every fixture sharing the definition at once.
+that wanted it. Landing a measurement makes the code that reads it work on every fixture
+sharing the definition at once.
 
 There is one class of exception, and it is worth naming so it does not get used as an excuse.
 A `.qxf` describes what a fixture's channels *are* — ranges, bands, travel — and says nothing
@@ -238,6 +233,33 @@ press from half of a chord. The motor runs only when asked, so stepping scenes c
 surprise, and test mode ends itself after fifteen quiet minutes, because a rig left in it
 would ignore the calendar unattended.
 
+### 2.7 The face is a fixture
+
+The cabinet door — e-stop, two buttons, a green lamp in each — is wired to the Pi's GPIO, but
+it is treated like any fixture in both directions rather than as a side channel.
+
+**Its lamps are patched.** `fixtures/face.qxf` gives them two dimmable channels, and the
+workspace patches them like the ball. The show writes them into the frame; the face drives
+the pins from the frame that actually went out, after arbitration. So a console that takes the
+rig over drives the lamps too, and the e-stop scene darkens them with everything else, with
+no special case in either. They dim through the Pi's two hardware PWM channels, because the
+software alternative is a busy-waiting real-time thread per pin, competing with audio capture
+and the DMX timing.
+
+**Its inputs are a state, handed in.** The face polls and debounces, and publishes a
+`FaceState` — e-stop, chord and press counts, the right button held — once per poll. The
+show's state machine takes that snapshot as an argument each frame and reads nothing else of
+the face's, so every input it depends on is visible in its signature. Remote sensing, when it
+comes, is another producer of the same kind of state — most likely over OSC.
+
+### 2.8 MQTT is telemetry, never show
+
+Every topic on the broker reports; nothing the show does reads one. The show's inputs are
+the audio, the door and the clock, and a future remote input arrives as state handed to the
+show, not as a subscription. That keeps the broker optional — a broker that is down, slow or
+restarting costs the telemetry and never a frame — and keeps the show's behaviour explainable
+from its inputs alone.
+
 ---
 
 ## 3. Hardware
@@ -259,55 +281,13 @@ Settings — SSID, serial console, DIP switches, `config.txt` — are in
 
 ## 4. Not built yet
 
-Each section below is one build: a chunk of work that lands as a whole. They are numbered in
-the order they were written down, which is not the order they get built in — §4.2 gives that.
+Each section below is one chunk of work that lands as a whole.
 
-### 4.1 Drive the moving heads
+### 4.1 Telemetry: MQTT and Stem
 
-The claw's heads are patched and its daemon does not touch them. Everything below assumes
-they move, so this comes first.
-
-What it takes is no longer a build of its own. The machinery is already in `cortex`: pan and tilt as 16-bit pairs, travel and park values read from the
-definitions, a rate limiter in degrees per second with the floor these heads impose. So this
-is the claw's show reaching for what already exists, plus the parts that are the claw's
-alone — the aim points of §4.8, and the signal-loss blackout confirmed on the fixtures
-themselves.
-
-It still sits after §4.6, because the repatch moves every address the show would name.
-
-### 4.2 The show pipeline
-
-The generative engine today is a single mapping from audio features to colour. The design
-that replaces it — moods, behaviours, verbs, and the eight-stage pipeline from capture to
-output — is [`SHOW.md`](SHOW.md). That document supersedes the fixture-agnostic
-engine/renderer split this file used to describe.
-
-The pipeline's eight stages are not eight builds. Stages 1, 2 and 8 are built and stage 7
-already has its vocabulary generated, so nothing upstream needs faking; and the stage
-boundaries do not line up with the boundaries of inspectable progress — stages 5, 6 and 7
-show nothing until all three exist, while stage 4 is nine behaviours. The builds are cut
-along what can be seen and judged instead.
-
-Two things run through all of them. **The intent frame is the only seam.** Once it is a real
-type, every build after it is a question of who writes it: a constant, then a verb, then
-home, then one behaviour, then nine, then the mood estimator. There is no stand-in per stage,
-only a `bringup` mode of `brain` that hand-authors an intent frame and survives afterwards as
-the bench and rental-verification tool. `sparkle.rs` is what a per-stage stand-in becomes when
-it is allowed to live, and it is deleted rather than extended. **Telemetry is the instrument,
-not the payoff.** It goes in early, publishing what already exists, and each build after it
-adds its own topic as part of that build.
-
-That gives the order: §4.6 repatch, §4.3 telemetry (its `brain` half), §4.1 the heads, §4.7
-intent and drivers, §4.8 aim points, §4.9 verbs, §4.10 home and modulation, §4.11 the state
-machine, §4.12 the remaining behaviours, §4.13 mood. §4.3's Stem half comes last of all —
-independent of the show by construction, which is exactly why the rest of the telemetry can
-sit at the front while Stem sits at the back.
-
-### 4.3 Telemetry: MQTT and Stem
-
-Read-only telemetry over a local MQTT broker. `brain` publishes for the show pipeline;
-**Stem**, a separate health daemon, stays alive and reporting when `brain` is down — which is
-precisely when health matters. Topic tree and rates are in [`SHOW.md`](SHOW.md).
+Read-only telemetry over a local MQTT broker (§2.8). `brain` publishes what it is and what the
+show is doing; **Stem**, a separate health daemon, stays alive and reporting when `brain` is
+down — which is precisely when health matters.
 
 Four clients each hold their own connection, announce themselves on `health/<service>`, and
 leave a will that says `gone`: `brain`, Stem, the `face` (its own client, inside the brain
@@ -323,20 +303,7 @@ reachable from the deep sleep it does not have yet.
 Stem also absorbs the 4G watchdog that currently lives as an unversioned script on the Pi,
 so there is one health daemon rather than two overlapping ones.
 
-The two halves split across the order in §4.2: `brain`'s topics go in early, because they are
-what makes the builds after them inspectable, while Stem goes in last. The early half touches
-`capture.rs` and the audio pipeline, which are also among the files still citing
-`SPARKLE.md`, `SOUND.md` and `HARDWARE-DMX.md` — none of which exist. Those references come
-out in the same sitting, along with the ones left in `clock.rs`, `dmx.rs`, `latest.rs`,
-`sparkle.rs` and the `config.rs` section headers: a comment says why its code is there, and
-pointing at a design file that may be renamed or deleted is not that.
-
-### 4.4 Watchdog
-
-Three layers — behaviour exception, process, SoC — each catching only what the layer above
-cannot see. Designed in [`PET-THE-DOG.md`](PET-THE-DOG.md).
-
-### 4.5 Installation cabinet
+### 4.2 Installation cabinet
 
 Encloses the Pi and all support hardware for a weatherproof, unattended outdoor deployment
 lasting up to 7 days.
@@ -378,93 +345,11 @@ Prices are indicative only and must be verified at purchase.
 - Runs the full deployment window (≤7 days) without intervention, SD corruption, or thermal
   shutdown.
 
-Commissioning is a test procedure, so it lives in [`TODO.md`](TODO.md).
+### 4.3 Show times, the ball show and the face
 
-### 4.6 Repatch to per-leg blocks
-
-Not code — the open item at the top of [`TODO.md`](TODO.md): legs at 10, 60 and 100, and the
-Yaras switched from 4CH to 11-channel mode. Every build that names a fixture by leg rests on
-this one, so it goes first; done later it moves every address out from under finished code.
-Afterwards the workspace is the only record, which is what retires the TODO item.
-
-### 4.7 The intent frame and the drivers
-
-Stages 5 and 7 of [`SHOW.md`](SHOW.md), built as one chunk because neither shows anything
-alone: an intent frame with no driver reaches no fixture, and a driver with no intent has
-nothing to translate. Together they are the seam everything above plugs into, and the first
-thing to write an intent frame is the `bringup` mode by hand.
-
-Position is carried in **degrees, unreferenced**: zero is wherever the fixture's own zero
-happens to fall, which depends on how that head is clamped and how the tripod sits that
-night. Nothing needs an absolute origin — the recorded point table of §4.8 is the absolute
-reference, and it is re-recorded every setup — so the origin is free to be arbitrary. The
-scale is not. Every motion constant above stage 7 is a delta or a rate: the per-frame ceiling
-for `climb`, how fast `whip` tears across, the wander radius, the smallest move that still
-reads as a `jump`. In raw DMX values those are silently model-specific, so a rental with a
-wider range runs the same code at a different apparent speed while still compiling and still
-running. In degrees they transfer, which is what makes "a rental is a new driver and nothing
-above it changes" true rather than merely stated.
-
-The per-model range is not a hand-written constant either. `PanMax` and `TiltMax` sit in the
-committed `.qxf` beside the channel definitions, so §2.3 covers them unchanged — a fixture
-whose definition declares no travel gets no position at all, the same way one with no red
-channel gets no `red` field.
-
-### 4.8 Named aim points
-
-The twelve points per head from [`SHOW.md`](SHOW.md), and the `bringup` recorder that
-produces them. Thirty-six pan/tilt pairs is too many to capture by editing constants and
-rebuilding, and the table is re-recorded every setup and every rental — so the recorder is
-not scaffolding for this build, it is the only way the table is ever filled in.
-
-### 4.9 Verbs
-
-Jump, whip, carry, climb, chop and flash, each runnable on its own from `bringup`. They are
-their own build rather than part of the behaviours that use them because this is where the
-bench measurements land: a verb that reads wrong is one constant in one place, while the same
-fault found inside a behaviour means guessing which of several constants caused it.
-
-### 4.10 Home and modulation
-
-Stage 6, and with it the home state: the sculpture breathes. Home is the majority of what the
-audience sees and the state every failure resolves to, so from here on a half-built show
-degrades into something finished rather than into darkness.
-
-`sparkle.rs` is deleted here rather than extended. It is a stand-in for stages 5 and 6 that
-was allowed to live, and keeping it would leave one fixture permanently outside the pipeline;
-its slew limiters and its stale-input-reads-as-silence crossfade move into modulation and the
-drivers.
-
-### 4.11 The show state machine
-
-Stage 4, carrying exactly one behaviour: hub-and-spoke, jittered home dwell, weighted
-selection over a pool of one, and abort to home on any exception. Climb is the gentlest first
-behaviour — slow enough that a wrong constant is legible rather than merely ugly, and it uses
-only two of the twelve points, so it does not wait on the whole table being good.
-
-### 4.12 The remaining behaviours
-
-The other eight, one at a time, relaxed pool first and climax last. Going in mood order means
-a partial pool is still a coherent show at every point along the way, and leaving the climax
-behaviours until the end is deliberate: the detonations need the restraint rules, the
-specular safety walk in [`TODO.md`](TODO.md), and an audience to judge them against.
-
-### 4.13 Mood
-
-Stage 3, last. Its pools mean nothing until the behaviours exist, and it is the one stage
-with no visible output at all — the mood topics of §4.3 are the only way to watch it work,
-which is why the telemetry build sits at the front rather than the back.
-
-Two halves. The continuous parameter vector is half-wired already by §4.10, which drives
-modulation from energy; completing it is giving it the full vector and the long time constant
-that turns estimator flaps into course corrections. The discrete mood id — tempo bands,
-corroborating energy, hysteresis — is the other half, and is what stage 4 reads at home.
-
-### 4.14 Show times and the ball show
-
-The design is §2.6. Written but not yet run on the rig: the calendar, the scenes, test mode
-and the door's lamps, the ball's pulse and strobe, and the brain's `scene` and `testmode`
-topics.
+The design is §2.6 and §2.7. Written but not yet run on the rig: the calendar, the scenes,
+test mode, the face as a fixture with its PWM lamps and its `FaceState`, the ball's pulse and
+strobe, and the brain's `scene` and `testmode` topics.
 
 1. **Flash-rate cap.** The strobe's flash and gap ranges reach 12.5 Hz, inside the 3–30 Hz
    band that can set off photosensitive seizures. Settle whether the gap needs a floor that

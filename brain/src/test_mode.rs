@@ -10,7 +10,7 @@
 //! start it by surprise. And test mode ends itself after a quiet spell, because the rig runs
 //! unattended, and one left in test mode would ignore the calendar for the rest of the event.
 
-use crate::face::{self, Gestures};
+use crate::face::FaceState;
 use crate::scene::{Cue, Scene};
 use std::time::{Duration, Instant};
 
@@ -18,8 +18,9 @@ use std::time::{Duration, Instant};
 const TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub struct TestMode {
-    /// The face's counts as last read.
-    seen: Gestures,
+    /// The face's counts as last read; the face counts from zero, and so does this.
+    seen_chords: u32,
+    seen_left_presses: u32,
     on: Option<On>,
 }
 
@@ -31,7 +32,8 @@ struct On {
 impl TestMode {
     pub fn new() -> Self {
         Self {
-            seen: face::gestures(),
+            seen_chords: 0,
+            seen_left_presses: 0,
             on: None,
         }
     }
@@ -42,13 +44,13 @@ impl TestMode {
 
     /// The cue while test mode is on, or `None` while the calendar has the rig. `current` is
     /// the scene to start from when a chord turns it on.
-    pub fn frame(&mut self, current: Scene) -> Option<Cue> {
+    pub fn frame(&mut self, current: Scene, face: &FaceState) -> Option<Cue> {
         let now = Instant::now();
-        let gestures = face::gestures();
-        let chords = gestures.chords.wrapping_sub(self.seen.chords);
-        let steps = gestures.left.wrapping_sub(self.seen.left);
-        self.seen = gestures;
-        let running = face::right_held();
+        let chords = face.chords.wrapping_sub(self.seen_chords);
+        let steps = face.left_presses.wrapping_sub(self.seen_left_presses);
+        self.seen_chords = face.chords;
+        self.seen_left_presses = face.left_presses;
+        let running = face.right_held;
 
         if chords % 2 == 1 {
             self.on = match self.on {
@@ -77,6 +79,7 @@ impl TestMode {
         Some(Cue {
             scene: on.scene,
             motor: running,
+            testing: true,
         })
     }
 }

@@ -1,7 +1,6 @@
-//! The generic latest-value seam between pipeline stages (SPARKLE.md §0.2):
-//! a single-writer, lock-free `ArcSwap` slot, parameterised by payload. Every
-//! seam in the staged pipeline is the same seam — `Latest<AudioFeatures>` today,
-//! `Latest<MusicFeatures>` when the music stage lands — so it is named for the
+//! The generic latest-value seam between threads and stages: a single-writer, lock-free
+//! `ArcSwap` slot, parameterised by payload. Audio features, the takeover candidate, the
+//! frames as sent and the face's state all cross the same seam, so it is named for the
 //! mechanism, not the payload. The producer never waits; consumers never block.
 
 use arc_swap::ArcSwap;
