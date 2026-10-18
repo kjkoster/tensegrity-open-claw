@@ -27,7 +27,7 @@ WireGuard tunnel — which is how both deployment and console traffic get there.
     └───────────────── WireGuard ─────────────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
-    │  (builds brain; local audio capture)            │
+    │  (builds brain; the ear: local audio capture)   │
     │  Generative engine                              │
     │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
     │  └── sACN sender ──────────── network           │
@@ -184,9 +184,9 @@ Standard Rust on Trixie Raspbian Linux, `std`.
   costs less than working around them.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
-- **ALSA** for audio capture.
+- **ALSA** for the ear's capture.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
-  producers — audio capture, and the sACN receiver — on their own OS threads feeding it
+  producers — the ear, and the sACN receiver — on their own OS threads feeding it
   through a lock-free latest-value seam. A blocking `recv` on the executor's thread would
   stall the frame loop, so anything that blocks stays off it.
 
@@ -245,8 +245,20 @@ workspace patches them like the ball. The show writes them into the frame; the f
 the pins from the frame that actually went out, after arbitration. So a console that takes the
 rig over drives the lamps too, and the e-stop scene darkens them with everything else, with
 no special case in either. They dim through the Pi's two hardware PWM channels, because the
-software alternative is a busy-waiting real-time thread per pin, competing with audio capture
-and the DMX timing.
+software alternative is a busy-waiting real-time thread per pin, competing with the ear and
+the DMX timing.
+
+### 2.9 The ear is a part, not a fixture
+
+The rig's microphone input is the ear: capture, feature extraction, and the `AudioFeatures`
+it hands the show. It has no DMX channels and no place in the workspace, but it is a part of
+the rig the way the face is — its own thread, its own state handed to the show, and its own
+client on the broker, so a dead or missing interface shows up as `ear/…` rather than as a
+show that has gone quiet for no visible reason.
+
+The interface itself is incidental — today an Alesis io|2, because it was the cheapest used
+one to be had — so the code names it by role. Swapping it is its ALSA card name and USB
+identity in `cortex`'s config, nothing more.
 
 **Its inputs are a state, handed in.** The face polls and debounces, and publishes a
 `FaceState` — e-stop, chord and press counts, the right button held — once per poll. The
@@ -291,14 +303,14 @@ Read-only telemetry over a local MQTT broker (§2.8). `brain` publishes what it 
 show is doing; **Stem**, a separate health daemon, stays alive and reporting when `brain` is
 down — which is precisely when health matters.
 
-Four clients each hold their own connection, announce themselves on `health/<service>`, and
-leave a will that says `gone`: `brain`, Stem, the `face` (its own client, inside the brain
-process) and the `ball` (over the AP, to the DHCP gateway). The Rust clients share their
+Five clients each hold their own connection, announce themselves on `health/<service>`, and
+leave a will that says `gone`: `brain`, Stem, the `face` and the `ear` (each its own client,
+inside the brain process) and the `ball` (over the AP, to the DHCP gateway). The Rust clients share their
 packets and the health words through the `rig-mqtt` crate; `stem/rig_mqtt.py` is the Python
 half. The broker keeps nothing on disk, and every client replays its retained topics on each
 connect instead.
 
-Written but not yet run on the rig: the `face` and `ball` clients, the brain client's
+Written but not yet run on the rig: the `face`, `ear` and `ball` clients, the brain client's
 retained-topic replay, and the broker without persistence. The ball's `disconnected` is only
 reachable from the deep sleep it does not have yet.
 

@@ -110,7 +110,7 @@ records is *how* you set them on each model, which does not change.
 
 | Device | Interface | Notes |
 |---|---|---|
-| Alesis io\|2 USB audio | USB (`plughw:CARD=io2,DEV=0`) | ALSA capture; confirm with `arecord -L`. VID:PID `0x13b2:0x0008`. Set in `cortex/src/config.rs`. |
+| The ear (a USB audio interface) | USB (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `arecord -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `cortex/src/config.rs`. Reports as `health/ear`, with `ear/state`, `ear/xruns`, `ear/clipping` (blocks at full scale since the brain started — turn the gain down), `ear/error` (why it is deaf, present only while it is), and `ear/usb/address`, `ear/usb/device` and `ear/usb/rate_hz`. |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
 | 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |

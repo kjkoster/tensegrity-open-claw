@@ -8,7 +8,7 @@
 //! the scene asks of it.
 
 use cortex::Rig;
-use cortex::audio_features::AudioFeatures;
+use cortex::ear::AudioFeatures;
 use cortex::config as cfg;
 use cortex::latest::latest;
 use cortex::qlc_plus::{Channel, Rgb, White};

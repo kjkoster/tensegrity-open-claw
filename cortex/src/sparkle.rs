@@ -8,7 +8,7 @@
 //! onsets never touch it. White and RGB are modal: a hard cut masked to a dark frame,
 //! never a crossfade.
 
-use crate::audio_features::AudioFeatures;
+use crate::ear::AudioFeatures;
 use crate::config as cfg;
 use crate::perlin::{fbm2, noise1d};
 

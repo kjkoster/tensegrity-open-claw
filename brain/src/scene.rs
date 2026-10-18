@@ -23,7 +23,7 @@
 
 use crate::face::FaceState;
 use crate::test_mode::TestMode;
-use cortex::audio_features::AudioFeatures;
+use cortex::ear::AudioFeatures;
 use cortex::calendar::{Calendar, Show};
 use cortex::telemetry::Publisher;
 

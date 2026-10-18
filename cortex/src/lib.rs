@@ -3,13 +3,13 @@
 //! The show and the patch generated from its QLC+ workspace live in the rig's own crate;
 //! what does not depend on which fixtures are patched lives here.
 //!
-//! A rig hands over a [`Rig`] and gets the frame loop, the audio pipeline, both transports
-//! and the takeover arbitration for it.
+//! A rig hands over a [`Rig`] and gets the frame loop, the ear, both transports and the
+//! takeover arbitration for it.
 
-pub mod audio_features;
 pub mod calendar;
 pub mod clock;
 pub mod config;
+pub mod ear;
 pub mod envelope;
 pub mod latest;
 pub mod moving_head;
@@ -19,12 +19,11 @@ pub mod scenes;
 pub mod sparkle;
 pub mod telemetry;
 
-mod capture;
 mod dmx;
 mod orchestrator;
 mod sacn_in;
 
-use audio_features::AudioFeatures;
+use ear::AudioFeatures;
 use config::{FRAME_RATE_HZ, SACN_PRIORITY, SACN_RELEASE_FRAMES};
 use embassy_executor::{Executor, Spawner};
 use qlc_plus::{PatchEntry, Sacn};
@@ -141,15 +140,15 @@ fn installed_ram_kb() -> Option<u64> {
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
 ///
 /// The executor lives here rather than in the rig, so a rig binary is its patch, its scenes
-/// and its show, and nothing else — `fn main` is one call. Audio capture always runs, on
-/// every rig: a rig with no use for the interface simply never reads the features it is
-/// handed, and a capture thread with nothing listening is cheaper than two configurations
-/// that can disagree about which device the cabinet has.
+/// and its show, and nothing else — `fn main` is one call. The ear always listens, on every
+/// rig: a rig with no use for it simply never reads the features it is handed, and an ear
+/// with nothing listening to it is cheaper than two configurations that can disagree about
+/// which interface the cabinet has.
 pub fn run(mut rig: Rig) -> ! {
-    let (tx, rx) = latest::latest(AudioFeatures::default());
-
-    // Audio capture runs on its own OS thread, alongside Embassy.
-    let _audio = capture::spawn_capture(tx);
+    // The ear runs on its own OS thread, alongside Embassy, and reports on its own client:
+    // a part of the rig on the broker like the face, not a topic of the brain's.
+    let (_ear_telemetry, ear_publisher, ear_farewell) = telemetry::spawn("ear");
+    let (_ear, rx) = ear::spawn(ear_publisher);
 
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
     socket
@@ -157,7 +156,7 @@ pub fn run(mut rig: Rig) -> ! {
         .expect("set multicast TTL failed");
     let cid = dmx::new_cid();
 
-    // The external-takeover receiver: a second OS thread alongside audio capture, because a
+    // The external-takeover receiver: a second OS thread alongside the ear, because a
     // blocking recv_from would stall the executor's single task. It publishes candidates;
     // the frame loop decides once per frame whether one is actually driving.
     let (takeover_tx, takeover_rx) = latest::latest(sacn_in::Takeover::idle());
@@ -194,7 +193,8 @@ pub fn run(mut rig: Rig) -> ! {
     // What the brain was built as and against goes under `brain/`, retained, so a subscriber
     // arriving later still gets it.
     let publisher = &rig.telemetry;
-    let farewells = std::mem::take(&mut rig.farewells);
+    let mut farewells = std::mem::take(&mut rig.farewells);
+    farewells.push(ear_farewell);
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("fixtures", rig.patch.len().to_string(), true);

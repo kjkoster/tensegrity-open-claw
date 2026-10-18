@@ -1,5 +1,5 @@
 //! Fast path: per-block feature extraction and the
-//! silence ↔ music state machine. Runs on the audio capture thread,
+//! silence ↔ music state machine. Runs on the ear's thread,
 //! once per ALSA period. FFT-free; the slow path lives in spectral.rs.
 
 use super::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole};
@@ -229,7 +229,7 @@ impl FeaturePipeline {
                 if self.above_s > cfg::UP_HOLD_S {
                     self.state = State::Music;
                     self.below_s = 0.0;
-                    eprintln!("audio: state SILENCE → MUSIC");
+                    eprintln!("ear: state SILENCE → MUSIC");
                 }
             }
             State::Music => {
@@ -241,7 +241,7 @@ impl FeaturePipeline {
                 if self.below_s > cfg::DOWN_HOLD_S {
                     self.state = State::Silence;
                     self.above_s = 0.0;
-                    eprintln!("audio: state MUSIC → SILENCE");
+                    eprintln!("ear: state MUSIC → SILENCE");
                 }
             }
         }

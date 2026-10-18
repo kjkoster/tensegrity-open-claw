@@ -9,7 +9,7 @@
 use crate::patch::{BALL, Ball};
 use crate::scene::{Cue, Scene};
 use ball_dmx::STROBE_STEP_MS;
-use cortex::audio_features::AudioFeatures;
+use cortex::ear::AudioFeatures;
 
 /// The power LEDs' peak in each pattern, as a fraction of full.
 const PULSE_LEVEL: f64 = 1.0;

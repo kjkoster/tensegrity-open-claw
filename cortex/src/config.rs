@@ -100,49 +100,54 @@ pub const SEEDS: [u64; 16] = [
     0xc2b2_ae3d_27d4_eb4f,
 ];
 
-// ── Capture ──────────────────────────────────────────────────────────────────
+// ── Ear — capture ────────────────────────────────────────────────────────────
+// The ear's interface is whichever class-compliant USB audio interface is in the cabinet —
+// today an Alesis io|2, chosen as the cheapest used one available, not for anything it does.
+// Swapping it is these three lines: its ALSA card name, and its USB identity for the probe.
 pub const ALSA_DEVICE: &str = "plughw:CARD=io2,DEV=0"; // confirm with `arecord -L`
+pub const EAR_USB_VENDOR: u16 = 0x13b2; // confirm with `lsusb`
+pub const EAR_USB_PRODUCT: u16 = 0x0008;
 pub const REQUESTED_RATE_HZ: u32 = 48_000; // always use the negotiated rate, never this
 pub const CHANNELS: usize = 2;
 pub const PERIOD_FRAMES: usize = 512; // ≈10.7 ms @ 48 kHz; do not chase smaller
 pub const PERIODS_PER_BUFFER: usize = 4;
 pub const DEVICE_RETRY_MAX_S: u64 = 30;
 
-// ── High-pass filter ─────────────────────────────────────────────────────────
+// ── Ear — high-pass filter ───────────────────────────────────────────────────
 pub const HPF_HZ: f32 = 90.0;
 pub const FILTER_Q: f32 = 0.707;
 
-// ── Band split ───────────────────────────────────────────────────────────────
+// ── Ear — band split ─────────────────────────────────────────────────────────
 pub const BAND_LOW_MAX_HZ: f32 = 250.0;
 pub const BAND_MID_MAX_HZ: f32 = 4_000.0;
 
-// ── Envelope followers ───────────────────────────────────────────────────────
+// ── Ear — envelope followers ─────────────────────────────────────────────────
 pub const ENV_ATTACK_S: f32 = 0.010; // ≤ 15 ms keeps lights tight on hits
 pub const ENV_RELEASE_S: f32 = 0.200;
 pub const ONSET_ENV_ATTACK_S: f32 = 0.001;
 pub const ONSET_ENV_RELEASE_S: f32 = 0.050;
 
-// ── Noise-floor tracking ─────────────────────────────────────────────────────
+// ── Ear — noise-floor tracking ───────────────────────────────────────────────
 pub const FLOOR_WINDOW_S: f32 = 8.0;
 pub const FLOOR_SUBWINDOWS: usize = 16;
 pub const FLOOR_MARGIN: f32 = 1.75;
 
-// ── AGC ──────────────────────────────────────────────────────────────────────
+// ── Ear — AGC ────────────────────────────────────────────────────────────────
 pub const AGC_RISE_S: f32 = 1.0;
 pub const AGC_FALL_S: f32 = 30.0; // must stay slow or the AGC becomes a compressor
 pub const AGC_MIN_REF: f32 = 1e-3;
 pub const NORM_HEADROOM: f32 = 1.5; // genuine peaks may read > 1.0
 
-// ── Energy family ────────────────────────────────────────────────────────────
+// ── Ear — energy family ──────────────────────────────────────────────────────
 pub const ENERGY_SLOW_S: f32 = 1.5;
 pub const BASS_RATIO_SMOOTH_S: f32 = 0.5;
 pub const TILT_SMOOTH_S: f32 = 0.5;
 
-// ── Dynamics family ──────────────────────────────────────────────────────────
+// ── Ear — dynamics family ────────────────────────────────────────────────────
 pub const CREST_SMOOTH_S: f32 = 1.0;
 pub const RMS_VAR_WINDOW_S: f32 = 2.0;
 
-// ── Onsets ───────────────────────────────────────────────────────────────────
+// ── Ear — onsets ─────────────────────────────────────────────────────────────
 pub const ONSET_STATS_S: f32 = 1.5; // history window for the adaptive threshold
 pub const ONSET_K: f32 = 2.0; // fire above mean + k·std
 pub const ONSET_MIN_STRENGTH: f32 = 0.02; // absolute veto against digital silence
@@ -150,7 +155,7 @@ pub const ONSET_REFRACTORY_S: f32 = 0.09;
 pub const ONSET_DENSITY_WINDOW_S: f32 = 3.0;
 pub const ONSET_DENSITY_FULL_HZ: f32 = 8.0; // onsets/s that read as density 1.0
 
-// ── Spectral (slow path) ─────────────────────────────────────────────────────
+// ── Ear — spectral (slow path) ───────────────────────────────────────────────
 pub const FFT_SIZE: usize = 2048;
 pub const FFT_INTERVAL_S: f32 = 0.25;
 pub const CENTROID_MIN_HZ: f32 = 100.0; // log-mapping range for centroid/rolloff
@@ -158,7 +163,7 @@ pub const CENTROID_MAX_HZ: f32 = 8_000.0;
 pub const SPREAD_NORM_HZ: f32 = 4_000.0;
 pub const ROLLOFF_FRACTION: f32 = 0.85;
 
-// ── Tempo ────────────────────────────────────────────────────────────────────
+// ── Ear — tempo ──────────────────────────────────────────────────────────────
 pub const TEMPO_RING_S: f32 = 6.0;
 pub const TEMPO_MIN_RING_S: f32 = 3.0; // no estimates until this much history
 pub const BPM_MIN: u32 = 60;
@@ -168,13 +173,13 @@ pub const BPM_PREF_MAX: f32 = 150.0;
 pub const BPM_PREF_BIAS: f32 = 1.15;
 pub const TEMPO_PERSIST_S: f32 = 2.0; // hysteresis before accepting a jump
 
-// ── Long horizon ─────────────────────────────────────────────────────────────
+// ── Ear — long horizon ───────────────────────────────────────────────────────
 pub const ENERGY_3MIN_S: f32 = 180.0;
 
-// ── Published features ───────────────────────────────────────────────────────
+// ── Ear — published features ─────────────────────────────────────────────────
 pub const STALE_US: u64 = 250_000; // older snapshots read as silence
 
-// ── Silence ↔ music state machine ────────────────────────────────────────────
+// ── Ear — silence ↔ music state machine ──────────────────────────────────────
 pub const UP_THRESHOLD: f32 = 0.15;
 pub const DOWN_THRESHOLD: f32 = 0.05; // must be < UP_THRESHOLD
 pub const UP_HOLD_S: f32 = 0.5;

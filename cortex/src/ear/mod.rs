@@ -1,22 +1,36 @@
-//! The audio-features pipeline stage: per-block feature
-//! extraction (`pipeline`, with its DSP and spectral building blocks) and the
-//! `AudioFeatures` snapshot it produces.
+//! The ear: the rig's microphone input, listening on its own thread and handing the show
+//! what it hears as [`AudioFeatures`].
 //!
-//! `AudioFeatures` is the published contract between the
-//! capture/feature thread and its consumers: a single Copy
-//! struct carried over a latest-value `Latest` seam. The producer never waits;
-//! consumers never block.
+//! Like the face, the ear is a part of the rig rather than a patched fixture: it has no DMX
+//! channels, but it has its own state, its own thread and its own client on the broker —
+//! `health/ear`, and `ear/state`, `ear/xruns`, `ear/clipping`, `ear/error`,
+//! `ear/usb/address`, `ear/usb/device` and `ear/usb/rate_hz`, retained.
+//!
+//! Capture reads blocks off the USB interface (`capture`), and per-block feature extraction
+//! (`pipeline`, with its DSP and spectral building blocks) turns each into a fresh
+//! `AudioFeatures`. That snapshot is the contract between the ear and the show: a single Copy
+//! struct carried over a latest-value seam. The ear never waits; the show never blocks.
 
+mod capture;
 mod dsp;
 mod pipeline;
 mod spectral;
 
-pub use pipeline::FeaturePipeline;
-
 use crate::clock::now_us;
 use crate::config as cfg;
+use crate::latest::{LatestRx, latest};
+use crate::telemetry::Publisher;
+use std::thread::JoinHandle;
 
-/// Written by the capture thread at block rate, read by the DMX loop at the frame
+/// Starts the ear on its own thread, reporting to `telemetry`, and returns the reader of
+/// what it hears. Until the first block arrives the reader holds a default snapshot, which
+/// reads as silence.
+pub fn spawn(telemetry: Publisher) -> (JoinHandle<()>, LatestRx<AudioFeatures>) {
+    let (features, reader) = latest(AudioFeatures::default());
+    (capture::spawn(features, telemetry), reader)
+}
+
+/// Written by the ear's thread at block rate, read by the DMX loop at the frame
 /// rate. All features are nominally 0..1 (post-AGC, post-floor) unless noted.
 #[derive(Clone, Copy, Default)]
 pub struct AudioFeatures {

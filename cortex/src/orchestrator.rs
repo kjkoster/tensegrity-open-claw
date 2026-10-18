@@ -11,7 +11,7 @@
 //! driven from different sources.
 
 use crate::Rig;
-use crate::audio_features::AudioFeatures;
+use crate::ear::AudioFeatures;
 use crate::clock;
 use crate::config as cfg;
 use crate::dmx;
