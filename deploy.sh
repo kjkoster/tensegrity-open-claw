@@ -42,7 +42,8 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 #   stem/           the broker configuration, and whatever else Stem grows
 #   etc/            what the deploy installs onto the Pi that belongs to no daemon: the
 #                    access point's configuration, the uplink watchdog (its script, its
-#                    unit and its timer), and remote-deploy.sh, which does the installing
+#                    unit and its timer), the boot configuration, and remote-deploy.sh,
+#                    which does the installing
 #   attach.sh        the probe-rs wrapper, which re-execs its own copy on the Pi
 #
 # A daemon's systemd unit travels inside that daemon's directory.
@@ -77,6 +78,39 @@ rsync -az --checksum "${FILES[@]}" "$PI:$PI_DIR/"
 step "rsync MCU binaries to $PI:$PI_DIR/binaries"
 ssh "$PI" "mkdir -p '$PI_DIR/binaries'"
 rsync -az "$BALL_BINARY" "$PI:$PI_DIR/binaries/ball"
+
+# --- 2b. Boot configuration -----------------------------------------------
+# The rig's settings live in their own file beside config.txt, included from it, so the rest
+# of config.txt stays as Raspberry Pi OS ships it and an OS upgrade can rewrite it freely.
+#
+# The file is synced on every deploy, and the include line is added once if it is missing.
+# Neither reboots: a bad boot configuration on a Pi reachable over 4G is a trip to site, so
+# when it takes effect stays a person's call.
+#
+# Plain `rsync -c`, not `-a`: the boot partition is FAT, which has no owners or permissions
+# to preserve, and asking for them fails. `--itemize-changes` prints a line only when the file
+# actually changed, which is what decides whether a reboot is owed. Nothing here reboots.
+step "boot configuration on $PI"
+BOOT_DIR="/boot/firmware"
+BOOT_CONFIG="config-claw.txt"
+INCLUDE_LINE="include $BOOT_CONFIG"
+
+changed=$(rsync -c --itemize-changes --rsync-path="sudo rsync" \
+    "etc/$BOOT_CONFIG" "$PI:$BOOT_DIR/$BOOT_CONFIG")
+if [ -n "$changed" ]; then
+    echo "$BOOT_DIR/$BOOT_CONFIG changed — reboot $PI for it to take effect"
+else
+    echo "$BOOT_DIR/$BOOT_CONFIG unchanged"
+fi
+
+if ssh "$PI" "grep -qxF '$INCLUDE_LINE' $BOOT_DIR/config.txt"; then
+    echo "$BOOT_DIR/config.txt includes $BOOT_CONFIG"
+else
+    # `[all]` first, so the include applies whatever conditional section the file happens to
+    # end in.
+    ssh "$PI" "printf '\n[all]\n%s\n' '$INCLUDE_LINE' | sudo tee -a $BOOT_DIR/config.txt >/dev/null"
+    echo "added '$INCLUDE_LINE' to $BOOT_DIR/config.txt — reboot $PI for it to take effect"
+fi
 
 # --- 3. Build, restart and flash on the Pi --------------------------------
 step "run remote deploy on $PI"

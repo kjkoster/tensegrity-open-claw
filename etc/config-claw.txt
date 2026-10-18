@@ -1,0 +1,30 @@
+# The rig's own boot configuration, included from /boot/firmware/config.txt by its last line,
+# `include config-claw.txt`. deploy.sh installs this file beside it and offers to add that
+# line; everything else in config.txt stays as Raspberry Pi OS ships it.
+#
+# Read at boot only: a change here takes a reboot to land.
+
+# The PL011 UART on the header, for wired DMX at 250 kbaud. The mini-UART cannot hold that
+# rate, so Bluetooth gives the PL011 up, and its clock is set so 250000 divides cleanly.
+enable_uart=1
+dtoverlay=disable-bt
+init_uart_clock=16000000
+
+# GPIO18 is the RS-485 HAT's transmit enable. Driven high from boot, so the break the DMX
+# framing sends never touches the direction line.
+gpio=18=op,dh
+
+# Firmware voltage and temperature compensation shifts timing; cheap DMX receivers are strict
+# about framing.
+disable_pvt=1
+
+# Pins the CPU clock against frequency-scaling jitter. Optional: the full 512-slot frame was
+# the real fix for the DMX receivers, and dropping this saves heat and power in the cabinet.
+force_turbo=1
+
+# The onboard analog audio uses both hardware PWM channels, which the face's lamps need. The
+# brain captures from a USB interface, so nothing is lost.
+dtparam=audio=off
+
+# PWM0 on GPIO12 and PWM1 on GPIO13: the face's two lamps.
+dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4

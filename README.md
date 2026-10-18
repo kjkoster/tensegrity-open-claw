@@ -120,20 +120,27 @@ records is *how* you set them on each model, which does not change.
 
 ## OS configuration (once)
 
+### Boot configuration
+
+Every setting the rig needs in the boot configuration lives in
+[`etc/config-claw.txt`](etc/config-claw.txt), with the reason for each beside it: the UART for
+wired DMX, the HAT's transmit enable, the timing settings, onboard audio off, and the PWM
+overlay for the face lamps. `config.txt` itself stays as Raspberry Pi OS ships it, apart from
+one last line, `include config-claw.txt`.
+
+`deploy.sh` copies the file to `/boot/firmware/` on every deploy and says when it changed. If
+`config.txt` lacks the include line it appends it, and says so. It never reboots: a changed
+boot configuration takes effect at the next `sudo reboot`, which is yours to choose.
+
 ### Serial / UART for wired DMX
 
-The mini-UART (`ttyS0`) can't hold 250 kbaud, so move the PL011 onto the header and free it
-from the login console.
+The mini-UART (`ttyS0`) can't hold 250 kbaud, so the boot configuration moves the PL011 onto
+the header; the login console has to let go of it too.
 
-1. `/boot/firmware/config.txt`, add:
-   - `dtoverlay=disable-bt` — makes `/dev/serial0 → ttyAMA0`.
-   - `init_uart_clock=16000000` — lets 250000 baud divide cleanly.
-   - `gpio=18=op,dh` — GPIO18 HIGH (transmit-enable) from boot, so the break code never
-     touches the RS-485 direction line.
-2. `raspi-config` → Interface → Serial: **login shell = No, hardware = Yes** (drops
+1. `raspi-config` → Interface → Serial: **login shell = No, hardware = Yes** (drops
    `console=serial0,115200` from `cmdline.txt`).
-3. `sudo systemctl disable --now serial-getty@ttyAMA0.service hciuart`
-4. Reboot, then confirm `ls -l /dev/serial0` → `ttyAMA0`.
+2. `sudo systemctl disable --now serial-getty@ttyAMA0.service hciuart`
+3. Reboot, then confirm `ls -l /dev/serial0` → `ttyAMA0`.
 
 `brain` opens `/dev/serial0` through the `zihatec-rs-485-dmx` crate, which preflights both of
 these at startup and panics with the remediation if they're wrong.
@@ -141,12 +148,9 @@ these at startup and panics with the remediation if they're wrong.
 ### Face lamps (hardware PWM)
 
 The two green lamps in the cabinet door's buttons dim through the Pi's two hardware PWM
-channels, which have to be routed to their pins. In `/boot/firmware/config.txt`, add:
-
-- `dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4` — PWM0 on GPIO12, PWM1 on GPIO13.
-
-Reboot, then confirm `ls /sys/class/pwm/pwmchip0`. Without it `brain` still runs, logs
-`no PWM` for each lamp at startup, and leaves the lamps dark.
+channels, which the boot configuration routes to GPIO12 and GPIO13. Confirm with
+`ls /sys/class/pwm/pwmchip0`. Without it `brain` still runs, logs `no PWM` for each lamp at
+startup, and leaves the lamps dark.
 
 ### DMX timing hardening
 
@@ -156,7 +160,7 @@ insurance:
 - **Full 512-slot frame (the actual fix).** `brain` pads the wired frame to a full 512-slot
   universe; do not ship a short frame. Why a short one fails — and why it fails while still
   showing a healthy "DMX detected" — is in [`DESIGN.md`](DESIGN.md) §2.2.
-- **`disable_pvt=1`** in `config.txt` — removes Broadcom firmware voltage/temperature timing
+- **`disable_pvt=1`** in the boot configuration — removes Broadcom firmware voltage/temperature timing
   jitter. Cheap, keep it.
 - **Real-time scheduling** — `brain.service` sets `CPUSchedulingPolicy=fifo` /
   `CPUSchedulingPriority=50` so the kernel can't preempt the DMX loop mid-frame. The RT
