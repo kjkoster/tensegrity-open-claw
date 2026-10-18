@@ -69,7 +69,9 @@ async fn main(spawner: Spawner) -> ! {
     // RTT must be initialized first so panics during startup produce visible output.
     rtt_target::rtt_init_print!();
 
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    // Half the chip's top speed: the ball's work is waiting on the network and the clock, and
+    // the lower clock draws less from the pack.
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::_80MHz);
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
     let peripherals = esp_hal::init(config);

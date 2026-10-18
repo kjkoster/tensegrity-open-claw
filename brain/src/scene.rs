@@ -116,7 +116,7 @@ impl Director {
             Some((scene, _)) => scene,
         };
         // Every frame, e-stop or not, so test mode keeps up with the buttons and its timeout.
-        let test = self.test.frame(current, estop);
+        let test = self.test.frame(current);
         let cue = if estop {
             self.running = false;
             Cue {

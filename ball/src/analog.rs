@@ -2,8 +2,9 @@
 //!
 //! Each is read only when the reading is about to be published, and no more often. The pack
 //! drains over hours, so once a minute says everything about it. The C terminal is only
-//! interesting around a run: it is watched every 100 ms while the motor runs and for half a
-//! second after it stops, and not read at all otherwise.
+//! interesting around a run: it is read every 500 ms while the motor runs, four times in the
+//! longest run the motor allows, once more half a second after it stops, and not at all
+//! otherwise.
 //!
 //! The conversion is a straight line from the raw count, with no calibration curve. Each
 //! pack reading logs its raw count and pin voltage beside the result, as does every change of
@@ -27,8 +28,8 @@ pub type PackPin = GPIO3<'static>;
 pub type PresencePin = GPIO4<'static>;
 
 const PACK_PERIOD: Duration = Duration::from_secs(60);
-const PRESENCE_PERIOD: Duration = Duration::from_millis(100);
-/// How long the C terminal is still watched after the motor stops, for the line coming down.
+const PRESENCE_PERIOD: Duration = Duration::from_millis(500);
+/// When the C terminal is read once more after the motor stops, for the line coming down.
 const PRESENCE_LINGER: Duration = Duration::from_millis(500);
 /// Samples averaged into one reading.
 const SAMPLES: u32 = 8;
@@ -111,9 +112,11 @@ pub async fn sense(mut sensors: Sensors) -> ! {
                 }
                 (true, _) => Watching::Running,
                 (false, Watching::Off) => Watching::Off,
-                (false, _) => Watching::Stopping {
-                    until: Instant::now() + PRESENCE_LINGER,
-                },
+                (false, _) => {
+                    let until = Instant::now() + PRESENCE_LINGER;
+                    next_presence = until;
+                    Watching::Stopping { until }
+                }
             };
             continue;
         }

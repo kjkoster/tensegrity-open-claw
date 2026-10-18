@@ -232,9 +232,9 @@ the pattern — the firmware's build reads out of the definition, as §2.3 asks.
 
 **Test mode is on the door, not on a console.** Testing a scene should not wait for dusk,
 for silence, or for a laptop on the network, so the face's two buttons can take the scene
-over: a two-second chord toggles test mode, and the buttons then step the scene and fire a
-single motor run. Gestures are counted on release, which is what tells a lone press from
-half of a chord. The motor runs only when asked, so stepping scenes cannot start it by
+over: a two-second chord toggles test mode, and the buttons then step the scene and run the
+motor for as long as one is held. A step is counted on release, which is what tells a lone
+press from half of a chord. The motor runs only when asked, so stepping scenes cannot start it by
 surprise, and test mode ends itself after fifteen quiet minutes, because a rig left in it
 would ignore the calendar unattended.
 

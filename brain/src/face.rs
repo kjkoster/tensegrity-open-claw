@@ -4,11 +4,12 @@
 //! The e-stop is live: while it is pressed the show is in its e-stop scene. The two buttons
 //! are read as gestures for the show's test mode, and the lamps say whether it is on.
 //!
-//! A gesture is counted on release, not on press, because only the release tells a button
-//! pressed alone from one that became half of a chord: holding both for two seconds toggles
-//! test mode, and neither of the presses that made the chord counts as a gesture of its own.
-//! Gestures are counters rather than flags, so a show that reads them once per frame cannot
-//! miss one that came and went between two frames.
+//! Holding both for two seconds toggles test mode. A left press is counted on release, not on
+//! press, because only the release tells a button pressed alone from one that became half of
+//! a chord, and neither of the presses that made a chord counts on its own. Presses and chords
+//! are counters rather than flags, so a show that reads them once per frame cannot miss one
+//! that came and went between two frames. The right button is read as held instead, for as
+//! long as it is down on its own: it drives the motor for exactly that long.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
@@ -46,7 +47,8 @@ static ESTOP_PRESSED: AtomicBool = AtomicBool::new(true);
 
 static CHORDS: AtomicU32 = AtomicU32::new(0);
 static LEFT_RELEASES: AtomicU32 = AtomicU32::new(0);
-static RIGHT_RELEASES: AtomicU32 = AtomicU32::new(0);
+/// Whether the right button is held on its own, not as half of a chord.
+static RIGHT_HELD: AtomicBool = AtomicBool::new(false);
 
 /// Whether the show wants the lamps lit.
 static LAMPS: AtomicBool = AtomicBool::new(false);
@@ -59,8 +61,6 @@ pub struct Gestures {
     pub chords: u32,
     /// The left button pressed and released on its own.
     pub left: u32,
-    /// The right button pressed and released on its own.
-    pub right: u32,
 }
 
 /// Tracks the chord across polls.
@@ -69,7 +69,7 @@ struct Chord {
     /// Consecutive polls with both buttons down.
     held: u16,
     /// Whether each button has been half of a chord since it was last pressed, which takes
-    /// its release out of the count.
+    /// the left one's release out of the count and stops the right one counting as held.
     left_in_chord: bool,
     right_in_chord: bool,
 }
@@ -167,8 +167,12 @@ pub fn gestures() -> Gestures {
     Gestures {
         chords: CHORDS.load(Ordering::Relaxed),
         left: LEFT_RELEASES.load(Ordering::Relaxed),
-        right: RIGHT_RELEASES.load(Ordering::Relaxed),
     }
+}
+
+/// Whether the right button is down on its own, as of the last poll.
+pub fn right_held() -> bool {
+    RIGHT_HELD.load(Ordering::Relaxed)
 }
 
 /// Lights both lamps, or darkens them, from the next poll on.
@@ -213,12 +217,11 @@ async fn input_task(mut face: Face) -> ! {
         }
 
         let left_changed = face.left_button.poll(&face.telemetry);
-        let right_changed = face.right_button.poll(&face.telemetry);
+        face.right_button.poll(&face.telemetry);
         chord.observe(
             face.left_button.pressed(),
             face.right_button.pressed(),
             left_changed,
-            right_changed,
         );
 
         let lit = LAMPS.load(Ordering::Relaxed);
@@ -235,9 +238,9 @@ async fn input_task(mut face: Face) -> ! {
 }
 
 impl Chord {
-    /// Counts the gestures one poll completes, from the buttons' settled levels and whether
-    /// each just changed.
-    fn observe(&mut self, left: bool, right: bool, left_changed: bool, right_changed: bool) {
+    /// Counts the gestures one poll completes and notes whether the right button is held on
+    /// its own, from the buttons' settled levels and whether the left one just changed.
+    fn observe(&mut self, left: bool, right: bool, left_changed: bool) {
         if left && right {
             self.left_in_chord = true;
             self.right_in_chord = true;
@@ -255,12 +258,12 @@ impl Chord {
             }
             self.left_in_chord = false;
         }
-        if right_changed && !right {
-            if !self.right_in_chord {
-                RIGHT_RELEASES.fetch_add(1, Ordering::Relaxed);
-            }
+        if !right {
             self.right_in_chord = false;
         }
+        // A press that turns into a chord drives the motor until the left button joins it, a
+        // poll or a few at most.
+        RIGHT_HELD.store(right && !self.right_in_chord, Ordering::Relaxed);
     }
 }
 

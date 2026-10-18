@@ -374,12 +374,13 @@ To try each scene without a console or waiting for dusk, use the cabinet door:
 |---|---|
 | hold both buttons for 2 s | test mode on, starting from the scene the rig is in; both lamps light |
 | left button | the next scene: blackout → daylight → pulse → strobe → blackout |
-| right button | one motor run, there and then |
+| right button | the motor, for as long as it is held |
 | hold both buttons for 2 s again | test mode off; the calendar has the rig again |
 
 The calendar and the sun are ignored while it is on, but the audio is not: the strobe still
-follows the room. The motor runs only when the right button asks, never on its beat. The
-e-stop still wins, and cancels a run in progress. The buttons are published as
+follows the room. The motor runs only while the right button is held, never on its beat,
+and the ball's firmware still stops any run at 2 s. The e-stop still wins: the motor stops
+while it is pressed. The buttons are published as
 `face/left_button` and `face/right_button`. Test mode turns itself off after 15
 minutes without a press, so a rig left in it cannot ignore the calendar for the rest of the
 event.
