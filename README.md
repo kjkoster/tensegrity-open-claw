@@ -9,8 +9,8 @@ The system is three parts:
   runs the show, and emits one DMX universe **two ways** at 40 Hz: out the wired RS-485 HAT
   as raw DMX-512, and over the network as E1.31 sACN. The wire drives the wired fixtures; the
   sACN copy drives the ball, and is what a monitor or QLC+ works against.
-- **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg,
-  plus a pinspot. What is patched where lives in `claw.qxw`, not in this file.
+- **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg.
+  What is patched where lives in `claw.qxw`, not in this file.
 - **The ball** — an ESP32-C3 on the Pi's WiFi, following the sACN universe.
 
 [`DESIGN.md`](DESIGN.md) holds the system's architectural decisions and what is not built
@@ -115,7 +115,6 @@ records is *how* you set them on each model, which does not change.
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
 | 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
 | ESP32-C3 MCUs (the balls) | USB serial/JTAG | Flashed by `deploy.sh` while plugged into the Pi; see [Ball fixtures](#ball-fixtures-esp32-c3). Not needed for `brain` itself. |
-| HQ Power VDPLPS36B2 pinspot | 3-pin XLR off the HAT | Mode *and* address are DIP switches, not a menu — set the binary pattern from the datasheet in `reference/`. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. |
 
 ## OS configuration (once)
@@ -331,8 +330,8 @@ outright, with a message naming the manufacturer and model.
 was built from:
 
 ```
-brain: 7 fixtures
-brain:   pinspot @ 1–5 — HQ Power VDPLPS36B2 LED Pinspot PAR36, 5 Channel
+brain: 8 fixtures
+brain:   Wash red leg @ 100–103 — CLF Yara, 4 Channel
 brain: 1 scenes
 brain:   front_wash_warm (18 values)
 ```
@@ -472,8 +471,7 @@ cp fixtures/*.qxf ~/Library/Application\ Support/QLC+/Fixtures/
 
 Then **quit and relaunch QLC+** — it builds its definition cache at startup.
 
-Check *Fixture Manager → Add fixture…* lists `CLF → Yara` and
-`HQ Power → VDPLPS36B2 LED Pinspot PAR36`. QLC+ 5 skips definitions that fail to parse
+Check *Fixture Manager → Add fixture…* lists `CLF → Yara` and `Tensegrity → Ball`. QLC+ 5 skips definitions that fail to parse
 **silently**, so absence is the error signal.
 
 Do not put them inside `/Applications/QLC+.app`. That library is indexed by a manifest

@@ -28,7 +28,7 @@ creates an anonymous empty first level, and `health/#` then matches nothing.
 
 ## Everything else
 
-Telemetry publishes under the service's own name — `stem/specs`, `brain/rig` — so the
+Telemetry publishes under the service's own name — `stem/specs`, `brain/scene` — so the
 tree says which process asserted a thing, and a dead process's topics stop moving instead of
 being quietly taken over.
 

@@ -3,17 +3,17 @@
 //! Everything below the show is `cortex`. What lives here is this rig's patch, its QLC+
 //! scenes, its calendar, and the per-frame fill that turns audio features into slots. The
 //! show picks a scene each frame, from the calendar or from test mode. In blackout the rig is
-//! black; in the others the sparkle engine is on the pinspot, the three Yara pars are pinned to
-//! hard R/G/B primaries for bring-up, and the ball does what the scene asks of it.
+//! black; in the others the three washes each hold their own colour, red, green or blue,
+//! with white beside it, and breathe and flash to the sound in step; and the ball does what
+//! the scene asks of it.
 
 use cortex::Rig;
 use cortex::audio_features::AudioFeatures;
 use cortex::config as cfg;
 use cortex::latest::latest;
-use cortex::qlc_plus::{Rgb, White};
-use cortex::sparkle::{SparkleMapping, SparkleOut};
+use cortex::qlc_plus::{Channel, Rgb, White};
+use cortex::sparkle::SparkleMapping;
 use cortex::telemetry;
-use patch::Vdplps36b2LedPinspotPar36;
 use scene::{Director, Scene};
 use std::f64::consts::TAU;
 
@@ -33,6 +33,10 @@ include!(concat!(env!("OUT_DIR"), "/shows.rs"));
 /// How fast the ball's onboard LED fades up and down.
 const BALL_LED_HZ: f64 = 1.0;
 
+/// Each wash's own colour, and the white beside it, at the top of the modulation.
+const WASH_COLOUR_LEVEL: f64 = 0.8;
+const WASH_WHITE_LEVEL: f64 = 0.5;
+
 fn main() {
     // First, so the lamps are dark and the inputs pulled up while everything else starts. Its
     // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
@@ -44,10 +48,10 @@ fn main() {
         telemetry::spawn(cortex::TELEMETRY_SERVICE);
     let mut director = Director::new(&shows::CALENDAR, brain_publisher.clone());
 
-    // The sparkle engine: silence breathing under a colour drift, glinting on musical
-    // onsets, with its own slow white-mode gate. One instance per fixture, so several
-    // fixtures sparkle independently rather than in lock-step.
-    let mut pinspot_map = SparkleMapping::new(
+    // The sparkle engine: silence breathing, a flash on each musical onset, and nothing
+    // between onsets once the music is in. One instance for all three legs, so the rig pulses
+    // in step.
+    let mut modulation = SparkleMapping::new(
         cfg::SEEDS[0],
         cfg::SEEDS[1],
         cfg::SEEDS[2],
@@ -65,10 +69,13 @@ fn main() {
         show: Box::new(move |features: &AudioFeatures, dt: f64, slots: &mut [u8]| {
             let cue = director.cue(cortex::calendar::now(), features, &face_state.snapshot());
 
-            // The engine and the status LED's sine run in every scene, so either resumes
-            // mid-stride rather than out of a frozen frame. The sine is kept within one turn
-            // so the phase never grows past the precision of an f64.
-            let sparkle = pinspot_map.frame(features, dt);
+            // The modulation and the status LED's sine run in every scene, so either resumes
+            // mid-stride rather than out of a frozen frame. The sine is kept within one turn so
+            // the phase never grows past the precision of an f64.
+            //
+            // Only the modulation's intensity is used: each leg keeps its own colour. It is
+            // gamma-corrected, because the breathing is shaped in perceived brightness.
+            let level = modulation.frame(features, dt).intensity.powf(1.0 / cfg::GAMMA);
             ball_led_phase = (ball_led_phase + TAU * BALL_LED_HZ * dt) % TAU;
 
             if cue.scene == Scene::Estop {
@@ -76,20 +83,9 @@ fn main() {
                 return;
             }
             if cue.scene != Scene::Blackout {
-                fill_sparkle(slots, &patch::PINSPOT, &sparkle);
-                // The pinspot's other two channels are its own, not the engine's: the Effect
-                // band for RGB control is what hands the emitters to the colour channels at
-                // all, and Speed only feeds the internal programs that Effect would start.
-                patch::PINSPOT.effect.set(
-                    slots,
-                    Vdplps36b2LedPinspotPar36::EFFECT_RGB_CONTROL_VIA_THE_RED_GREEN_AND_BLUE_CHANNELS
-                        .center(),
-                );
-                patch::PINSPOT.speed.park(slots);
-
-                fill_yara(slots, &patch::YARA_LEG_A, [255, 0, 0]); // red
-                fill_yara(slots, &patch::YARA_LEG_B, [0, 255, 0]); // green
-                fill_yara(slots, &patch::YARA_LEG_C, [0, 0, 255]); // blue
+                fill_wash(slots, &patch::WASH_RED_LEG, Rgb::red, level);
+                fill_wash(slots, &patch::WASH_GREEN_LEG, Rgb::green, level);
+                fill_wash(slots, &patch::WASH_BLUE_LEG, Rgb::blue, level);
             } else {
                 slots.fill(0);
             }
@@ -119,36 +115,12 @@ fn main() {
     })
 }
 
-/// Drive any colour-mixing fixture from the sparkle engine.
-///
-/// Generic over [`Rgb`], so it accepts exactly those fixtures whose patched mode carries
-/// red, green and blue — and the compiler refuses the rest rather than letting the engine
-/// write colour into whatever channel happens to sit at that offset.
-///
-/// Intensity is folded into the colours rather than sent to a dimmer, because the fixtures
-/// this drives have none. It is gamma-corrected first: that curve is about perceived
-/// brightness, which is what the breathing is shaped in, and the colours ride on it.
-///
-/// The engine's white mode deliberately darkens RGB to hand the light to a white emitter.
-/// On a fixture without one that would just black it out for the length of every
-/// white-sparkle phrase, so it is rendered as equal parts red, green and blue instead.
-fn fill_sparkle<F: Rgb>(slots: &mut [u8], fixture: &F, out: &SparkleOut) {
-    let level = out.intensity.powf(1.0 / cfg::GAMMA);
-    let (r, g, b) = if out.white > 0.0 {
-        (out.white, out.white, out.white)
-    } else {
-        (out.r, out.g, out.b)
-    };
-    fixture.red().set_unit(slots, r * level);
-    fixture.green().set_unit(slots, g * level);
-    fixture.blue().set_unit(slots, b * level);
-}
-
-/// Pin one Yara par to a hard primary for bring-up. Needs both colour and a white emitter,
-/// so the white can be held off rather than left wherever it was.
-fn fill_yara<F: Rgb + White>(slots: &mut [u8], fixture: &F, rgb: [u8; 3]) {
-    fixture.red().set(slots, rgb[0]);
-    fixture.green().set(slots, rgb[1]);
-    fixture.blue().set(slots, rgb[2]);
-    fixture.white().set(slots, 0);
+/// One wash at its own colour and its white, both scaled by `level`, with its other two
+/// colours held off rather than left wherever they were.
+fn fill_wash<F: Rgb + White>(slots: &mut [u8], fixture: &F, colour: fn(&F) -> Channel, level: f64) {
+    for channel in [fixture.red(), fixture.green(), fixture.blue()] {
+        channel.set(slots, 0);
+    }
+    colour(fixture).set_unit(slots, WASH_COLOUR_LEVEL * level);
+    fixture.white().set_unit(slots, WASH_WHITE_LEVEL * level);
 }

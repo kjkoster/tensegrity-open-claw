@@ -10,8 +10,8 @@
 //! `build.rs` reads both and generates one struct per patched fixture into `patch.rs`, with
 //! a named field per channel of its mode. The types below are what those structs are built
 //! from. The point is that channel roles become part of the type: a fixture whose mode has
-//! no red channel has no `red` field and does not implement [`Rgb`], so wiring the sparkle
-//! engine to it is a compile error rather than a fixture that lights the wrong colour.
+//! no red channel has no `red` field and does not implement [`Rgb`], so driving its colour
+//! is a compile error rather than a fixture that lights the wrong channel.
 
 use core::net::Ipv4Addr;
 

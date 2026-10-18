@@ -94,7 +94,6 @@ async fn main(spawner: Spawner) -> ! {
 
     rprintln!("");
     rprintln!("ball firmware started");
-    rprintln!("firmware:       {}", env!("FIRMWARE"));
     rprintln!("cpu:           {} MHz", cpu_clock().as_mhz());
 
     // Why this boot happened. On a ball that runs on a pack, a brownout reset is what a sagging
@@ -103,7 +102,6 @@ async fn main(spawner: Spawner) -> ! {
     let reset = reset_reason().map_or_else(|| "unknown".into(), |reason| format!("{:?}", reason));
     rprintln!("reset reason:   {}", reset);
     telemetry::publish("reset_reason", reset);
-    telemetry::publish("firmware", env!("FIRMWARE"));
 
     // What this ball is, in the `sys` subtree every part of the rig publishes its own under.
     telemetry::publish("sys/board", esp_metadata_generated::chip_pretty!());
@@ -169,9 +167,6 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(telemetry::run(network_stack).unwrap());
 
     let mut dmx_state = DMX_STATE.receiver().unwrap();
-    // Whether the universe is being heard, published on the change alone: it is what tells a
-    // ball that is on the network but deaf to the multicast apart from one that is following.
-    let mut live = None;
     loop {
         // A run in progress bounds the wait, because nothing arrives from a rig that simply
         // holds the motor on, and that is the case the bound is for.
@@ -179,13 +174,6 @@ async fn main(spawner: Spawner) -> ! {
             Some(deadline) => with_deadline(deadline, dmx_state.changed()).await.ok(),
             None => Some(dmx_state.changed().await),
         };
-        if let Some(state) = state {
-            let heard = matches!(state, DmxState::Live(_));
-            if live != Some(heard) {
-                live = Some(heard);
-                telemetry::publish("dmx_live", rig_mqtt::boolean(heard));
-            }
-        }
         match state {
             Some(DmxState::Live(value)) => {
                 leds.status.set_brightness(value.onboard_led());

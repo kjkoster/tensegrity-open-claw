@@ -37,7 +37,7 @@ WireGuard tunnel — which is how both deployment and console traffic get there.
                     (see claw.qxw for the patch)
 ```
 
-The fixtures are one wash and one moving head per leg, the pinspot, the ball on the network,
+The fixtures are one wash and one moving head per leg, the ball on the network,
 and the cabinet door's two lamps — the face, a fixture inside the brain process (§2.7).
 
 ---
@@ -198,7 +198,9 @@ Outside a show it is in blackout: black but for the ball's status LED, which kee
 so a ball that hears the rig can be told apart from one that does not. Inside one, the
 ball's motor runs on a beat counted from the show's start; until civil dusk that is the
 daylight scene, and after it the ball's power LEDs pulse in silence and strobe with the
-music. The other fixtures are left as they were.
+music. In every scene but blackout and e-stop, each wash holds its own colour — red, green or
+blue — with white beside it, and one sparkle modulation drives all three, so the rig breathes
+in silence and flashes on the music's onsets in step rather than three ways at once.
 
 **All of the time work happens at build time.** The table names a city and lists local
 start/stop pairs; the build turns that into coordinates, a zone, UTC instants with their

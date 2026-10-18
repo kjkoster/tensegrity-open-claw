@@ -20,16 +20,6 @@
    <Universe Name="Universe 4" ID="3"/>
   </InputOutputMap>
   <Fixture>
-   <Manufacturer>HQ Power</Manufacturer>
-   <Model>VDPLPS36B2 LED Pinspot PAR36</Model>
-   <Mode>5 Channel</Mode>
-   <ID>0</ID>
-   <Name>pinspot</Name>
-   <Universe>0</Universe>
-   <Address>0</Address>
-   <Channels>5</Channels>
-  </Fixture>
-  <Fixture>
    <Manufacturer>UKing</Manufacturer>
    <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
@@ -74,7 +64,7 @@
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>5</ID>
-   <Name>Yara leg A</Name>
+   <Name>Wash red leg</Name>
    <Universe>0</Universe>
    <Address>99</Address>
    <Channels>4</Channels>
@@ -84,7 +74,7 @@
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>6</ID>
-   <Name>Yara leg B</Name>
+   <Name>Wash green leg</Name>
    <Universe>0</Universe>
    <Address>106</Address>
    <Channels>4</Channels>
@@ -94,7 +84,7 @@
    <Model>Yara</Model>
    <Mode>4 Channel</Mode>
    <ID>7</ID>
-   <Name>Yara leg C</Name>
+   <Name>Wash blue leg</Name>
    <Universe>0</Universe>
    <Address>112</Address>
    <Channels>4</Channels>
@@ -115,7 +105,6 @@
    <ValueStyle>0</ValueStyle>
    <Grid Width="5" Height="3" Depth="5" Units="0" POV="1"/>
    <StageItem>0</StageItem>
-   <FxItem ID="0" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="1" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="2" XPos="700" YPos="1000" ZPos="0"/>
    <FxItem ID="3" XPos="1050" YPos="1000" ZPos="0"/>

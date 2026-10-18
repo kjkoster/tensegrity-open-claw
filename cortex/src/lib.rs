@@ -195,7 +195,6 @@ pub fn run(mut rig: Rig) -> ! {
     // arriving later still gets it.
     let publisher = &rig.telemetry;
     let farewells = std::mem::take(&mut rig.farewells);
-    publisher.publish("rig", name, true);
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("fixtures", rig.patch.len().to_string(), true);

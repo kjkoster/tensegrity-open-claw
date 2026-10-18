@@ -1395,7 +1395,7 @@ fn write_value_constants(out: &mut String, shape: &Patched) {
 ///   * Repatch a fixture into a mode without a channel the code writes → the field is gone,
 ///     or the capability trait is no longer implemented, and again the use site fails.
 ///
-/// That last one is why channels are typed rather than numbered. `PINSPOT.red` names the red
+/// That last one is why channels are typed rather than numbered. `WASH_RED_LEG.red` names the red
 /// emitter because the definition says that channel of that mode is `IntensityRed`; there is
 /// no offset in the source to get wrong, and a fixture with no red simply has no `red`.
 fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
