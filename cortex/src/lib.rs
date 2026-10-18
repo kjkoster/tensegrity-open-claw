@@ -9,6 +9,7 @@
 pub mod calendar;
 pub mod clock;
 pub mod config;
+pub mod dmx;
 pub mod ear;
 pub mod envelope;
 pub mod latest;
@@ -19,9 +20,9 @@ pub mod scenes;
 pub mod sparkle;
 pub mod telemetry;
 
-mod dmx;
 mod orchestrator;
 mod sacn_in;
+mod sacn_out;
 
 use ear::AudioFeatures;
 use config::{FRAME_RATE_HZ, SACN_PRIORITY, SACN_RELEASE_FRAMES};
@@ -36,12 +37,6 @@ use std::net::UdpSocket;
 /// The name the brain wears on the broker: its health topic and the prefix on everything else
 /// it publishes. The rig spawns the client under it, so its show can publish there as well.
 pub const TELEMETRY_SERVICE: &str = "brain";
-
-/// One universe's worth of slots, as the frame loop fills and sends it.
-pub type Frame = [u8; zihatec_rs_485_dmx::SLOTS];
-
-/// Every slot zero: the frame before any has been sent.
-pub const DARK: Frame = [0; zihatec_rs_485_dmx::SLOTS];
 
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
 ///
@@ -72,7 +67,7 @@ pub struct Rig {
     /// Where every frame goes once it is final — after the takeover has had its say — for
     /// the rig's fixtures that live inside the brain process and read their own channels
     /// out of it rather than off the wire.
-    pub frames: latest::LatestTx<Frame>,
+    pub frames: latest::LatestTx<dmx::Frame>,
     /// The brain's own client, spawned by the rig under [`TELEMETRY_SERVICE`] so that both the
     /// rig's show and everything here can publish under `brain/`: the show is built before
     /// the brain comes up, and one service cannot have two clients.
@@ -154,7 +149,7 @@ pub fn run(mut rig: Rig) -> ! {
     socket
         .set_multicast_ttl_v4(1)
         .expect("set multicast TTL failed");
-    let cid = dmx::new_cid();
+    let cid = sacn_out::new_cid();
 
     // The external-takeover receiver: a second OS thread alongside the ear, because a
     // blocking recv_from would stall the executor's single task. It publishes candidates;
@@ -163,7 +158,7 @@ pub fn run(mut rig: Rig) -> ! {
     let sacn = rig.sacn;
     let _sacn_in = sacn_in::spawn_receiver(cid, sacn, takeover_tx);
 
-    let group = dmx::multicast_addr(sacn.universe);
+    let group = sacn_out::multicast_addr(sacn.universe);
     let name = rig.name;
     eprintln!(
         "{name}: universe {} → {group}:{}  @ {FRAME_RATE_HZ} Hz",
@@ -214,8 +209,8 @@ pub fn run(mut rig: Rig) -> ! {
             let signal = signal_name(signal).unwrap_or("signal");
             eprintln!("{name}: {signal} — releasing sACN source ({SACN_RELEASE_FRAMES} terminate frames)");
             for sequence in 0..SACN_RELEASE_FRAMES {
-                let packet = dmx::encode_release(sacn.universe, sequence, SACN_PRIORITY, &cid, dmx_slots);
-                dmx::send_multicast(&shutdown_socket, sacn.universe, sacn.port, &packet);
+                let packet = sacn_out::encode_release(sacn.universe, sequence, SACN_PRIORITY, &cid, dmx_slots);
+                sacn_out::send_multicast(&shutdown_socket, sacn.universe, sacn.port, &packet);
             }
             // After the fixtures are handed back, because they are what the delay would cost.
             // Without this every ordinary restart would look like a crash: the will fires

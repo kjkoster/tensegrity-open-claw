@@ -42,7 +42,7 @@ fn main() {
     // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
     // It reads its lamps out of the frames the brain sends, and the show reads its state.
     let (_face_telemetry, face_publisher, face_farewell) = telemetry::spawn("face");
-    let (frames, sent_frames) = latest(cortex::DARK);
+    let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
     let (face, face_state) = face::claim(face_publisher, sent_frames);
     let (_brain_telemetry, brain_publisher, brain_farewell) =
         telemetry::spawn(cortex::TELEMETRY_SERVICE);

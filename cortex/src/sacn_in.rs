@@ -23,7 +23,7 @@
 
 use crate::clock;
 use crate::config as cfg;
-use crate::dmx::STREAM_TERMINATED;
+use crate::sacn_out::STREAM_TERMINATED;
 use crate::latest::LatestTx;
 use crate::qlc_plus::Sacn;
 use std::error::Error;

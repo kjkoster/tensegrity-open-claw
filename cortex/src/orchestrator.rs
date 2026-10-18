@@ -15,6 +15,7 @@ use crate::ear::AudioFeatures;
 use crate::clock;
 use crate::config as cfg;
 use crate::dmx;
+use crate::sacn_out;
 use crate::latest::LatestRx;
 use crate::sacn_in::Takeover;
 use embassy_time::{Duration, Ticker};
@@ -50,7 +51,7 @@ pub async fn frame_task(
         // A full 512-slot universe for the wire; the sACN frame carries only the live head.
         // Slots outside a patched fixture's block stay zero, and so do the ones the rig's
         // show says nothing about.
-        let mut slots = [0u8; zihatec_rs_485_dmx::SLOTS];
+        let mut slots = dmx::BLACKOUT;
         (rig.show)(&snapshot, dt, &mut slots);
 
         // The show above runs every frame whether or not it is driving. Its noise fields,
@@ -81,7 +82,7 @@ pub async fn frame_task(
 
         rig.frames.publish(slots);
 
-        let packet = dmx::encode(
+        let packet = sacn_out::encode(
             rig.sacn.universe,
             sequence,
             cfg::SACN_PRIORITY,
@@ -89,7 +90,7 @@ pub async fn frame_task(
             &cid,
             &slots[..dmx_slots],
         );
-        dmx::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
+        sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
         // A wire write error is logged, not fatal — a yanked cable must not take the
         // sculpture down.
         if let Err(e) = hat.send(&slots) {

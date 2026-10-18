@@ -24,7 +24,7 @@
 //! `health/face`, and `face/left_button`, `face/right_button` and `face/estop`, retained.
 
 use crate::patch;
-use cortex::Frame;
+use cortex::dmx::Frame;
 use cortex::latest::{LatestRx, LatestTx, latest};
 use cortex::qlc_plus::Channel;
 use cortex::telemetry::Publisher;
