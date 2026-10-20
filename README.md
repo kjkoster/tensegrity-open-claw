@@ -325,6 +325,7 @@ offsets, drift is caught by the compiler in every direction:
 | remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
 | delete or rename a ball a board is provisioned as | the ball firmware stops compiling at that board's row |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
+| patch a fixture whose shutter, Effect or Maintenance channel marks no off band | fails, naming the band the e-stop needs marked |
 | name a scene anything but `[a-z][a-z0-9_]*` | fails — scene names are the keys the daemon knows scenes by |
 | give two scenes the same name | fails; QLC+ does not enforce uniqueness, the daemon needs it |
 
@@ -341,6 +342,7 @@ was built from:
 ```
 brain: 8 fixtures
 brain:   Wash red leg @ 100–103 — CLF Yara, 4 Channel
+brain: 31 e-stop overrides
 brain: 1 scenes
 brain:   front_wash_warm (18 values)
 ```
@@ -381,28 +383,88 @@ show:   2026-10-21 13:00 CEST (+02:00, summer time) → 2026-10-21 22:00 CEST (+
 show:     dark 19:08 → 22:00
 ```
 
-The brain publishes its state as `brain/scene` (`estop`, `blackout`, `daylight`, `pulse` or
-`strobe`) and `brain/testmode`, retained, and a `show: scene …` or `show: test mode …` line in the
-log on every change.
+The brain publishes its state under `brain/state/`, retained, on every change:
+
+| topic | values |
+|---|---|
+| `brain/state/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
+| `brain/state/show` | `blackout`, `daylight`, `pulse` or `strobe` |
+| `brain/state/testmode` | whether test mode is on |
+
+The log has a `rig: …` line for each change of the rig state, and a `show: …` or
+`show: test mode …` line for each change of the show state.
 
 ### Test mode
 
-To try each scene without a console or waiting for dusk, use the cabinet door:
+To try each show state without a console or waiting for dusk, use the cabinet door:
 
 | | |
 |---|---|
-| hold both buttons for 2 s | test mode on, starting from the scene the rig is in; both lamps light |
-| left button | the next scene: blackout → daylight → pulse → strobe → blackout |
+| hold both buttons for 2 s | test mode on, starting from the current show state; both lamps light |
+| left button | the next show state: blackout → daylight → pulse → strobe → blackout |
 | right button | the motor, for as long as it is held |
-| hold both buttons for 2 s again | test mode off; the calendar has the rig again |
+| hold both buttons for 2 s again | test mode off; the calendar has the show again |
 
 The calendar and the sun are ignored while it is on, but the audio is not: the strobe still
 follows the room. The motor runs only while the right button is held, never on its beat,
-and the ball's firmware still stops any run at 2 s. The e-stop still wins: the motor stops
-while it is pressed. The buttons are published as
+and the ball's firmware still stops any run at 2 s. The e-stop still wins, as it wins over
+everything. The buttons are published as
 `face/left_button` and `face/right_button`. Test mode turns itself off after 15
 minutes without a press, so a rig left in it cannot ignore the calendar for the rest of the
 event.
+
+### E-stop
+
+The e-stop on the cabinet door is a **show-stop, not a power cut**. It acts over DMX only:
+it takes the light away and stops what moves by itself, but every fixture stays powered and
+nothing is isolated. Do not rely on it to remove a hazard. If a load ever needs a real cut,
+switch a relay on its feed from the button's spare contact, not from a DMX channel.
+
+While it is pressed, or its two contacts agree (a broken cable or a contact fault), the rig
+holds the last frame it sent, with these overrides:
+
+| channels | held at |
+|---|---|
+| light — dimmers, emitters, value / lightness, status LEDs, lamps | blackout (0) |
+| shutter / strobe | closed if the fixture has it, otherwise open: strobe off |
+| auto programs, macros, pattern selectors, resets, settings (Effect and Maintenance groups) | their *no function* band |
+| anything that spins continuously | its *rotation stop* band |
+| everything else — pan / tilt, speeds, wheels, gobos, beam, hue / saturation, CMY | where it was |
+
+Not all zeros, because zero is only "off" for light. For a head it is the end of its travel,
+for a speed channel often the fastest, for a wheel a slot, so an all-zero frame would send
+every head to its corner at full speed. Holding everything but the light is QLC+'s Blackout
+plus strobe, programs, resets and rotation, which Blackout leaves running.
+
+- **It beats everything.** It acts on the frame as it goes out, so a console's takeover is
+  stopped too (see [Taking the rig over](#taking-the-rig-over)).
+- **The held frame goes out continuously** at the normal rate, so no fixture sees a lost
+  signal.
+- **Release is twisting the button out.** The live frame goes out again at once.
+- **The button is read before anything goes out.** Booted with it released, the rig
+  starts sending from the first frame. Booted with it pressed, the rig sends nothing until
+  it is released: after a restart the brain does not know what the
+  fixtures were doing, and silence leaves them as they were, where a held frame would be a
+  guess.
+- **The show does not know.** It runs on underneath the stop, so `brain/state/show` keeps
+  reporting the show state it is in. The rig state is `brain/state/rig`; the button itself
+  is `face/estop`.
+- **The overrides are compiled from the fixture definitions.** A shutter, Effect or
+  Maintenance channel whose `.qxf` does not mark the band the stop needs fails the build,
+  naming the band to mark. Mark it in the definition; never guess a value.
+
+The startup log counts the overrides, and the journal says what goes out and why:
+
+```
+brain: 31 e-stop overrides
+rig: e-stop released — the frame goes out
+rig: e-stop pressed — holding the last frame, 31 channels overridden
+rig: e-stop pressed at boot — nothing goes out until it is released
+rig: shutdown — releasing the sACN source (3 terminate frames)
+```
+
+Set every fixture's own **DMX-loss behaviour to hold last values**, so a cable fault behaves
+like the stop rather than like a homing command.
 
 ---
 
@@ -512,7 +574,7 @@ Stop, and control returns to the generative engine after the E1.31 data-loss tim
 sacn: released by 10.8.0.4 … — internal engine resumes
 ```
 
-Three behaviours that are correct but surprise you the first time:
+Four behaviours that are correct but surprise you the first time:
 
 - **QLC+ transmits the full universe.** Channels you have not touched are sent as 0, not
   left to the engine. Takeover means the generative look is gone until you release — knowing
@@ -522,9 +584,10 @@ Three behaviours that are correct but surprise you the first time:
   output if that matters.
 - **Handback takes about 2.5 s, not one frame.** E1.31 has a stream-terminated bit that
   releases instantly, but QLC+ does not send it, so the timeout does the work.
-- **A takeover beats the e-stop.** The e-stop only blacks out the generative engine;
-  your universe goes out as you send it, e-stop pressed or not. A motor you run is yours:
-  pull its fader down before you release the e-stop, or it carries on.
+- **The e-stop beats a takeover.** While it is pressed the rig holds what it last showed,
+  dark and still, whatever you send. Release it and your universe goes out again at once,
+  heads moving to wherever you left them. A motor you run is stopped by the e-stop but
+  restarts on release if its fader is still up: pull it down before you release.
 
 Takeover needs priority **strictly above 100**, which is what the daemon transmits at. That
 is deliberate: every sACN source ships defaulted to 100, so a laptop joining the network

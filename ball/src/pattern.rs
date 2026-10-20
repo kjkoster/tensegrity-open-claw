@@ -67,13 +67,13 @@ async fn pulse(power: &PowerLeds, looks: &mut Looks, look: &mut Look) {
 /// waits, and the executor would never get the core back.
 async fn strobe(power: &PowerLeds, looks: &mut Looks, look: &mut Look) {
     power.set_brightness(look.white, look.blue);
-    let dark = Instant::now() + look.strobe_on.max(POWER_PWM_PERIOD);
+    let dark = Instant::now() + look.strobe_flash.max(POWER_PWM_PERIOD);
     if !wait(looks, look, dark).await {
         return;
     }
     power.set_brightness(0, 0);
     // The gap's length is read only now, so a look that arrived during the flash sets it.
-    wait(looks, look, dark + look.strobe_off.max(POWER_PWM_PERIOD)).await;
+    wait(looks, look, dark + look.strobe_gap.max(POWER_PWM_PERIOD)).await;
 }
 
 /// Waits until `until`, taking in every look that arrives meanwhile. Returns false as soon as

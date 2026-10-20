@@ -66,9 +66,9 @@ impl DmxValue {
         Self(slots)
     }
 
-    /// The level of the onboard status LED.
-    pub fn onboard_led(self) -> u8 {
-        self.0[layout::INTENSITY]
+    /// The level of the status LED.
+    pub fn status_led(self) -> u8 {
+        self.0[layout::STATUS_LED]
     }
 
     /// Whether the motor is asked to run.
@@ -91,8 +91,8 @@ impl DmxValue {
             pattern,
             white: self.0[layout::WHITE],
             blue: self.0[layout::BLUE],
-            strobe_on: strobe_length(self.0[layout::STROBE_ON]),
-            strobe_off: strobe_length(self.0[layout::STROBE_OFF]),
+            strobe_flash: strobe_length(self.0[layout::STROBE_FLASH]),
+            strobe_gap: strobe_length(self.0[layout::STROBE_GAP]),
         }
     }
 }
@@ -118,8 +118,8 @@ pub struct Look {
     pub pattern: Pattern,
     pub white: u8,
     pub blue: u8,
-    pub strobe_on: Duration,
-    pub strobe_off: Duration,
+    pub strobe_flash: Duration,
+    pub strobe_gap: Duration,
 }
 
 impl Look {
@@ -127,8 +127,8 @@ impl Look {
         pattern: Pattern::Direct,
         white: 0,
         blue: 0,
-        strobe_on: Duration::from_millis(0),
-        strobe_off: Duration::from_millis(0),
+        strobe_flash: Duration::from_millis(0),
+        strobe_gap: Duration::from_millis(0),
     };
 }
 

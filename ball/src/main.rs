@@ -173,7 +173,7 @@ async fn main(spawner: Spawner) -> ! {
         };
         match state {
             Some(DmxState::Live(value)) => {
-                leds.status.set_brightness(value.onboard_led());
+                leds.status.set_brightness(value.status_led());
                 look.send(value.look());
                 motor.follow(value.motor());
             }

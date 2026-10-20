@@ -6,7 +6,7 @@
 
 #![no_std]
 
-/// What one step of the `Strobe on` and `Strobe off` channels is worth: 0–1020 ms in all,
+/// What one step of the `Strobe flash` and `Strobe gap` channels is worth: 0–1020 ms in all,
 /// which spans the shortest flash the eye still catches and a trough long enough to read as
 /// a pause.
 pub const STROBE_STEP_MS: u32 = 4;

@@ -160,15 +160,43 @@ identity.
 The engine keeps running while overridden — its noise fields, breath phase and slews stay
 continuous — so handback resumes mid-stride rather than springing out of a frozen frame.
 
-The cabinet's e-stop is part of the **show**, not of the arbitration: a console that takes
-over replaces the frame, e-stop included, and what it sends is the operator's
-responsibility. While the e-stop is pressed, or its two contacts agree (a broken cable or
-a contact fault), the show is in its e-stop scene, which beats every other scene and test
-mode: every slot zero, at the usual rate and priority, so nothing downstream sees a lost
-stream. Being a scene, it is reported as one, on `brain/scene`. The show runs the ball's motor on a beat (§2.6), and
-a run starts only at the head of its window, so releasing the e-stop partway through one
-waits for the next rather than running the remainder. The face's two buttons drive only test
-mode (§2.6), which runs the motor only when asked.
+The cabinet's e-stop comes **after** the arbitration: it acts on the frame as it goes out,
+so it stops a console's frame as surely as the show's. A stop button that a laptop on the
+network can override is not one. While the e-stop is pressed, or its two contacts agree (a
+broken cable or a contact fault), the frame loop holds the last frame under a mask compiled
+from the fixture definitions; what it overrides is in the README's E-stop section.
+
+The mask is static and decided per channel at build time, from the channel's group, preset
+and bands. Light goes to blackout by preset rather than by group, because hue, saturation and
+subtractive CMY share the Intensity group and are not dark at zero. Shutters go to closed
+where the definition has it and to open otherwise: most definitions mark no closed band, the
+light is already out, and what matters is that the strobe stops. Every Effect and
+Maintenance channel goes to its no-function band, settings included, because channel names
+are free text and the channel guessed to be a harmless setting is the one that turns out to
+be a program or a reset that fires when held. A forced channel whose definition marks no
+such band fails the build: a guessed stop value is exactly the one that becomes a visible
+event.
+
+The brain runs **two state machines, layered**, and keeps their states apart by name:
+
+- The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes
+  out. Its machine is in `cortex`'s frame loop, after the arbitration, and it is published on
+  `brain/state/rig`.
+- The **show state** — blackout, daylight, pulse, strobe — says what the show asks for. Its
+  machine is the brain's Director, with test mode as one of its rules, and it is published on
+  `brain/state/show`, with test mode on `brain/state/testmode`.
+
+The rig state gates the show's output; the show state machine never sees the rig state, so
+it has no e-stop, boot or shutdown cases, and runs on unchanged underneath a stop.
+
+The rig state machine runs boot hold → running ⇄ e-stop → shutdown. Boot hold is where it
+starts, before anything has gone out, and it leaves on the first frame: to running if the
+e-stop is released, or to an e-stop holding nothing, which stays silent until release. The
+face reads the e-stop once when it claims its pins, so the first frame already knows it. Until a frame has gone out the brain does
+not know what the fixtures are doing, so silence, which their signal-loss behaviour answers
+by holding, is the only honest stop frame. Shutdown releases the sACN source on the frame
+loop's own send path, so there is only ever one sender. Neither boot hold nor shutdown can be
+returned to, and neither needs a special case anywhere else.
 
 The receiver binds the address the workspace's console unicasts to — the Pi's WireGuard
 address — alone rather than the wildcard. That is not
@@ -192,13 +220,13 @@ Standard Rust on Trixie Raspbian Linux, `std`.
 
 ### 2.6 Show times and the ball show
 
-The rig runs to a fixed list of shows in local time, one scene at a time, chosen each frame
-by one state machine: the e-stop scene (§2.4) first, then test mode's, then the calendar's.
-Outside a show it is in blackout: black but for the ball's status LED, which keeps breathing
-so a ball that hears the rig can be told apart from one that does not. Inside one, the
-ball's motor runs on a beat counted from the show's start; until civil dusk that is the
-daylight scene, and after it the ball's power LEDs pulse in silence and strobe with the
-music. In every scene but blackout and e-stop, each wash holds its own colour — red, green or
+The rig runs to a fixed list of shows in local time, in one show state at a time (§2.4),
+chosen each frame by the show state machine: test mode first, then the calendar.
+Outside a show the show state is blackout: black but for the ball's status LED, which keeps
+breathing so a ball that hears the rig can be told apart from one that does not. Inside one,
+the ball's motor runs on a beat counted from the show's start; until civil dusk the show
+state is daylight, and after it pulse or strobe, the ball's power LEDs pulsing in silence
+and strobing with the music. In every show state but blackout, each wash holds its own colour — red, green or
 blue — with white beside it, and one sparkle modulation drives all three, so the rig breathes
 in silence and flashes on the music's onsets in step rather than three ways at once.
 
@@ -227,11 +255,11 @@ modulates the strobe live, through the flash and gap lengths. Those lengths are 
 Everything the `.qxf` can express — which channel sits where, and the bands of the motor and
 the pattern — the firmware's build reads out of the definition, as §2.3 asks.
 
-**Test mode is on the door, not on a console.** Testing a scene should not wait for dusk,
-for silence, or for a laptop on the network, so the face's two buttons can take the scene
-over: a two-second chord toggles test mode, and the buttons then step the scene and run the
-motor for as long as one is held. A step is counted on release, which is what tells a lone
-press from half of a chord. The motor runs only when asked, so stepping scenes cannot start it by
+**Test mode is on the door, not on a console.** Testing a show state should not wait for
+dusk, for silence, or for a laptop on the network, so the face's two buttons can take the
+show over: a two-second chord toggles test mode, and the buttons then step the show state and
+run the motor for as long as one is held. A step is counted on release, which is what tells a
+lone press from half of a chord. The motor runs only when asked, so stepping show states cannot start it by
 surprise, and test mode ends itself after fifteen quiet minutes, because a rig left in it
 would ignore the calendar unattended.
 
@@ -243,7 +271,7 @@ it is treated like any fixture in both directions rather than as a side channel.
 **Its lamps are patched.** `fixtures/face.qxf` gives them two dimmable channels, and the
 workspace patches them like the ball. The show writes them into the frame; the face drives
 the pins from the frame that actually went out, after arbitration. So a console that takes the
-rig over drives the lamps too, and the e-stop scene darkens them with everything else, with
+rig over drives the lamps too, and the e-stop darkens them with everything else, with
 no special case in either. They dim through the Pi's two hardware PWM channels, because the
 software alternative is a busy-waiting real-time thread per pin, competing with the ear and
 the DMX timing.
@@ -262,8 +290,9 @@ identity in `cortex`'s config, nothing more.
 
 **Its inputs are a state, handed in.** The face polls and debounces, and publishes a
 `FaceState` — e-stop, chord and press counts, the right button held — once per poll. The
-show's state machine takes that snapshot as an argument each frame and reads nothing else of
-the face's, so every input it depends on is visible in its signature. Remote sensing, when it
+show state machine takes that snapshot as an argument each frame and reads only the
+buttons; the e-stop goes to the rig state machine (§2.4). Neither reads
+anything else of the face's, so every input each depends on is visible in its signature. Remote sensing, when it
 comes, is another producer of the same kind of state — most likely over OSC.
 
 ### 2.8 MQTT is telemetry, never show
@@ -361,9 +390,9 @@ Prices are indicative only and must be verified at purchase.
 
 ### 4.3 Show times, the ball show and the face
 
-The design is §2.6 and §2.7. Written but not yet run on the rig: the calendar, the scenes,
+The design is §2.6 and §2.7. Written but not yet run on the rig: the calendar, the show states,
 test mode, the face as a fixture with its PWM lamps and its `FaceState`, the ball's pulse and
-strobe, and the brain's `scene` and `testmode` topics.
+strobe, and the brain's `state/rig`, `state/show` and `state/testmode` topics.
 
 1. **Flash-rate cap.** The strobe's flash and gap ranges reach 12.5 Hz, inside the 3–30 Hz
    band that can set off photosensitive seizures. Settle whether the gap needs a floor that

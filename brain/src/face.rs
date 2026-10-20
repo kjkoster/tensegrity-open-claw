@@ -4,7 +4,7 @@
 //! The door is a fixture both ways. Its inputs go to the show as a [`FaceState`], published
 //! once per poll; its lamps are patched in the workspace like any other fixture, and are driven
 //! from the frame that actually goes out. So a console that takes the rig over drives them,
-//! and the e-stop scene darkens them with everything else.
+//! and the e-stop darkens them with everything else.
 //!
 //! Holding both buttons for two seconds is a chord. A left press is counted on release, not on
 //! press, because only the release tells a button pressed alone from one that became half of
@@ -56,8 +56,7 @@ const LAMP_PWM_HZ: f64 = 1000.0;
 /// What the door says, as of the face's last poll.
 #[derive(Clone, Copy)]
 pub struct FaceState {
-    /// Whether the show must be in its e-stop scene: the e-stop is pressed, or its wiring is
-    /// at fault.
+    /// Whether the rig must be stopped: the e-stop is pressed, or its wiring is at fault.
     pub estop: bool,
     /// Chords so far. Like the presses below, a count whose differences are what mean
     /// anything.
@@ -66,17 +65,6 @@ pub struct FaceState {
     pub left_presses: u32,
     /// Whether the right button is down on its own, not as half of a chord.
     pub right_held: bool,
-}
-
-impl FaceState {
-    /// Before the face has been read: pressed, so a frame that somehow ran first would be in
-    /// the e-stop scene rather than lit.
-    const UNREAD: FaceState = FaceState {
-        estop: true,
-        chords: 0,
-        left_presses: 0,
-        right_held: false,
-    };
 }
 
 /// Tracks the chord across polls.
@@ -93,8 +81,7 @@ struct Chord {
 /// The face's pins, claimed and configured, waiting for [`spawn`] to hand them to their
 /// polling task.
 pub struct Face {
-    estop_nc: Input,
-    estop_no: Input,
+    contacts: EstopContacts,
     left_button: Input,
     right_button: Input,
     left_lamp: Lamp,
@@ -128,6 +115,12 @@ struct Input {
     differing: u8,
 }
 
+/// The e-stop's two contacts, normally closed and normally open.
+struct EstopContacts {
+    nc: Input,
+    no: Input,
+}
+
 /// What the two e-stop contacts say together. They must always disagree; when they agree
 /// the face cannot tell a press from a fault, and either fault is treated as pressed.
 #[derive(Clone, Copy)]
@@ -140,10 +133,13 @@ enum Estop {
     ContactFault,
 }
 
-/// Claims the face: the lamps dark and the inputs pulled up, and the e-stop read once. Call
-/// this before anything else, so the lamps are dark, no input floats, and the very first
-/// frame already honours the e-stop. Returns the face, and the reader of its state for the
-/// show.
+/// Claims the face: the lamps dark, the inputs pulled up, and the e-stop read once. Call this
+/// before anything else, so the lamps are dark, no input floats, and the very first frame
+/// already knows the e-stop. Returns the face, and the reader of its state for the show and
+/// the frame loop.
+///
+/// The first read is not debounced: at power-on nobody is mid-press, and the debouncing is
+/// for contacts on the move.
 ///
 /// Both buttons and the e-stop are published once here, so the tree holds the face's state
 /// before anybody presses anything.
@@ -157,31 +153,38 @@ pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<F
             .unwrap_or_else(|e| panic!("face: GPIO{number}: {e}"))
     };
 
-    let (states, state_reader) = latest(FaceState::UNREAD);
-    let mut face = Face {
-        left_lamp: Lamp::open(LEFT_LAMP, "left-lamp", patch::FACE.left_lamp),
-        right_lamp: Lamp::open(RIGHT_LAMP, "right-lamp", patch::FACE.right_lamp),
-        estop_nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", None),
-        estop_no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", None),
-        left_button: Input::new(pin(LEFT_BUTTON).into_input_pullup(), "left", Some("left_button")),
-        right_button: Input::new(
-            pin(RIGHT_BUTTON).into_input_pullup(),
-            "right",
-            Some("right_button"),
-        ),
+    let left_lamp = Lamp::open(LEFT_LAMP, "left-lamp", patch::FACE.left_lamp);
+    let right_lamp = Lamp::open(RIGHT_LAMP, "right-lamp", patch::FACE.right_lamp);
+    let contacts = EstopContacts {
+        nc: Input::new(pin(ESTOP_NC).into_input_pullup(), "estop-nc", None),
+        no: Input::new(pin(ESTOP_NO).into_input_pullup(), "estop-no", None),
+    };
+    let button = |number, name, topic| Input::new(pin(number).into_input_pullup(), name, Some(topic));
+    let left_button = button(LEFT_BUTTON, "left", "left_button");
+    let right_button = button(RIGHT_BUTTON, "right", "right_button");
+    for input in [&contacts.nc, &contacts.no, &left_button, &right_button] {
+        input.trace();
+        input.publish(&telemetry);
+    }
+
+    let state = FaceState {
+        estop: contacts.decide(&telemetry),
+        chords: 0,
+        left_presses: 0,
+        right_held: false,
+    };
+    let (states, state_reader) = latest(state);
+    let face = Face {
+        contacts,
+        left_button,
+        right_button,
+        left_lamp,
+        right_lamp,
         frames,
-        state: FaceState::UNREAD,
+        state,
         states,
         telemetry,
     };
-
-    for input in [&face.estop_nc, &face.estop_no, &face.left_button, &face.right_button] {
-        input.trace();
-        input.publish(&face.telemetry);
-    }
-    face.state.estop = face.decide_estop();
-    face.states.publish(face.state);
-
     (face, state_reader)
 }
 
@@ -197,32 +200,31 @@ async fn input_task(mut face: Face) -> ! {
     // releasing opens NO before NC closes, so for a moment either way both read open. Read off
     // the first contact to settle, that moment is a cable fault on every press. The e-stop is
     // therefore decided only once neither contact has read anything but its settled level for
-    // a full settle period, and from both levels together.
-    let mut estop_undecided = false;
-    let mut estop_quiet = 0u8;
+    // a full settle period, and from both levels together: once per change, on the quiet
+    // sample that completes the period. It starts out decided, by the read in `claim`.
+    let mut estop_quiet = SETTLE_SAMPLES;
     let mut chord = Chord::default();
     loop {
         ticker.next().await;
+        let contacts = &mut face.contacts;
         // `|`, not `||`: both contacts must be sampled every tick, or a change on the NO
         // contact would be debounced late whenever the NC contact changed too.
-        let estop_changed =
-            face.estop_nc.poll(&face.telemetry) | face.estop_no.poll(&face.telemetry);
-        if estop_changed {
+        if contacts.nc.poll(&face.telemetry) | contacts.no.poll(&face.telemetry) {
             // Towards stop at once, on whichever contact got there first. Only the decision
             // waits, and only it can release.
-            if !matches!(face.estop(), Estop::Released) {
+            if !matches!(contacts.read(), Estop::Released) {
                 face.state.estop = true;
             }
-            estop_undecided = true;
             estop_quiet = 0;
-        } else if face.estop_nc.differing == 0 && face.estop_no.differing == 0 {
+        } else if contacts.nc.differing == 0 && contacts.no.differing == 0 {
             estop_quiet = estop_quiet.saturating_add(1);
-        } else {
+            if estop_quiet == SETTLE_SAMPLES {
+                face.state.estop = contacts.decide(&face.telemetry);
+            }
+        } else if estop_quiet < SETTLE_SAMPLES {
+            // A bounce restarts a wait still running. Once decided, one that settles back
+            // changes nothing, and one that does not is a change, which restarts it anyway.
             estop_quiet = 0;
-        }
-        if estop_undecided && estop_quiet >= SETTLE_SAMPLES {
-            estop_undecided = false;
-            face.state.estop = face.decide_estop();
         }
 
         let left_changed = face.left_button.poll(&face.telemetry);
@@ -313,9 +315,9 @@ impl Lamp {
     }
 }
 
-impl Face {
-    fn estop(&self) -> Estop {
-        match (self.estop_nc.level, self.estop_no.level) {
+impl EstopContacts {
+    fn read(&self) -> Estop {
+        match (self.nc.level, self.no.level) {
             (Level::Low, Level::High) => Estop::Released,
             (Level::High, Level::Low) => Estop::Pressed,
             (Level::High, Level::High) => Estop::CableFault,
@@ -324,9 +326,9 @@ impl Face {
     }
 
     /// Decides the e-stop from both contacts, traces it, publishes it, and returns whether
-    /// the show must be in its e-stop scene.
-    fn decide_estop(&self) -> bool {
-        let estop = self.estop();
+    /// the rig must be stopped.
+    fn decide(&self, telemetry: &Publisher) -> bool {
+        let estop = self.read();
         // Pressed or not, like the buttons, unless the wiring says it cannot tell.
         let (state, word) = match estop {
             Estop::Released => ("RELEASED", rig_mqtt::boolean(false)),
@@ -335,7 +337,7 @@ impl Face {
             Estop::ContactFault => ("CONTACT FAULT (treated as pressed)", "contact_fault"),
         };
         eprintln!("face: {}  {:<18}{state}", timestamp(), "ESTOP");
-        self.telemetry.publish("estop", word, true);
+        telemetry.publish("estop", word, true);
         !matches!(estop, Estop::Released)
     }
 }

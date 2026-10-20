@@ -9,34 +9,39 @@
  <Manufacturer>Tensegrity</Manufacturer>
  <Model>Ball</Model>
  <Type>Other</Type>
- <Channel Name="Onboard LED" Preset="IntensityDimmer"/>
- <Channel Name="led-white" Preset="IntensityWhite"/>
+ <Channel Name="Status LED">
+  <Group Byte="0">Intensity</Group>
+  <Capability Min="0" Max="255">Level</Capability>
+ </Channel>
+ <Channel Name="White LED" Preset="IntensityWhite"/>
  <Channel Name="Blue LED" Preset="IntensityBlue"/>
  <Channel Name="Motor">
-  <Group Byte="0">Speed</Group>
-  <Capability Min="0" Max="127">Off</Capability>
+  <Group Byte="0">Effect</Group>
+  <Capability Min="0" Max="127" Preset="NoFunction">Off</Capability>
   <Capability Min="128" Max="255">On</Capability>
  </Channel>
  <Channel Name="Pattern">
   <Group Byte="0">Effect</Group>
-  <Capability Min="0" Max="84">Direct</Capability>
+  <Capability Min="0" Max="84" Preset="NoFunction">Direct</Capability>
   <Capability Min="85" Max="169">Pulse</Capability>
   <Capability Min="170" Max="255">Strobe</Capability>
  </Channel>
- <Channel Name="Strobe on">
-  <Group Byte="0">Shutter</Group>
+ <Channel Name="Strobe flash">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="255">Length</Capability>
  </Channel>
- <Channel Name="Strobe off">
-  <Group Byte="0">Shutter</Group>
+ <Channel Name="Strobe gap">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="255">Length</Capability>
  </Channel>
  <Mode Name="7 Channel">
-  <Channel Number="0">Onboard LED</Channel>
-  <Channel Number="1">led-white</Channel>
+  <Channel Number="0">Status LED</Channel>
+  <Channel Number="1">White LED</Channel>
   <Channel Number="2">Blue LED</Channel>
   <Channel Number="3">Motor</Channel>
   <Channel Number="4">Pattern</Channel>
-  <Channel Number="5">Strobe on</Channel>
-  <Channel Number="6">Strobe off</Channel>
+  <Channel Number="5">Strobe flash</Channel>
+  <Channel Number="6">Strobe gap</Channel>
   <Head>
    <Channel>1</Channel>
    <Channel>2</Channel>

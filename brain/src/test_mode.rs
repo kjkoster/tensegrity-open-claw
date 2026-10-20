@@ -1,17 +1,17 @@
-//! Test mode: the cabinet door's buttons take the show over, to step through its scenes by
-//! hand without a console.
+//! Test mode: the cabinet door's buttons take the show over, to step through its show states
+//! by hand without a console.
 //!
-//! Holding both buttons for two seconds turns it on, starting from the scene the rig is in, and
-//! the same again turns it off. While it is on, the left button steps to the next scene and the
-//! motor runs for as long as the right button is held. The calendar and the sun are ignored; the
-//! audio is not, so the strobe still follows the room. The e-stop still wins.
+//! Holding both buttons for two seconds turns it on, starting from the show state the show is
+//! in, and the same again turns it off. While it is on, the left button steps to the next show
+//! state and the motor runs for as long as the right button is held. The calendar and the sun
+//! are ignored; the audio is not, so the strobe still follows the room.
 //!
-//! The motor runs only when asked, never on its beat, so stepping through the scenes cannot
+//! The motor runs only when asked, never on its beat, so stepping through the show states cannot
 //! start it by surprise. And test mode ends itself after a quiet spell, because the rig runs
 //! unattended, and one left in test mode would ignore the calendar for the rest of the event.
 
 use crate::face::FaceState;
-use crate::scene::{Cue, Scene};
+use crate::show_state::{Cue, ShowState};
 use std::time::{Duration, Instant};
 
 /// How long test mode lasts without a gesture.
@@ -25,7 +25,7 @@ pub struct TestMode {
 }
 
 struct On {
-    scene: Scene,
+    state: ShowState,
     last_gesture: Instant,
 }
 
@@ -38,13 +38,9 @@ impl TestMode {
         }
     }
 
-    pub fn is_on(&self) -> bool {
-        self.on.is_some()
-    }
-
-    /// The cue while test mode is on, or `None` while the calendar has the rig. `current` is
-    /// the scene to start from when a chord turns it on.
-    pub fn frame(&mut self, current: Scene, face: &FaceState) -> Option<Cue> {
+    /// The cue while test mode is on, or `None` while the calendar has the show. `current` is
+    /// the show state to start from when a chord turns it on.
+    pub fn frame(&mut self, current: ShowState, face: &FaceState) -> Option<Cue> {
         let now = Instant::now();
         let chords = face.chords.wrapping_sub(self.seen_chords);
         let steps = face.left_presses.wrapping_sub(self.seen_left_presses);
@@ -55,7 +51,7 @@ impl TestMode {
         if chords % 2 == 1 {
             self.on = match self.on {
                 None => Some(On {
-                    scene: current,
+                    state: current,
                     last_gesture: now,
                 }),
                 Some(_) => None,
@@ -74,10 +70,10 @@ impl TestMode {
             return None;
         }
         for _ in 0..steps {
-            on.scene = on.scene.next();
+            on.state = on.state.next();
         }
         Some(Cue {
-            scene: on.scene,
+            state: on.state,
             motor: running,
             testing: true,
         })

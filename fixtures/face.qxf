@@ -9,11 +9,25 @@
  <Manufacturer>Tensegrity</Manufacturer>
  <Model>Face</Model>
  <Type>Other</Type>
- <Channel Name="Left lamp" Preset="IntensityGreen"/>
- <Channel Name="Right lamp" Preset="IntensityGreen"/>
+ <Channel Name="Left lamp">
+  <Group Byte="0">Intensity</Group>
+  <Colour>Green</Colour>
+  <Capability Min="0" Max="255">Level</Capability>
+ </Channel>
+ <Channel Name="Right lamp">
+  <Group Byte="0">Intensity</Group>
+  <Colour>Green</Colour>
+  <Capability Min="0" Max="255">Level</Capability>
+ </Channel>
  <Mode Name="2 Channel">
   <Channel Number="0">Left lamp</Channel>
   <Channel Number="1">Right lamp</Channel>
+  <Head>
+   <Channel>0</Channel>
+  </Head>
+  <Head>
+   <Channel>1</Channel>
+  </Head>
  </Mode>
  <Physical>
   <Bulb Type="LED" Lumens="0" ColourTemperature="0"/>

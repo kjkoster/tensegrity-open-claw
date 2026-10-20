@@ -145,6 +145,11 @@ struct ResolvedChannel {
     slot: u32,
     /// The channel's `Preset` attribute, if it has one.
     preset: Option<String>,
+    /// The channel's QLC+ group: stated, or implied by its preset.
+    group: String,
+    /// The channel's `<Colour>`, for an intensity channel that names its colour without a
+    /// preset.
+    colour: Option<String>,
     /// What the definition says the channel does, band by band.
     capabilities: Vec<Capability>,
 }
@@ -216,6 +221,8 @@ struct Definition {
 /// One `<Channel>` of a definition.
 struct ChannelDef {
     preset: Option<String>,
+    group: String,
+    colour: Option<String>,
     capabilities: Vec<Capability>,
 }
 
@@ -596,10 +603,30 @@ fn load_definitions(dir: &Path) -> BTreeMap<(String, String), Definition> {
                 });
             }
 
+            let element_text = |tag: &str| {
+                channel
+                    .children()
+                    .find(|n| n.is_element() && n.tag_name().name() == tag)
+                    .and_then(|n| n.text())
+                    .map(|text| text.trim().to_string())
+            };
+            let preset = channel.attribute("Preset").map(str::to_string);
+            // QLC+ writes a preset channel without a `<Group>`: the preset implies it.
+            let group = element_text("Group")
+                .or_else(|| preset.as_deref().and_then(group_of_preset).map(str::to_string))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: channel {name:?} has neither a <Group> nor a preset that implies one",
+                        path.display()
+                    )
+                });
+
             channels.insert(
                 name,
                 ChannelDef {
-                    preset: channel.attribute("Preset").map(str::to_string),
+                    preset,
+                    group,
+                    colour: element_text("Colour"),
                     capabilities,
                 },
             );
@@ -748,6 +775,8 @@ fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
                     name: channel_name.clone(),
                     slot: fixture.slot(offset as u32),
                     preset: channel.preset.clone(),
+                    group: channel.group.clone(),
+                    colour: channel.colour.clone(),
                     capabilities: channel.capabilities.clone(),
                 }
             })
@@ -928,6 +957,122 @@ fn role_of(preset: Option<&str>) -> Option<&'static str> {
         Some("IntensityLightness") => Some("lightness"),
         _ => None,
     }
+}
+
+/// The group a channel preset implies, as QLC+ assigns it: the preset's attribute is its
+/// leading word, and only position splits into two groups.
+fn group_of_preset(preset: &str) -> Option<&'static str> {
+    let group = match preset {
+        "NoFunction" => "Nothing",
+        p if p.starts_with("PositionPan") || p.starts_with("PositionXAxis") => "Pan",
+        p if p.starts_with("PositionTilt") || p.starts_with("PositionYAxis") => "Tilt",
+        p if p.starts_with("Intensity") => "Intensity",
+        p if p.starts_with("Color") => "Colour",
+        p if p.starts_with("Speed") => "Speed",
+        p if p.starts_with("Gobo") => "Gobo",
+        p if p.starts_with("Shutter") => "Shutter",
+        p if p.starts_with("Beam") => "Beam",
+        p if p.starts_with("Prism") => "Prism",
+        _ => return None,
+    };
+    Some(group)
+}
+
+/// Intensity-group presets for which zero is not dark: hue and saturation pick a colour, and
+/// subtractive cyan, magenta and yellow at zero let the whole beam through.
+const NOT_DARK_AT_ZERO: [&str; 5] = [
+    "IntensityHue",
+    "IntensitySaturation",
+    "IntensityCyan",
+    "IntensityMagenta",
+    "IntensityYellow",
+];
+
+/// The value the e-stop holds one channel at, and why; `None` where it holds the channel at
+/// whatever it last carried. Panics, naming the band to add, where the rule calls for a value
+/// the definition does not state: a guessed stop value is exactly the one that turns out to
+/// be a visible event.
+///
+/// The order matters. Intensity comes first, so light is never mistaken for anything else.
+/// Rotation comes before the groups, because a spinning wheel or motor can sit in any of
+/// them and stopping it beats whatever its group would do.
+fn stop_override(fixture: &Patched, channel: &ResolvedChannel) -> Option<(u8, String)> {
+    let band = |preset: &str| {
+        channel
+            .capabilities
+            .iter()
+            .find(|capability| capability.preset.as_deref() == Some(preset))
+            .map(|capability| (capability.min, capability.name.clone()))
+    };
+    let missing = |wanted: &str| -> ! {
+        panic!(
+            "{:?}: channel {:?} of {} is in the {} group, which the e-stop sends to its {wanted} \
+             band, and it declares none. Mark that band with its preset in the .qxf.",
+            fixture.name,
+            channel.name,
+            fixture.definition.display(),
+            channel.group,
+        )
+    };
+
+    let coarse = channel.preset.as_deref().map(|p| p.strip_suffix("Fine").unwrap_or(p));
+    if channel.group == "Intensity" {
+        let subtractive = matches!(channel.colour.as_deref(), Some("Cyan" | "Magenta" | "Yellow"));
+        let not_dark = coarse.is_some_and(|p| NOT_DARK_AT_ZERO.contains(&p)) || (coarse.is_none() && subtractive);
+        return (!not_dark).then(|| (0, "blackout".to_string()));
+    }
+    if let Some(stop) = band("RotationStop") {
+        return Some(stop);
+    }
+    match channel.group.as_str() {
+        "Shutter" if coarse.is_some_and(|p| p.starts_with("ShutterIris")) => None,
+        // Closed where the shutter has it, otherwise open: the light is already dark, and
+        // what matters is that the strobe stops.
+        "Shutter" => Some(
+            band("ShutterClose")
+                .or_else(|| band("ShutterOpen"))
+                .unwrap_or_else(|| missing("ShutterClose or ShutterOpen")),
+        ),
+        "Effect" | "Maintenance" => Some(band("NoFunction").unwrap_or_else(|| missing("NoFunction"))),
+        _ => None,
+    }
+}
+
+/// Renders the e-stop's mask: one override per channel it overrides, in address order. Every
+/// channel not listed is held.
+///
+/// Channels are written as paths into the instance constants, like the patch table, so the
+/// mask carries no slot numbers of its own to disagree with them.
+fn render_stop(out: &mut String, fixtures: &[&Patched]) {
+    writeln!(out, "use cortex::estop::StopOverride;").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "/// What the e-stop overrides in the frame it holds. Every channel not listed is held.").unwrap();
+    writeln!(out, "pub static STOP: &[StopOverride] = &[").unwrap();
+    for fixture in fixtures {
+        writeln!(out, "    // {}", fixture.name).unwrap();
+        let instance = ident_of(&fixture.name);
+        for field in &fixture.fields {
+            let channel = &fixture.resolved[field.head()];
+            let Some((value, why)) = stop_override(fixture, channel) else {
+                continue;
+            };
+            let path = format!("{instance}.{}", field.name());
+            let mut row = |path: &str, value: u8, comment: &str| {
+                writeln!(out, "    StopOverride {{ channel: {path}, value: {value} }}, // {comment}").unwrap();
+            };
+            match field {
+                Field::Single { .. } => row(&path, value, &format!("{} — {why}", channel.name)),
+                // The band states the coarse value only, so the fine half goes to the band's
+                // own start; blackout is zero in both halves.
+                Field::Pair { .. } => {
+                    row(&format!("{path}.coarse"), value, &format!("{} — {why}", channel.name));
+                    row(&format!("{path}.fine"), 0, &format!("{} fine", channel.name));
+                }
+            }
+        }
+    }
+    writeln!(out, "];").unwrap();
+    writeln!(out).unwrap();
 }
 
 /// Turns a channel name into a Rust field name: "Gobo rotation" → `gobo_rotation`.
@@ -1680,6 +1825,8 @@ fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
     }
     writeln!(out, "];").unwrap();
     writeln!(out).unwrap();
+
+    render_stop(&mut out, &fixtures);
 
     let top = fixtures
         .iter()

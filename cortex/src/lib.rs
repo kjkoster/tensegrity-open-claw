@@ -3,8 +3,8 @@
 //! The show and the patch generated from its QLC+ workspace live in the rig's own crate;
 //! what does not depend on which fixtures are patched lives here.
 //!
-//! A rig hands over a [`Rig`] and gets the frame loop, the ear, both transports and the
-//! takeover arbitration for it.
+//! A rig hands over a [`Rig`] and gets the frame loop, the ear, both transports, the
+//! takeover arbitration and the e-stop for it.
 
 pub mod calendar;
 pub mod clock;
@@ -12,6 +12,7 @@ pub mod config;
 pub mod dmx;
 pub mod ear;
 pub mod envelope;
+pub mod estop;
 pub mod latest;
 pub mod moving_head;
 pub mod perlin;
@@ -25,7 +26,7 @@ mod sacn_in;
 mod sacn_out;
 
 use ear::AudioFeatures;
-use config::{FRAME_RATE_HZ, SACN_PRIORITY, SACN_RELEASE_FRAMES};
+use config::FRAME_RATE_HZ;
 use embassy_executor::{Executor, Spawner};
 use qlc_plus::{PatchEntry, Sacn};
 use scenes::Scene;
@@ -33,6 +34,8 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signal_hook::low_level::signal_name;
 use std::net::UdpSocket;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The name the brain wears on the broker: its health topic and the prefix on everything else
 /// it publishes. The rig spawns the client under it, so its show can publish there as well.
@@ -59,6 +62,11 @@ pub struct Rig {
     pub patch: &'static [PatchEntry],
     /// The generated scenes, likewise.
     pub scenes: &'static [Scene],
+    /// The generated stop mask: what the e-stop overrides in the held frame.
+    pub stop: &'static [estop::StopOverride],
+    /// Whether the e-stop is pressed, asked once per frame. The stop acts on the frame that
+    /// goes out, after the takeover, so a console cannot drive the rig past it.
+    pub estop: Box<dyn FnMut() -> bool>,
     pub show: Box<dyn FnMut(&AudioFeatures, f64, &mut [u8])>,
     /// The rig's own tasks, beside the frame loop. Called once, with the executor's spawner,
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
@@ -72,9 +80,9 @@ pub struct Rig {
     /// rig's show and everything here can publish under `brain/`: the show is built before
     /// the brain comes up, and one service cannot have two clients.
     pub telemetry: telemetry::Publisher,
-    /// The goodbyes of every telemetry client the rig spawned, the brain's included, said on
-    /// shutdown. The rig spawns those clients itself, but only the brain knows when it is
-    /// stopping.
+    /// The goodbyes of every telemetry client the rig spawned, the brain's included, said by
+    /// the frame loop on shutdown. The rig spawns those clients itself, but only the brain
+    /// knows when it is stopping.
     pub farewells: Vec<telemetry::Farewell>,
 }
 
@@ -180,6 +188,7 @@ pub fn run(mut rig: Rig) -> ! {
             fixture.profile,
         );
     }
+    eprintln!("{name}: {} e-stop overrides", rig.stop.len());
     eprintln!("{name}: {} scenes", rig.scenes.len());
     for scene in rig.scenes {
         eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
@@ -187,9 +196,8 @@ pub fn run(mut rig: Rig) -> ! {
 
     // What the brain was built as and against goes under `brain/`, retained, so a subscriber
     // arriving later still gets it.
+    rig.farewells.push(ear_farewell);
     let publisher = &rig.telemetry;
-    let mut farewells = std::mem::take(&mut rig.farewells);
-    farewells.push(ear_farewell);
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("fixtures", rig.patch.len().to_string(), true);
@@ -197,27 +205,18 @@ pub fn run(mut rig: Rig) -> ! {
     publish_system(publisher);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with
-    // SIGINT. Catch both to release the sACN source — a burst of terminate frames — so a
-    // higher-priority console or the fixtures' fallback takes over at once instead of waiting
-    // out the 2.5 s data-loss timeout. signal_hook's iterator runs on its own thread, outside
-    // async-signal context, so the log line and socket sends here are safe.
-    let shutdown_socket = socket.try_clone().expect("socket clone failed");
-    let dmx_slots = frame_width(rig.patch);
+    // SIGINT. Catching both only asks the frame loop to shut down: it releases the sACN source
+    // on its own send path, so there is never a second sender, and says the goodbyes.
+    // signal_hook's iterator runs on its own thread, outside async-signal context, so the log
+    // line here is safe.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let asked = shutdown.clone();
     let mut signals = Signals::new([SIGINT, SIGTERM]).expect("signal registration failed");
     std::thread::spawn(move || {
         if let Some(signal) = signals.forever().next() {
             let signal = signal_name(signal).unwrap_or("signal");
-            eprintln!("{name}: {signal} — releasing sACN source ({SACN_RELEASE_FRAMES} terminate frames)");
-            for sequence in 0..SACN_RELEASE_FRAMES {
-                let packet = sacn_out::encode_release(sacn.universe, sequence, SACN_PRIORITY, &cid, dmx_slots);
-                sacn_out::send_multicast(&shutdown_socket, sacn.universe, sacn.port, &packet);
-            }
-            // After the fixtures are handed back, because they are what the delay would cost.
-            // Without this every ordinary restart would look like a crash: the will fires
-            // whenever the connection dies without a goodbye, and `systemctl restart` is the
-            // most common way for that to happen.
-            telemetry::farewell(&farewells);
-            std::process::exit(0);
+            eprintln!("{name}: {signal} — shutting down");
+            asked.store(true, Ordering::Relaxed);
         }
     });
 
@@ -228,7 +227,7 @@ pub fn run(mut rig: Rig) -> ! {
     // The frame task takes the rig whole, so the one-shot hook comes out of it first.
     let tasks = std::mem::replace(&mut rig.tasks, Box::new(|_| {}));
     executor.run(|spawner| {
-        spawner.spawn(orchestrator::frame_task(socket, cid, rx, takeover_rx, rig).unwrap());
+        spawner.spawn(orchestrator::frame_task(socket, cid, rx, takeover_rx, shutdown, rig).unwrap());
         tasks(spawner);
     })
 }
