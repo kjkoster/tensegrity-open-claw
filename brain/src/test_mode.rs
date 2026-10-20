@@ -76,6 +76,7 @@ impl TestMode {
             state: on.state,
             motor: running,
             testing: true,
+            sleep: false,
         })
     }
 }

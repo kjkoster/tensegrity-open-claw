@@ -32,6 +32,9 @@ const MOTOR_REST_S: f64 = 240.0;
 /// enough for what starts to be the remainder of a run rather than a run. Past it, the window
 /// is skipped — after test mode hands back, or after NTP steps the clock into one.
 const MOTOR_START_GRACE_S: f64 = 0.1;
+/// How long before a show the ball is no longer asked to sleep: its five-minute stretch of
+/// sleep, a wake, and a margin, so it is up when the show starts.
+const BALL_WAKE_AHEAD_S: f64 = 10.0 * 60.0;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum ShowState {
@@ -74,6 +77,8 @@ pub struct Cue {
     pub motor: bool,
     /// Whether test mode is on, which the face's lamps show.
     pub testing: bool,
+    /// Whether the ball may sleep: no show now, and none starting soon.
+    pub sleep: bool,
 }
 
 pub struct Director {
@@ -121,10 +126,15 @@ impl Director {
             Some(_) => ShowState::Pulse,
         };
         self.running = show.is_some_and(|show| self.on_beat(show, now));
+        let show_soon = self.calendar.shows.iter().any(|show| {
+            let start = show.span.start.unix as f64;
+            start > now && start - now < BALL_WAKE_AHEAD_S
+        });
         Cue {
             state,
             motor: self.running,
             testing: false,
+            sleep: show.is_none() && !show_soon,
         }
     }
 

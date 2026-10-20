@@ -76,6 +76,11 @@ impl DmxValue {
         layout::MOTOR_ON.contains(self.0[layout::MOTOR])
     }
 
+    /// Whether the ball is asked to sleep.
+    pub fn sleep(self) -> bool {
+        layout::SLEEP_SLEEP.contains(self.0[layout::SLEEP])
+    }
+
     /// What the power LEDs are asked to do. A pattern value in no band the definition
     /// declares reads as direct, which is what a console that knows nothing of patterns sends.
     pub fn look(self) -> Look {

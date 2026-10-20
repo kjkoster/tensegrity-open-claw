@@ -340,8 +340,7 @@ half. The broker keeps nothing on disk, and every client replays its retained to
 connect instead.
 
 Written but not yet run on the rig: the `face`, `ear` and `ball` clients, the brain client's
-retained-topic replay, and the broker without persistence. The ball's `disconnected` is only
-reachable from the deep sleep it does not have yet.
+retained-topic replay, and the broker without persistence.
 
 Stem also absorbs the 4G watchdog that currently lives as an unversioned script on the Pi,
 so there is one health daemon rather than two overlapping ones.
@@ -397,6 +396,56 @@ strobe, and the brain's `state/rig`, `state/show` and `state/testmode` topics.
 1. **Flash-rate cap.** The strobe's flash and gap ranges reach 12.5 Hz, inside the 3–30 Hz
    band that can set off photosensitive seizures. Settle whether the gap needs a floor that
    keeps the strobe below 3 Hz; the ranges carry a `TODO` until then.
+
+### 4.4 The ball sleeps outside shows
+
+The ball's radio, receiving all the time, is most of its draw, and outside a show it has
+nothing to do. The brain asks it to sleep over DMX, like everything else it asks of the ball,
+and the ball deep-sleeps in five-minute stretches, waking each time to report and to ask
+again. Deep sleep is a reset on waking, so every wake is a boot.
+
+Every boot, a wake from sleep or a power-on alike, runs the same way:
+
+- The outputs start held off and the motor tripped, as every boot already does.
+- sACN is processed as normal from the moment the network is up: the ball follows the
+  universe straight away, whatever comes next.
+- Alongside it, telemetry goes out as always, the pack voltage among it. The pack is read at
+  boot, without waiting for anything, which is how it is read on every boot. Publishing never
+  holds up the sACN processing.
+- Five seconds after the network is up the ball decides. Timed from the lease rather than
+  from boot, because joining and the lease take seconds of their own, and five seconds of
+  listening is what has to pass. That is plenty for a broker that is there to take the
+  telemetry, and waiting longer for one that is not would not make it come: the operator
+  reads the ball's liveness off MQTT — `health/ball` going `connected` every five minutes and
+  a fresh `ball/pack_v` — and a wake that did not reach it shows as exactly that.
+- If the universe asks it to sleep, or if no universe has been heard at all in those five
+  seconds, it goes to sleep. Otherwise it keeps running, as a ball does today.
+- The access point is on the Pi, so a rig switched off has none to join, and the five
+  seconds would never start. A join that has not succeeded after four retries and a margin,
+  about a minute, is taken as that, and the ball sleeps.
+
+Going to sleep is four steps, in order: stop the motor, whatever it was doing, and hold its
+pin low, because in deep sleep nothing drives it; say `disconnected` and wait for the goodbye
+to leave, the one place anything waits on telemetry; disconnect from the access point cleanly,
+so it holds no stale association for the ball's next wake to wait out; then deep-sleep for
+five minutes. A wake counter in RTC memory, which a deep sleep keeps, is published as
+`ball/wakes`, so a reset that was not a wake shows as the count starting over.
+
+No universe after a wake means the rig is off, and a ball that stayed awake for it would drain
+its pack exactly when nobody is there. It counts only at that one decision: an awake ball that
+loses the universe mid-show, to a brain restart say, darkens and waits as it does today. Once
+awake, only the channel puts the ball to sleep.
+
+The brain asks from the end of one show until ten minutes before the next, which is one
+stretch of sleep, a wake, and a margin, so the ball is up when the show starts; never in test
+mode. The Sleep channel's awake band is `NoFunction`, so the e-stop's mask wakes the balls with
+no rule of its own.
+
+Written but not yet run on the rig: all of it.
+
+1. **The LED pins through deep sleep.** The motor's pin is held low; the status and power LED
+   pins are the PWM peripheral's and are not. Confirm the board pulls them down, so a power
+   LED's driver cannot light on a floating pin while the ball sleeps.
 
 ---
 

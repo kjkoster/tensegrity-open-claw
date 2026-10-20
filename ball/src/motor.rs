@@ -51,8 +51,12 @@ impl Motor {
     /// Starts with the motor off and tripped: a board that restarted mid-run comes back
     /// into the same tail of a run as one that lost the universe.
     pub fn new(pin: MotorPin) -> Self {
+        let mut pin = Output::new(pin, Level::Low, OutputConfig::default());
+        // Released only once the pin is driven low, so it is never left floating: a wake from
+        // deep sleep finds it still held from `hold_off`.
+        pin.set_pad_hold(false);
         let motor = Self {
-            pin: Output::new(pin, Level::Low, OutputConfig::default()),
+            pin,
             state: State::Tripped,
         };
         RUNNING.sender().send(false);
@@ -78,6 +82,12 @@ impl Motor {
             (state @ (State::Running { .. } | State::Tripped), true) => state,
         };
         self.enter(next);
+    }
+
+    /// Stops the motor and holds its pin low through deep sleep, where nothing drives it.
+    pub fn hold_off(&mut self) {
+        self.trip();
+        self.pin.set_pad_hold(true);
     }
 
     /// Stops the motor and keeps it stopped until the rig next asks for a stop.

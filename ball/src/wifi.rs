@@ -1,7 +1,10 @@
 use alloc::format;
+use core::convert::Infallible;
 use embassy_executor::Spawner;
+use embassy_futures::select::select;
 use embassy_net::{Runner, Stack, StackResources};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use esp_hal::{peripherals::WIFI, system::software_reset};
 use esp_radio::wifi::{
     AuthenticationMethodConfig, ControllerConfig, Interface, PowerSaveMode, WifiController,
@@ -26,11 +29,45 @@ async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
 }
 
+/// Asks the radio to let go of the access point, before a sleep.
+static DISCONNECT: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static DISCONNECTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// How long a disconnect waits for the access point to let go. Bounded, because a ball going
+/// to sleep must not be kept awake by a radio that does not answer.
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Disconnects from the access point cleanly and stops reconnecting, so the access point holds
+/// no stale entry for the ball's next wake to wait out. Returns once it has let go, or once it
+/// is clear that it will not answer.
+pub async fn disconnect() {
+    DISCONNECTED.reset();
+    DISCONNECT.signal(());
+    let _ = with_timeout(DISCONNECT_TIMEOUT, DISCONNECTED.wait()).await;
+}
+
 #[embassy_executor::task]
 async fn wifi_supervision_task(
     mut controller: WifiController<'static>,
     wifi_config: WifiConfig,
 ) -> ! {
+    // Supervision ends only on a request to disconnect. Whatever it was waiting on is dropped
+    // where it stands, which frees the controller for the goodbye.
+    select(supervise(&mut controller, wifi_config), DISCONNECT.wait()).await;
+    match controller.disconnect_async().await {
+        Ok(_) | Err(WifiError::NotConnected) => {
+            rprintln!("wifi disconnected for sleep");
+        }
+        Err(e) => {
+            rprintln!("wifi disconnect failed ({:?})", e);
+        }
+    }
+    DISCONNECTED.signal(());
+    core::future::pending().await
+}
+
+/// Keeps the ball on the access point: joins, and joins again whenever it drops.
+async fn supervise(controller: &mut WifiController<'static>, wifi_config: WifiConfig) -> Infallible {
     // Every attempt since boot. Published as it counts, though it can only leave once an
     // attempt has succeeded: what it says is how hard getting back on was.
     let mut attempts = 0u32;

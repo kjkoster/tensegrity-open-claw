@@ -1,4 +1,5 @@
-//! The ball's channels for a cue: its motor, its power LEDs' pattern, and its status LED.
+//! The ball's channels for a cue: its motor, its power LEDs' pattern, its status LED, and
+//! whether it may sleep.
 //!
 //! The ball renders the pulse and the strobe itself. A frame here is 25 ms, longer than the
 //! pulse holds at its peak, and multicast over WiFi arrives bunched, so drawing either from
@@ -41,6 +42,9 @@ impl BallShow {
     /// Fills the ball's channels for this frame, `dt` seconds after the last.
     pub fn fill(&mut self, slots: &mut [u8], cue: Cue, features: &AudioFeatures, dt: f64) {
         fill_look(slots, cue, features);
+
+        let sleep = if cue.sleep { Ball::SLEEP_SLEEP } else { Ball::SLEEP_AWAKE };
+        BALL.sleep.set(slots, sleep.center());
 
         // A sine on the status LED, so that a ball following the rig is told apart at a
         // glance from one that is not — which is why it breathes in blackout as well.

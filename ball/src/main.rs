@@ -14,13 +14,14 @@ mod models;
 mod motor;
 mod pattern;
 mod sacn;
+mod sleep;
 mod telemetry;
 mod wifi;
 
 use alloc::format;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
-use embassy_time::with_deadline;
+use embassy_time::{Instant, with_deadline, with_timeout};
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
     delay::Delay,
@@ -31,6 +32,7 @@ use esp_hal::{
 };
 use models::{DmxConfig, DmxState, DmxWatch, Look};
 use rtt_target::rprintln;
+use sleep::{JOIN_TIMEOUT, LISTEN, Sleep, count_wake};
 
 extern crate alloc;
 
@@ -94,6 +96,8 @@ async fn main(spawner: Spawner) -> ! {
         peripherals.GPIO10,
     );
     let mut motor = motor::Motor::new(peripherals.GPIO7);
+    let mut sleep = Sleep::new(peripherals.LPWR);
+    count_wake();
     spawner.spawn(pattern::render(leds.power).unwrap());
     let look = pattern::LOOK.sender();
 
@@ -166,21 +170,35 @@ async fn main(spawner: Spawner) -> ! {
 
     let rng = Rng::new();
     let seed = (rng.random() as u64) | ((rng.random() as u64) << 32);
-    let network_stack = wifi::connect(spawner, peripherals.WIFI, seed, config::WIFI_CONFIG).await;
+    let joining = wifi::connect(spawner, peripherals.WIFI, seed, config::WIFI_CONFIG);
+    let Ok(network_stack) = with_timeout(JOIN_TIMEOUT, joining).await else {
+        rprintln!("no access point after {} seconds", JOIN_TIMEOUT.as_secs());
+        sleep.now(&mut motor, &leds.status).await
+    };
 
     spawner.spawn(sacn_listener(dmx_config, network_stack).unwrap());
     spawner.spawn(telemetry::run(network_stack).unwrap());
 
     let mut dmx_state = DMX_STATE.receiver().unwrap();
+    // When this boot decides between sleeping on and running, until it has.
+    let mut decide_at = Some(Instant::now() + LISTEN);
+    let mut heard = false;
+    let mut asked_to_sleep = false;
     loop {
         // A run in progress bounds the wait, because nothing arrives from a rig that simply
-        // holds the motor on, and that is the case the bound is for.
-        let state = match motor.deadline() {
+        // holds the motor on, and that is the case the bound is for. So does the decision.
+        let state = match motor.deadline().into_iter().chain(decide_at).min() {
             Some(deadline) => with_deadline(deadline, dmx_state.changed()).await.ok(),
             None => Some(dmx_state.changed().await),
         };
         match state {
             Some(DmxState::Live(value)) => {
+                heard = true;
+                asked_to_sleep = value.sleep();
+                if asked_to_sleep && decide_at.is_none() {
+                    rprintln!("the rig asks the ball to sleep");
+                    sleep.now(&mut motor, &leds.status).await;
+                }
                 leds.status.set_brightness(value.status_led());
                 look.send(value.look());
                 motor.follow(value.motor());
@@ -193,11 +211,26 @@ async fn main(spawner: Spawner) -> ! {
                 look.send(Look::DARK);
             }
             None => {
-                rprintln!(
-                    "motor ran for {} seconds, stopping it",
-                    motor::MAX_RUN.as_secs()
-                );
-                motor.trip();
+                let now = Instant::now();
+                if decide_at.is_some_and(|at| now >= at) {
+                    decide_at = None;
+                    if !heard {
+                        rprintln!("no universe after {} seconds", LISTEN.as_secs());
+                        sleep.now(&mut motor, &leds.status).await;
+                    }
+                    if asked_to_sleep {
+                        rprintln!("the rig asks the ball to sleep");
+                        sleep.now(&mut motor, &leds.status).await;
+                    }
+                    rprintln!("the rig is running, staying awake");
+                }
+                if motor.deadline().is_some_and(|deadline| now >= deadline) {
+                    rprintln!(
+                        "motor ran for {} seconds, stopping it",
+                        motor::MAX_RUN.as_secs()
+                    );
+                    motor.trip();
+                }
             }
         }
     }

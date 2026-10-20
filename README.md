@@ -342,7 +342,7 @@ was built from:
 ```
 brain: 8 fixtures
 brain:   Wash red leg @ 100–103 — CLF Yara, 4 Channel
-brain: 31 e-stop overrides
+brain: 32 e-stop overrides
 brain: 1 scenes
 brain:   front_wash_warm (18 values)
 ```
@@ -456,9 +456,9 @@ plus strobe, programs, resets and rotation, which Blackout leaves running.
 The startup log counts the overrides, and the journal says what goes out and why:
 
 ```
-brain: 31 e-stop overrides
+brain: 32 e-stop overrides
 rig: e-stop released — the frame goes out
-rig: e-stop pressed — holding the last frame, 31 channels overridden
+rig: e-stop pressed — holding the last frame, 32 channels overridden
 rig: e-stop pressed at boot — nothing goes out until it is released
 rig: shutdown — releasing the sACN source (3 terminate frames)
 ```
@@ -502,6 +502,30 @@ A board has to be known in two places, under two different MACs:
 ```
 
 Runs from the Mac and attaches `probe-rs` on the Pi, which is where the boards are plugged in.
+
+## Sleep
+
+Outside shows the brain asks the balls to sleep, on the ball's Sleep channel: from the end of
+one show until ten minutes before the next, and never in test mode or while the e-stop is
+pressed. A ball sleeps in five-minute stretches of deep sleep, and every wake is a boot.
+
+A boot listens for five seconds once its network is up, following the universe meanwhile and
+sending its telemetry. It then sleeps again if the universe asks it to, or if no universe was
+heard at all — the rig is off. It also sleeps again if it cannot join the access point within
+about a minute, which is what a switched-off Pi looks like. Otherwise it stays awake, and from
+then on only the Sleep channel puts it back to sleep. Going to sleep stops the motor first,
+then says goodbye on MQTT and leaves the access point cleanly.
+
+On MQTT a sleeping ball looks like this:
+
+| topic | while it sleeps |
+|---|---|
+| `health/ball` | `disconnected`, then `connected` for a few seconds every five minutes |
+| `ball/pack_v` | refreshed on every wake |
+| `ball/wakes` | wakes from deep sleep in a row; back to 0 after any other reset |
+
+A `health/ball` that says `gone` rather than `disconnected` is a ball that did not go to
+sleep on purpose.
 
 ---
 

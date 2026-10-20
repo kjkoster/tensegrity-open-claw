@@ -95,7 +95,6 @@ pub fn publish(topic: &'static str, payload: impl Into<String>) {
 /// Says `disconnected` and closes the connection cleanly, for a ball about to sleep, so the
 /// sleep reads as a deliberate stop and not as `gone`. Returns once the goodbye has left, or
 /// once it is clear that it will not.
-#[expect(dead_code, reason = "the deep sleep that says this is not built yet")]
 pub async fn farewell() {
     SAID.reset();
     FAREWELL.signal(());

@@ -12,7 +12,7 @@
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
     <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
-     <PluginParameters UniverseChannels="116" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
+     <PluginParameters UniverseChannels="75" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
@@ -26,7 +26,7 @@
    <ID>1</ID>
    <Name>ZQ02015 leg A</Name>
    <Universe>0</Universe>
-   <Address>9</Address>
+   <Address>39</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
@@ -36,7 +36,7 @@
    <ID>2</ID>
    <Name>ZQ02015 leg B</Name>
    <Universe>0</Universe>
-   <Address>21</Address>
+   <Address>51</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
@@ -46,18 +46,18 @@
    <ID>3</ID>
    <Name>ZQ02015 leg C</Name>
    <Universe>0</Universe>
-   <Address>33</Address>
+   <Address>63</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>Tensegrity</Manufacturer>
    <Model>Ball</Model>
-   <Mode>7 Channel</Mode>
+   <Mode>8 Channel</Mode>
    <ID>4</ID>
    <Name>Ball</Name>
    <Universe>0</Universe>
-   <Address>2</Address>
-   <Channels>7</Channels>
+   <Address>9</Address>
+   <Channels>8</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>CLF</Manufacturer>
@@ -66,7 +66,7 @@
    <ID>5</ID>
    <Name>Wash red leg</Name>
    <Universe>0</Universe>
-   <Address>99</Address>
+   <Address>19</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
@@ -76,7 +76,7 @@
    <ID>6</ID>
    <Name>Wash green leg</Name>
    <Universe>0</Universe>
-   <Address>106</Address>
+   <Address>23</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
@@ -86,7 +86,7 @@
    <ID>7</ID>
    <Name>Wash blue leg</Name>
    <Universe>0</Universe>
-   <Address>112</Address>
+   <Address>27</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
