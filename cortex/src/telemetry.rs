@@ -153,8 +153,8 @@ pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
             let mut backoff_s = 1u64;
             loop {
                 match session(service, &incoming, &thread_said, &mut retained, &mut backoff_s) {
-                    // The goodbye went out and the connection was closed cleanly. There is
-                    // nothing left to reconnect for; the process is on its way out.
+                    // The goodbye went out and the connection was closed cleanly, or nobody
+                    // is left to say anything. There is nothing left to reconnect for.
                     Ok(()) => return,
                     Err(e) => eprintln!("telemetry: {service}: {e}"),
                 }
@@ -173,7 +173,8 @@ pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
     )
 }
 
-/// Connects, announces, and pumps the queue. Returns only once the goodbye has been said.
+/// Connects, announces, and pumps the queue. Returns only once the goodbye has been said, or
+/// once nobody is left to say anything.
 fn session(
     service: &str,
     incoming: &Receiver<Command>,
@@ -229,10 +230,13 @@ fn session(
             // Nothing to say. The ping is what keeps the broker from declaring the will on a
             // client that is simply quiet. Draining only here, after the one packet that is
             // ever answered, keeps the drain's wait off every publish.
-            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => {
+            Err(RecvTimeoutError::Timeout) => {
                 stream.write_all(&rig_mqtt::PINGREQ)?;
                 drain(&mut stream)?;
             }
+            // Every sender is gone, so nothing will be said any more, the goodbye included.
+            // Waiting on would return at once, every time.
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
     }
 }

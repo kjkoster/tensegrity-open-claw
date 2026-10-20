@@ -23,9 +23,10 @@ use embassy_net::Stack;
 use embassy_time::with_deadline;
 use esp_hal::{
     clock::{CpuClock, cpu_clock},
+    delay::Delay,
     efuse::{self, InterfaceMacAddress},
     rng::Rng,
-    system::reset_reason,
+    system::{reset_reason, software_reset},
     timer::timg::TimerGroup,
 };
 use models::{DmxConfig, DmxState, DmxWatch, Look};
@@ -33,10 +34,17 @@ use rtt_target::rprintln;
 
 extern crate alloc;
 
+/// Prints the panic and restarts the board.
+///
+/// Not a spin: every task has stopped, but the outputs hold their last level, so a panic in a
+/// motor run would leave the motor running with nothing left to stop it. A reset returns every
+/// pin to its default, and the firmware comes back with the motor tripped.
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
     rprintln!("{}", panic_info);
-    loop {}
+    // Time for the probe to read the line above before it is gone.
+    Delay::new().delay_millis(100);
+    software_reset()
 }
 
 // This creates a default app-descriptor required by the esp-idf bootloader.

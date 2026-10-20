@@ -489,7 +489,7 @@ A board has to be known in two places, under two different MACs:
    `unknown device usb-Espressif_…` — add that name to `DEVICE_MAP` in `remote-deploy.sh`,
    mapped to `ball`, and deploy again.
 2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
-   `Board` row to paste, then panics. Add the row to `BOARDS` in `ball/src/config.rs`, name
+   `Board` row to paste, then panics and restarts, printing it again every boot. Add the row to `BOARDS` in `ball/src/config.rs`, name
    the fixture it is in `claw.qxw` — `Ball` there is `patch::BALL` here — and deploy
    once more. The address, the universe and the port come with the fixture.
 

@@ -32,7 +32,6 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use rppal::gpio::{Gpio, InputPin, Level};
 use rppal::pwm::{self, Polarity, Pwm};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // BCM numbers. The RS-485 HAT owns 14, 15 and 18; none of those may appear here.
 const ESTOP_NC: u8 = 23;
@@ -282,7 +281,7 @@ impl Lamp {
         {
             Ok(pwm) => Some(pwm),
             Err(e) => {
-                eprintln!("face: {} GPIO{gpio} {name}: no PWM ({e}), so the lamp stays dark", timestamp());
+                eprintln!("face: GPIO{gpio} {name}: no PWM ({e}), so the lamp stays dark");
                 None
             }
         };
@@ -310,7 +309,7 @@ impl Lamp {
         if let Some(pwm) = &self.pwm
             && let Err(e) = pwm.set_duty_cycle(f64::from(level) / f64::from(u8::MAX))
         {
-            eprintln!("face: {} GPIO{} {}: {e}", timestamp(), self.gpio, self.name);
+            eprintln!("face: GPIO{} {}: {e}", self.gpio, self.name);
         }
     }
 }
@@ -336,7 +335,7 @@ impl EstopContacts {
             Estop::CableFault => ("CABLE FAULT (treated as pressed)", "cable_fault"),
             Estop::ContactFault => ("CONTACT FAULT (treated as pressed)", "contact_fault"),
         };
-        eprintln!("face: {}  {:<18}{state}", timestamp(), "ESTOP");
+        eprintln!("face: {:<18}{state}", "ESTOP");
         telemetry.publish("estop", word, true);
         !matches!(estop, Estop::Released)
     }
@@ -399,39 +398,10 @@ fn trace_pin(number: u8, name: &str, level: Level, meaning: &str) {
         Level::Low => "LOW ",
         Level::High => "HIGH",
     };
-    eprintln!(
-        "face: {}  GPIO{number:<2} {name:<11}{level}{meaning}",
-        timestamp()
-    );
+    eprintln!("face: GPIO{number:<2} {name:<11}{level}{meaning}");
 }
 
 fn trace_lamp(gpio: u8, name: &str, level: u8) {
     let meaning = if level == 0 { "dark" } else { "lit" };
-    eprintln!(
-        "face: {}  GPIO{gpio:<2} {name:<11}{level:<4}({meaning})",
-        timestamp()
-    );
-}
-
-/// Local wall-clock time to the millisecond, so a trace line can be matched against a
-/// press someone remembers making.
-fn timestamp() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let seconds = now.as_secs() as libc::time_t;
-    // `localtime_r`, not `localtime`: `localtime` returns a buffer shared by every caller
-    // in the process.
-    //
-    // SAFETY: `tm` is plain data, so all zeroes is a valid value, and `localtime_r` writes
-    // only into the struct it is handed.
-    let mut local: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&seconds, &mut local) };
-    format!(
-        "{:02}:{:02}:{:02}.{:03}",
-        local.tm_hour,
-        local.tm_min,
-        local.tm_sec,
-        now.subsec_millis()
-    )
+    eprintln!("face: GPIO{gpio:<2} {name:<11}{level:<4}({meaning})");
 }
