@@ -18,7 +18,7 @@ use cortex::draw::Draw;
 /// The incidents the schedule may pick. Empty means the base show all night: an incident
 /// joins once it has been seen on the rig, and stays in the code but out of the show until
 /// then.
-pub const ENABLED_INCIDENTS: &[Incident] = &[];
+pub const ENABLED_INCIDENTS: &[Incident] = &[Incident::Searchlights, Incident::BallLighting];
 
 /// From dusk, or from the end of the last incident, to the start of the next.
 const GAP_S: (f64, f64) = (30.0 * 60.0, 45.0 * 60.0);

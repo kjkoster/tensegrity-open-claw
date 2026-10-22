@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE FixtureDefinition>
+<FixtureDefinition xmlns="http://www.qlcplus.org/FixtureDefinition">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>5.2.1</Version>
+  <Author>Kees Jan Koster</Author>
+ </Creator>
+ <Manufacturer>CLF</Manufacturer>
+ <Model>Poseidon Laser Beam XS</Model>
+ <Type>Moving Head</Type>
+ <!-- Outdoor IP65 laser-sourced beam moving head. Channel tables transcribed from the
+      "DMX protocol" section of the CLF Poseidon Laser Beam XS manual, V1.1.
+
+      The manual does not say which end of pan/tilt speed is fast, which way focus runs, or
+      which way "forwards" prism rotation turns, so those carry no direction preset. Which
+      prism is the 8-facet one and which the 24-facet one is not stated either. -->
+ <Channel Name="Pan" Preset="PositionPan"/>
+ <Channel Name="Pan Fine" Preset="PositionPanFine"/>
+ <Channel Name="Tilt" Preset="PositionTilt"/>
+ <Channel Name="Tilt Fine" Preset="PositionTiltFine"/>
+ <Channel Name="Pan/Tilt Speed">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="255">Pan/tilt speed</Capability>
+ </Channel>
+ <Channel Name="Device Set">
+  <Group Byte="0">Maintenance</Group>
+  <!-- Every setting below must be held for 3 seconds before it takes effect, so a
+       scene that sweeps through this channel cannot trigger one by accident. -->
+  <Capability Min="0" Max="9" Preset="NoFunction">Reserved</Capability>
+  <Capability Min="10" Max="14">Display lock off (hold 3 s)</Capability>
+  <Capability Min="15" Max="19">Display lock on (hold 3 s)</Capability>
+  <Capability Min="20" Max="24">Display rotate normal (hold 3 s)</Capability>
+  <Capability Min="25" Max="29">Display rotate 180° (hold 3 s)</Capability>
+  <Capability Min="30" Max="34">Display backlight always on (hold 3 s)</Capability>
+  <Capability Min="35" Max="39">Display backlight auto off after 15 s (hold 3 s)</Capability>
+  <Capability Min="40" Max="44">Display backlight blink off (hold 3 s)</Capability>
+  <Capability Min="45" Max="49">Display backlight blink on (hold 3 s)</Capability>
+  <Capability Min="50" Max="54">Pan/tilt normal mode (hold 3 s)</Capability>
+  <Capability Min="55" Max="59">Pan/tilt fast mode (hold 3 s)</Capability>
+  <Capability Min="60" Max="64">Pan/tilt precise mode (hold 3 s)</Capability>
+  <Capability Min="65" Max="69" Preset="NoFunction">Reserved</Capability>
+  <Capability Min="70" Max="74">CMYTV mode off (hold 3 s)</Capability>
+  <Capability Min="75" Max="79">CMYTV mode on (hold 3 s)</Capability>
+  <Capability Min="80" Max="99" Preset="NoFunction">Reserved</Capability>
+  <Capability Min="100" Max="104">Pan invert off (hold 3 s)</Capability>
+  <Capability Min="105" Max="109">Pan invert on (hold 3 s)</Capability>
+  <Capability Min="110" Max="114">Tilt invert off (hold 3 s)</Capability>
+  <Capability Min="115" Max="119">Tilt invert on (hold 3 s)</Capability>
+  <Capability Min="120" Max="139" Preset="NoFunction">Reserved</Capability>
+  <Capability Min="140" Max="149" Preset="ResetPanTilt">Pan/tilt reset (hold 3 s)</Capability>
+  <Capability Min="150" Max="159" Preset="ResetMotors">Head motor reset (hold 3 s)</Capability>
+  <Capability Min="160" Max="169" Preset="ResetAll">Total reset (hold 3 s)</Capability>
+  <Capability Min="170" Max="174" Preset="SilentModeOff">Fan standard mode (hold 3 s)</Capability>
+  <Capability Min="175" Max="179" Preset="SilentModeOn">Fan silent mode (hold 3 s)</Capability>
+  <Capability Min="180" Max="184">LED frequency 1.8 kHz (hold 3 s)</Capability>
+  <Capability Min="185" Max="189">LED frequency 3.6 kHz (hold 3 s)</Capability>
+  <Capability Min="190" Max="194">LED frequency 7.2 kHz (hold 3 s)</Capability>
+  <Capability Min="195" Max="199">LED frequency 25 kHz (hold 3 s)</Capability>
+  <Capability Min="200" Max="204">Dimmer curve linear (hold 3 s)</Capability>
+  <Capability Min="205" Max="209">Dimmer curve square (hold 3 s)</Capability>
+  <Capability Min="210" Max="214">Dimmer curve inverse square (hold 3 s)</Capability>
+  <Capability Min="215" Max="219">Dimmer curve S (hold 3 s)</Capability>
+  <Capability Min="220" Max="224">Dimmer speed normal (hold 3 s)</Capability>
+  <Capability Min="225" Max="229">Dimmer speed smooth (hold 3 s)</Capability>
+  <Capability Min="230" Max="255" Preset="NoFunction">Reserved</Capability>
+ </Channel>
+ <Channel Name="Cyan" Preset="IntensityCyan"/>
+ <Channel Name="Magenta" Preset="IntensityMagenta"/>
+ <Channel Name="Yellow" Preset="IntensityYellow"/>
+ <Channel Name="Color Wheel">
+  <Group Byte="0">Colour</Group>
+  <!-- A virtual wheel: the fixture mixes these from CMY. The swatches are approximations
+       for QLC+'s display only. -->
+  <Capability Min="0" Max="4" Preset="ColorMacro" Res1="#ffffff">White</Capability>
+  <Capability Min="5" Max="8" Preset="ColorDoubleMacro" Res1="#ffffff" Res2="#8b0000">White + dark red</Capability>
+  <Capability Min="9" Max="12" Preset="ColorMacro" Res1="#8b0000">Dark red</Capability>
+  <Capability Min="13" Max="17" Preset="ColorDoubleMacro" Res1="#8b0000" Res2="#7fffd4">Dark red + aquamarine</Capability>
+  <Capability Min="18" Max="21" Preset="ColorMacro" Res1="#7fffd4">Aquamarine</Capability>
+  <Capability Min="22" Max="25" Preset="ColorDoubleMacro" Res1="#7fffd4" Res2="#006400">Aquamarine + dark green</Capability>
+  <Capability Min="26" Max="29" Preset="ColorMacro" Res1="#006400">Dark green</Capability>
+  <Capability Min="30" Max="34" Preset="ColorDoubleMacro" Res1="#006400" Res2="#b57edc">Dark green + lavender</Capability>
+  <Capability Min="35" Max="38" Preset="ColorMacro" Res1="#b57edc">Lavender</Capability>
+  <Capability Min="39" Max="42" Preset="ColorDoubleMacro" Res1="#b57edc" Res2="#ffff00">Lavender + yellow</Capability>
+  <Capability Min="43" Max="46" Preset="ColorMacro" Res1="#ffff00">Yellow</Capability>
+  <Capability Min="47" Max="51" Preset="ColorDoubleMacro" Res1="#ffff00" Res2="#ff00ff">Yellow + magenta</Capability>
+  <Capability Min="52" Max="55" Preset="ColorMacro" Res1="#ff00ff">Magenta</Capability>
+  <Capability Min="56" Max="59" Preset="ColorDoubleMacro" Res1="#ff00ff" Res2="#ff8000">Magenta + orange</Capability>
+  <Capability Min="60" Max="63" Preset="ColorMacro" Res1="#ff8000">Orange</Capability>
+  <Capability Min="64" Max="68" Preset="ColorDoubleMacro" Res1="#ff8000" Res2="#ffa757">Orange + CTO 2500K</Capability>
+  <Capability Min="69" Max="72" Preset="ColorMacro" Res1="#ffa757">CTO 2500K</Capability>
+  <Capability Min="73" Max="76" Preset="ColorDoubleMacro" Res1="#ffa757" Res2="#e3e9ff">CTO 2500K + CTB 8000K</Capability>
+  <Capability Min="77" Max="81" Preset="ColorMacro" Res1="#e3e9ff">CTB 8000K</Capability>
+  <Capability Min="82" Max="85" Preset="ColorDoubleMacro" Res1="#e3e9ff" Res2="#ff69b4">CTB 8000K + pink</Capability>
+  <Capability Min="86" Max="89" Preset="ColorMacro" Res1="#ff69b4">Pink</Capability>
+  <Capability Min="90" Max="93" Preset="ColorDoubleMacro" Res1="#ff69b4" Res2="#00ffff">Pink + cyan</Capability>
+  <Capability Min="94" Max="98" Preset="ColorMacro" Res1="#00ffff">Cyan</Capability>
+  <Capability Min="99" Max="102" Preset="ColorDoubleMacro" Res1="#00ffff" Res2="#00008b">Cyan + dark blue</Capability>
+  <Capability Min="103" Max="106" Preset="ColorMacro" Res1="#00008b">Dark blue</Capability>
+  <Capability Min="107" Max="127" Preset="NoFunction">Reserved</Capability>
+  <Capability Min="128" Max="191">Color shake, fast to slow (5 - 0.2 Hz)</Capability>
+  <Capability Min="192" Max="255">Color shake, slow to fast (0.2 - 5 Hz)</Capability>
+ </Channel>
+ <Channel Name="Gobo Wheel">
+  <Group Byte="0">Gobo</Group>
+  <!-- The manual gives 0-3 as open, but on two of our three units only 0 is: at 1 they
+       project a gobo. -->
+  <Capability Min="0" Max="0">Open</Capability>
+  <Capability Min="1" Max="3">Open per the manual, a gobo on some units</Capability>
+  <Capability Min="4" Max="8">Gobo 1</Capability>
+  <Capability Min="9" Max="13">Gobo 2</Capability>
+  <Capability Min="14" Max="18">Gobo 3</Capability>
+  <Capability Min="19" Max="23">Gobo 4</Capability>
+  <Capability Min="24" Max="28">Gobo 5</Capability>
+  <Capability Min="29" Max="33">Gobo 6</Capability>
+  <Capability Min="34" Max="38">Gobo 7</Capability>
+  <Capability Min="39" Max="43">Gobo 8</Capability>
+  <Capability Min="44" Max="48">Gobo 9</Capability>
+  <Capability Min="49" Max="53">Gobo 10</Capability>
+  <Capability Min="54" Max="58">Gobo 11</Capability>
+  <Capability Min="59" Max="63">Gobo 12</Capability>
+  <Capability Min="64" Max="68">Gobo 13</Capability>
+  <Capability Min="69" Max="73">Gobo 14</Capability>
+  <Capability Min="74" Max="78">Gobo 15</Capability>
+  <Capability Min="79" Max="83">Gobo 16</Capability>
+  <Capability Min="84" Max="88">Gobo 17</Capability>
+  <Capability Min="89" Max="95">Gobo 1 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="96" Max="102">Gobo 2 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="103" Max="109">Gobo 3 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="110" Max="116">Gobo 4 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="117" Max="123">Gobo 5 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="124" Max="130">Gobo 6 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="131" Max="137">Gobo 7 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="138" Max="144">Gobo 8 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="145" Max="151">Gobo 9 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="152" Max="158">Gobo 10 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="159" Max="165">Gobo 11 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="166" Max="172">Gobo 12 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="173" Max="179">Gobo 13 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="180" Max="186">Gobo 14 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="187" Max="193">Gobo 15 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="194" Max="200">Gobo 16 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="201" Max="207">Gobo 17 shake, slow to fast (0.2 - 10 Hz)</Capability>
+  <Capability Min="208" Max="227" Preset="RotationClockwiseFastToSlow">Wheel rotation clockwise, fast to slow (120 - 0 RPM)</Capability>
+  <Capability Min="228" Max="229" Preset="RotationStop">Wheel rotation stop</Capability>
+  <Capability Min="230" Max="249" Preset="RotationCounterClockwiseSlowToFast">Wheel rotation counter-clockwise, slow to fast (0 - 120 RPM)</Capability>
+  <Capability Min="250" Max="255">Random gobo, fast to slow</Capability>
+ </Channel>
+ <Channel Name="Prism 1">
+  <Group Byte="0">Prism</Group>
+  <Capability Min="0" Max="3" Preset="PrismEffectOff">Prism out</Capability>
+  <Capability Min="4" Max="199" Preset="PrismEffectOn">Prism in</Capability>
+  <Capability Min="200" Max="255">Prism shake, slow to fast</Capability>
+ </Channel>
+ <Channel Name="Prism 1 Rotation">
+  <Group Byte="0">Prism</Group>
+  <Capability Min="0" Max="63" Preset="RotationIndexed">Prism indexing (0 - 360°)</Capability>
+  <Capability Min="64" Max="127">Forwards rotation, fast to slow (62.5 - 0 RPM)</Capability>
+  <Capability Min="128" Max="191">Backwards rotation, slow to fast (0 - 62.5 RPM)</Capability>
+  <Capability Min="192" Max="207">90° swing, slow to fast (0.2 - 1 Hz)</Capability>
+  <Capability Min="208" Max="223">180° swing, slow to fast (0.2 - 1 Hz)</Capability>
+  <Capability Min="224" Max="239">270° swing, slow to fast (0.2 - 1 Hz)</Capability>
+  <Capability Min="240" Max="255">360° swing, slow to fast (0.2 - 1 Hz)</Capability>
+ </Channel>
+ <Channel Name="Prism 2">
+  <Group Byte="0">Prism</Group>
+  <Capability Min="0" Max="3" Preset="PrismEffectOff">Prism out</Capability>
+  <Capability Min="4" Max="199" Preset="PrismEffectOn">Prism in</Capability>
+  <Capability Min="200" Max="255">Prism shake, slow to fast</Capability>
+ </Channel>
+ <Channel Name="Prism 2 Rotation">
+  <Group Byte="0">Prism</Group>
+  <Capability Min="0" Max="255" Preset="NoFunction">Reserved</Capability>
+ </Channel>
+ <Channel Name="Frost">
+  <Group Byte="0">Beam</Group>
+  <Capability Min="0" Max="3">Frost out</Capability>
+  <Capability Min="4" Max="255">Frost in</Capability>
+ </Channel>
+ <Channel Name="Focus">
+  <Group Byte="0">Beam</Group>
+  <Capability Min="0" Max="255">Focus</Capability>
+ </Channel>
+ <Channel Name="Focus Fine">
+  <Group Byte="1">Beam</Group>
+  <Capability Min="0" Max="255">Focus fine</Capability>
+ </Channel>
+ <Channel Name="Shutter">
+  <Group Byte="0">Shutter</Group>
+  <Capability Min="0" Max="31" Preset="ShutterClose">Shutter closed</Capability>
+  <Capability Min="32" Max="63" Preset="ShutterOpen">Shutter open</Capability>
+  <Capability Min="64" Max="95" Preset="StrobeSlowToFast">Strobe, slow to fast (1 - 25 Hz)</Capability>
+  <Capability Min="96" Max="127" Preset="ShutterOpen">Shutter open, after strobe</Capability>
+  <Capability Min="128" Max="143" Preset="RampUpSlowToFast">Fast close, slow open, slow to fast (0.5 - 12 Hz)</Capability>
+  <Capability Min="144" Max="159" Preset="RampDownFastToSlow">Slow close, fast open, fast to slow (12 - 0.5 Hz)</Capability>
+  <Capability Min="160" Max="191" Preset="ShutterOpen">Shutter open, after pulse</Capability>
+  <Capability Min="192" Max="223" Preset="StrobeRandomSlowToFast">Random strobe, slow to fast (1 - 25 Hz)</Capability>
+  <Capability Min="224" Max="255" Preset="ShutterOpen">Shutter open, after random strobe</Capability>
+ </Channel>
+ <Channel Name="Dimmer" Preset="IntensityMasterDimmer"/>
+ <Channel Name="Dimmer Fine" Preset="IntensityMasterDimmerFine"/>
+ <Mode Name="21 Channel">
+  <Channel Number="0">Pan</Channel>
+  <Channel Number="1">Pan Fine</Channel>
+  <Channel Number="2">Tilt</Channel>
+  <Channel Number="3">Tilt Fine</Channel>
+  <Channel Number="4">Pan/Tilt Speed</Channel>
+  <Channel Number="5">Device Set</Channel>
+  <Channel Number="6">Cyan</Channel>
+  <Channel Number="7">Magenta</Channel>
+  <Channel Number="8">Yellow</Channel>
+  <Channel Number="9">Color Wheel</Channel>
+  <Channel Number="10">Gobo Wheel</Channel>
+  <Channel Number="11">Prism 1</Channel>
+  <Channel Number="12">Prism 1 Rotation</Channel>
+  <Channel Number="13">Prism 2</Channel>
+  <Channel Number="14">Prism 2 Rotation</Channel>
+  <Channel Number="15">Frost</Channel>
+  <Channel Number="16">Focus</Channel>
+  <Channel Number="17">Focus Fine</Channel>
+  <Channel Number="18">Shutter</Channel>
+  <Channel Number="19">Dimmer</Channel>
+  <Channel Number="20">Dimmer Fine</Channel>
+ </Mode>
+ <Physical>
+  <Bulb Type="Laser" Lumens="3600" ColourTemperature="9256"/>
+  <Dimensions Weight="16.1" Width="364" Height="517" Depth="241"/>
+  <Lens Name="Other" DegreesMin="1.1" DegreesMax="1.1"/>
+  <Focus Type="Head" PanMax="540" TiltMax="270"/>
+  <Technical PowerConsumption="233" DmxConnector="5-pin IP65"/>
+ </Physical>
+</FixtureDefinition>

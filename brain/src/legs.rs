@@ -3,10 +3,11 @@
 //!
 //! The pairing is a fact about this rig, found only in its fixture names, so it is written
 //! here rather than generated. The two paint functions are where "red" becomes a fixture's
-//! channels: the wash mixes it, the head turns its wheel to it. Everything above them speaks
-//! [`Colour`], so heads that mix rather than step are a change to [`paint_head`] alone.
+//! channels: the wash mixes it, the head picks the nearest slot on its colour wheel. Everything
+//! above them speaks [`Colour`], so heads that mix rather than pick are a change to
+//! [`paint_head`] alone.
 
-use crate::patch::{self, Yara, Zq02015};
+use crate::patch::{self, PoseidonLaserBeamXs, Yara};
 use crate::presets::Preset;
 use cortex::moving_head::Pose;
 
@@ -20,7 +21,7 @@ pub enum Colour {
 
 pub struct Leg {
     pub wash: Yara,
-    pub head: Zq02015,
+    pub head: PoseidonLaserBeamXs,
     /// The leg's own colour, which its wash holds in the base show.
     pub colour: Colour,
     /// This leg's head's pose in a preset.
@@ -65,14 +66,20 @@ pub fn paint_wash(wash: &Yara, slots: &mut [u8], mix: &[(Colour, f64)]) {
     }
 }
 
-/// Turns a head's colour wheel to `colour`. The wheel steps rather than blends, and on its
-/// way between two slots it sweeps through the ones in between, lit.
-pub fn paint_head(head: &Zq02015, slots: &mut [u8], colour: Colour) {
+/// Sets a head's colour wheel to `colour`. The head has no red, green or blue of its own: its
+/// wheel is virtual, mixed by the fixture from its CMY flags, and its dark red, dark green and
+/// dark blue are the saturated colours closest to the washes' emitters. Being virtual, it
+/// switches cleanly instead of sweeping through the slots in between. Cyan, magenta and
+/// yellow are held at zero so they cannot tint the colour the wheel picks.
+pub fn paint_head(head: &PoseidonLaserBeamXs, slots: &mut [u8], colour: Colour) {
     let band = match colour {
-        Colour::White => Zq02015::COLOR_WHITE,
-        Colour::Red => Zq02015::COLOR_RED,
-        Colour::Green => Zq02015::COLOR_GREEN,
-        Colour::Blue => Zq02015::COLOR_BLUE,
+        Colour::White => PoseidonLaserBeamXs::COLOR_WHEEL_WHITE,
+        Colour::Red => PoseidonLaserBeamXs::COLOR_WHEEL_DARK_RED,
+        Colour::Green => PoseidonLaserBeamXs::COLOR_WHEEL_DARK_GREEN,
+        Colour::Blue => PoseidonLaserBeamXs::COLOR_WHEEL_DARK_BLUE,
     };
-    head.color.set(slots, band.center());
+    for flag in [head.cyan, head.magenta, head.yellow] {
+        flag.set(slots, 0);
+    }
+    head.color_wheel.set(slots, band.center());
 }

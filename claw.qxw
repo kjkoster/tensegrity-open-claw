@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Workspace>
-<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FIXANDFUNC">
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="SDESK">
  <Creator>
   <Name>Q Light Controller Plus</Name>
   <Version>5.2.1</Version>
@@ -12,7 +12,7 @@
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
     <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
-     <PluginParameters UniverseChannels="58" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
+     <PluginParameters UniverseChannels="189" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
@@ -20,34 +20,14 @@
    <Universe Name="Universe 4" ID="3"/>
   </InputOutputMap>
   <Fixture>
-   <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ02015</Model>
-   <Mode>12 Channel</Mode>
-   <ID>1</ID>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Poseidon Laser Beam XS</Model>
+   <Mode>21 Channel</Mode>
+   <ID>0</ID>
    <Name>Head red leg</Name>
    <Universe>0</Universe>
-   <Address>14</Address>
-   <Channels>12</Channels>
-  </Fixture>
-  <Fixture>
-   <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ02015</Model>
-   <Mode>12 Channel</Mode>
-   <ID>2</ID>
-   <Name>Head green leg</Name>
-   <Universe>0</Universe>
-   <Address>30</Address>
-   <Channels>12</Channels>
-  </Fixture>
-  <Fixture>
-   <Manufacturer>UKing</Manufacturer>
-   <Model>ZQ02015</Model>
-   <Mode>12 Channel</Mode>
-   <ID>3</ID>
-   <Name>Head blue leg</Name>
-   <Universe>0</Universe>
-   <Address>46</Address>
-   <Channels>12</Channels>
+   <Address>126</Address>
+   <Channels>21</Channels>
   </Fixture>
   <Fixture>
    <Manufacturer>Tensegrity</Manufacturer>
@@ -99,41 +79,61 @@
    <Address>0</Address>
    <Channels>2</Channels>
   </Fixture>
+  <Fixture>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Poseidon Laser Beam XS</Model>
+   <Mode>21 Channel</Mode>
+   <ID>9</ID>
+   <Name>Head green leg</Name>
+   <Universe>0</Universe>
+   <Address>147</Address>
+   <Channels>21</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>CLF</Manufacturer>
+   <Model>Poseidon Laser Beam XS</Model>
+   <Mode>21 Channel</Mode>
+   <ID>10</ID>
+   <Name>Head blue leg</Name>
+   <Universe>0</Universe>
+   <Address>168</Address>
+   <Channels>21</Channels>
+  </Fixture>
   <Function ID="0" Type="Scene" Name="Look at ball">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,128,1,0,2,170,3,0</FixtureVal>
-   <FixtureVal ID="2">0,128,1,0,2,170,3,0</FixtureVal>
-   <FixtureVal ID="3">0,128,1,0,2,170,3,0</FixtureVal>
+   <FixtureVal ID="0">0,170,1,0,2,115,3,0</FixtureVal>
+   <FixtureVal ID="9">0,170,1,0,2,107,3,0</FixtureVal>
+   <FixtureVal ID="10">0,170,1,0,2,110,3,0</FixtureVal>
   </Function>
   <Function ID="1" Type="Scene" Name="Look at heaven">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,128,1,0,2,128,3,0</FixtureVal>
-   <FixtureVal ID="2">0,128,1,0,2,128,3,0</FixtureVal>
-   <FixtureVal ID="3">0,128,1,0,2,128,3,0</FixtureVal>
+   <FixtureVal ID="0">0,170,1,0,2,43,3,0</FixtureVal>
+   <FixtureVal ID="9">0,170,1,0,2,43,3,0</FixtureVal>
+   <FixtureVal ID="10">0,170,1,0,2,43,3,0</FixtureVal>
   </Function>
   <Function ID="2" Type="Scene" Name="Sky corner A">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,112,1,0,2,100,3,0</FixtureVal>
-   <FixtureVal ID="2">0,112,1,0,2,100,3,0</FixtureVal>
-   <FixtureVal ID="3">0,112,1,0,2,100,3,0</FixtureVal>
+   <FixtureVal ID="0">0,156,1,0,2,43,3,0</FixtureVal>
+   <FixtureVal ID="9">0,156,1,0,2,43,3,0</FixtureVal>
+   <FixtureVal ID="10">0,156,1,0,2,43,3,0</FixtureVal>
   </Function>
   <Function ID="3" Type="Scene" Name="Sky corner B">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,144,1,0,2,150,3,0</FixtureVal>
-   <FixtureVal ID="2">0,144,1,0,2,150,3,0</FixtureVal>
-   <FixtureVal ID="3">0,144,1,0,2,150,3,0</FixtureVal>
+   <FixtureVal ID="0">0,184,1,0,2,15,3,0</FixtureVal>
+   <FixtureVal ID="9">0,184,1,0,2,15,3,0</FixtureVal>
+   <FixtureVal ID="10">0,184,1,0,2,15,3,0</FixtureVal>
   </Function>
   <Function ID="4" Type="Scene" Name="Look at centre">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,128,1,0,2,200,3,0</FixtureVal>
-   <FixtureVal ID="2">0,128,1,0,2,200,3,0</FixtureVal>
-   <FixtureVal ID="3">0,128,1,0,2,200,3,0</FixtureVal>
+   <FixtureVal ID="0">0,128,1,0,2,200,3,0</FixtureVal>
+   <FixtureVal ID="9">0,128,1,0,2,200,3,0</FixtureVal>
+   <FixtureVal ID="10">0,128,1,0,2,200,3,0</FixtureVal>
   </Function>
   <Function ID="5" Type="Scene" Name="Look at centre wide">
    <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="1">0,128,1,0,2,215,3,0</FixtureVal>
-   <FixtureVal ID="2">0,128,1,0,2,215,3,0</FixtureVal>
-   <FixtureVal ID="3">0,128,1,0,2,215,3,0</FixtureVal>
+   <FixtureVal ID="0">0,128,1,0,2,215,3,0</FixtureVal>
+   <FixtureVal ID="9">0,128,1,0,2,215,3,0</FixtureVal>
+   <FixtureVal ID="10">0,128,1,0,2,215,3,0</FixtureVal>
   </Function>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>
@@ -141,14 +141,14 @@
    <ValueStyle>0</ValueStyle>
    <Grid Width="5" Height="3" Depth="5" Units="0" POV="1"/>
    <StageItem>0</StageItem>
-   <FxItem ID="1" XPos="259.599" YPos="0" ZPos="1031.02"/>
-   <FxItem ID="2" XPos="665.38" YPos="1000" ZPos="611.66"/>
-   <FxItem ID="3" XPos="574.843" YPos="1000" ZPos="1005.85"/>
+   <FxItem ID="0" XPos="0" YPos="0" ZPos="0"/>
    <FxItem ID="4" XPos="2389.75" YPos="0" ZPos="2008.28"/>
    <FxItem ID="5" XPos="2422.91" YPos="1000" ZPos="3025.75"/>
    <FxItem ID="6" XPos="1396.54" YPos="1000" ZPos="1335.41"/>
    <FxItem ID="7" XPos="3431.1" YPos="1000" ZPos="1370.33"/>
    <FxItem ID="8" XPos="4591.85" YPos="0" ZPos="151.688"/>
+   <FxItem ID="9" XPos="0" YPos="0" ZPos="0"/>
+   <FxItem ID="10" XPos="0" YPos="0" ZPos="0"/>
   </Monitor>
  </Engine>
  <VirtualConsole>

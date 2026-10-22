@@ -59,7 +59,7 @@ pub enum Base {
 /// A few minutes of something else, every half hour or so after dusk.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Incident {
-    /// One head at a time snaps to a random point in its patch of sky, white.
+    /// One head at a time snaps to a random point in its patch of sky, in its leg's colour.
     Searchlights,
     /// Heads, washes and ball fade together between white and each leg's colour.
     BallLighting,

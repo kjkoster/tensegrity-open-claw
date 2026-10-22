@@ -119,7 +119,7 @@ records is *how* you set them on each model, which does not change.
 | The ear (a USB audio interface) | USB (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `arecord -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `cortex/src/config.rs`. Reports as `health/ear`, with `ear/state`, `ear/xruns`, `ear/clipping` (blocks at full scale since the brain started — turn the gain down), `ear/error` (why it is deaf, present only while it is), and `ear/usb/address`, `ear/usb/device` and `ear/usb/rate_hz`. |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
-| 3× UKing ZQ02015 moving head | DMX off the HAT | Address and mode from the front-panel menu. Also set `bLnd` → `bLAc`, so signal loss blacks the head out instead of starting an auto or sound-active program. |
+| 3× CLF Poseidon Laser Beam XS moving head | DMX off the HAT, 5-pin XLR | Address from the LCD menu (*DMX Address*). There is only one mode, 21 channels, so nothing else to match. See [Front-panel settings on the moving heads](#front-panel-settings-on-the-moving-heads). |
 | ESP32-C3 MCUs (the balls) | USB serial/JTAG | Flashed by `deploy.sh` while plugged into the Pi; see [Ball fixtures](#ball-fixtures-esp32-c3). Not needed for `brain` itself. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. |
 
@@ -414,8 +414,8 @@ The log has a `rig: …` line for each change of the rig state, and a `show: …
 After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes to an
 **incident** — Searchlights, Ball Lighting or Heart — and then return. None ends later than
 20 minutes before dawn or the show's stop. Which ones may run is `ENABLED_INCIDENTS` in
-`brain/src/schedule.rs`, and it **ships empty**: the base show runs all night. Add an incident
-to it once you have seen it on the rig in test mode, and deploy.
+`brain/src/schedule.rs`: today Searchlights and Ball Lighting, with Heart left out. Add an
+incident to it only once you have seen it on the rig in test mode, and deploy.
 
 At an incident's start the heads light up and glide, lit, to its preset; over its last five
 seconds their light falls away, and they glide back dark to the ball. Washes and ball switch
@@ -424,7 +424,7 @@ have reached "Look at heaven".
 
 | incident | heads | washes | ball |
 |---|---|---|---|
-| Searchlights | white, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
+| Searchlights | each in its leg's colour, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
 | Ball Lighting | on "Look at ball"; white, then each leg's colour, then back, every ten seconds | the same fade | white LED to blue LED and back |
 | Heart | red, breathing between "Look at centre" and "Look at centre wide" | red | dark |
 
@@ -591,11 +591,12 @@ does not look like a wrong setting — it looks like broken software.
 
 | Menu | Setting | Why |
 |---|---|---|
-| `SLnd` | `Auto` | Follows the console. Verified on our ZQ02015s: they track DMX in this mode. |
-| `rPAN` | `no` | Axis not reversed. |
-| `rTiL` | `no` | Axis not reversed. |
+| *DMX Address → DMX Signal mode* | `Wire` | The rig drives the heads over the cable, not wireless DMX. |
+| *Personal → P/T invert → Pan invert* | `OFF` | Axis not reversed. |
+| *Personal → P/T invert → Tilt invert* | `OFF` | Axis not reversed. |
+| *Manual control → Program → Run on power on* | `NO` | A head powered up before the rig is sending stays still instead of playing its own program. |
 
-`rPAN` and `rTiL` may be either way round, but **every head must agree**. A head with one
+Pan and tilt invert may be either way round, but **every head must agree**. A head with one
 axis reversed tracks DMX perfectly and lands nowhere near where the others do — which reads
 as broken aiming code, not as a menu.
 
@@ -620,16 +621,16 @@ cp fixtures/*.qxf ~/Library/Application\ Support/QLC+/Fixtures/
 
 Then **quit and relaunch QLC+** — it builds its definition cache at startup.
 
-Check *Fixture Manager → Add fixture…* lists `CLF → Yara` and `Tensegrity → Ball`. QLC+ 5 skips definitions that fail to parse
+Check *Fixture Manager → Add fixture…* lists `CLF → Yara`, `CLF → Poseidon Laser Beam XS` and `Tensegrity → Ball`. QLC+ 5 skips definitions that fail to parse
 **silently**, so absence is the error signal.
 
 Do not put them inside `/Applications/QLC+.app`. That library is indexed by a manifest
 (`FixturesMap.xml`) and ignores anything not listed in it, editing the bundle breaks its
 signature, and an update wipes it.
 
-`CLF-Yara.qxf` is ours, written from the manual, and the QLC+ library has no Yara at all —
-**worth submitting upstream** to `mcallegari/qlcplus` once it has been confirmed against the
-hardware. Open it in QLC+'s Fixture Editor and re-save first, so the file matches what their
+`CLF-Yara.qxf` and `CLF-Poseidon-Laser-Beam-XS.qxf` are ours, written from the manuals, and
+the QLC+ library has neither — **worth submitting upstream** to `mcallegari/qlcplus` once each has been confirmed against
+the hardware. Open each in QLC+'s Fixture Editor and re-save first, so the file matches what their
 tooling emits.
 
 Every fixture the workspace patches needs its `.qxf` committed to `fixtures/` as well — the

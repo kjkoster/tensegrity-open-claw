@@ -1710,6 +1710,16 @@ fn write_value_constants(out: &mut String, shape: &Patched) {
     }
 }
 
+/// Whether a fixture has `field` as a single 8-bit channel. The colour and dimmer traits hand
+/// out a `Channel`, so a fixture whose dimmer is a 16-bit pair cannot implement them; it is
+/// driven through its own field instead.
+fn carries_8bit(fixture: &Patched, field: &str) -> bool {
+    fixture
+        .fields
+        .iter()
+        .any(|f| matches!(f, Field::Single { name, .. } if name == field))
+}
+
 /// Renders the fixture table: one named constant per fixture in the QLC+ patch, a struct per
 /// fixture *type* with a named field per channel, and the e-stop's mask over them.
 ///
@@ -1735,11 +1745,7 @@ fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
     // Import exactly the capability traits this patch implements. Naming them all in the
     // hand-written half would warn about the ones no patched fixture happens to have, and
     // that warning would be noise rather than the signal an unused import usually is.
-    let implements = |field: &str| {
-        fixtures
-            .iter()
-            .any(|fixture| fixture.fields.iter().any(|f| f.name() == field))
-    };
+    let implements = |field: &str| fixtures.iter().any(|fixture| carries_8bit(fixture, field));
     let mut imports = vec!["Channel", "PatchEntry", "Sacn"];
     if implements("red") && implements("green") && implements("blue") {
         imports.push("Rgb");
@@ -1846,7 +1852,7 @@ fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
         // This is the type-safety the whole exercise is for: a fixture patched into a mode
         // without colour cannot be handed to code that mixes colour. One impl per type, so
         // it covers every instance.
-        let has = |field: &str| shape.fields.iter().any(|f| f.name() == field);
+        let has = |field: &str| carries_8bit(shape, field);
         if aims(shape) {
             let focus = shape.focus.as_ref().expect("aims() checked the focus");
             writeln!(out, "impl Position for {type_name} {{").unwrap();

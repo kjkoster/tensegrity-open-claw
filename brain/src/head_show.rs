@@ -9,7 +9,7 @@
 use crate::ball_lighting;
 use crate::heart;
 use crate::legs::{Colour, LEGS, paint_head};
-use crate::patch::Zq02015;
+use crate::patch::PoseidonLaserBeamXs;
 use crate::presets::{self, Preset};
 use crate::show_state::{Cue, Incident, ShowState};
 use cortex::draw::Draw;
@@ -86,7 +86,7 @@ impl HeadShow {
 
             let (colour, level) = match cue.state {
                 ShowState::Base(_) => (Colour::White, 0.0),
-                ShowState::Incident(Incident::Searchlights) => (Colour::White, 1.0),
+                ShowState::Incident(Incident::Searchlights) => (leg.colour, 1.0),
                 ShowState::Incident(Incident::BallLighting) => {
                     // The wheel steps where the washes and the ball are halfway.
                     let colour = if ball_lighting::phase(&cue) < 0.5 { Colour::White } else { leg.colour };
@@ -151,18 +151,16 @@ fn snap_pause(key: i64, number: i64) -> f64 {
 
 /// One head's every channel: where it points, how bright, and what colour, with everything it
 /// could do by itself held off.
-fn write(head: &Zq02015, slots: &mut [u8], pose: Pose, colour: Colour, dimmer: f64) {
+fn write(head: &PoseidonLaserBeamXs, slots: &mut [u8], pose: Pose, colour: Colour, dimmer: f64) {
     aim(head, slots, pose);
-    // Fastest always: the head's own ramp would otherwise smooth, and lag, the stream it is
-    // sent, and turn a snap into a drift.
-    head.motor_speed.set(slots, Zq02015::MOTOR_SPEED_FASTEST);
     head.dimmer.set_unit(slots, dimmer);
     paint_head(head, slots, colour);
-    head.gobo.set(slots, Zq02015::GOBO_OPEN_WHITE.center());
-    head.strobe.set(slots, Zq02015::STROBE_SHUTTER_OPEN.center());
-    head.automatic_mode.park(slots);
-    head.reset.park(slots);
-    head.light_strips.set(slots, Zq02015::LIGHT_STRIPS_OFF.center());
+    head.shutter.set(slots, PoseidonLaserBeamXs::SHUTTER_SHUTTER_OPEN.center());
+    head.gobo_wheel.set(slots, PoseidonLaserBeamXs::GOBO_WHEEL_OPEN.center());
+    head.prism_1.set(slots, PoseidonLaserBeamXs::PRISM_1_PRISM_OUT.center());
+    head.prism_2.set(slots, PoseidonLaserBeamXs::PRISM_2_PRISM_OUT.center());
+    head.frost.set(slots, PoseidonLaserBeamXs::FROST_FROST_OUT.center());
+    head.device_set.park(slots);
 }
 
 fn mix(from: f64, to: f64, amount: f64) -> f64 {

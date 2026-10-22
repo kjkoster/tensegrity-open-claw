@@ -7,10 +7,8 @@
 const CITY: &str = "Amsterdam";
 
 const SHOWS: &[(&str, &str)] = &[
-    // A test day at home, all day, so it is a show whenever the rig is switched on.
-    ("2026-10-18 00:00", "2026-10-19 00:00"),
     // Build day, for testing and tuning.
-    ("2026-10-21 13:00", "2026-10-21 22:00"),
+    ("2026-10-22 16:00", "2026-10-22 22:00"),
     // ADE, Friday and Saturday nights. Sunday is the tear-down.
     ("2026-10-23 16:00", "2026-10-24 06:00"),
     ("2026-10-24 16:00", "2026-10-25 06:00"),

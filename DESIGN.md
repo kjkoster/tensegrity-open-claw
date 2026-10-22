@@ -257,8 +257,8 @@ each frame and a restart lands back in it. The draws are uniform rather than tak
 noise fields, whose values cluster. Times are drawn before the pick, so enabling another
 incident changes which run but not when. An incident starts only if it ends a margin before
 the dark stretch does, which covers dawn and the show's stop with one rule. Which incidents
-may run is a guard in the rig crate that ships empty, because an incident nobody has seen on
-the rig must stay in the code but out of the show.
+may run is a guard in the rig crate, which lists only the incidents seen on the rig, because
+an incident nobody has seen there must stay in the code but out of the show.
 
 **Only the heads fade.** Washes and ball switch looks in one frame at both ends of an
 incident. The heads light over a second at its start and glide, lit, to its preset at the
