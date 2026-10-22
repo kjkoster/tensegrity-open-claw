@@ -37,7 +37,7 @@ step "build ball -> riscv32imc-unknown-none-elf    (ESP32-C3)"
 # reference PDFs, the editor config and the git history all stay on the Mac.
 #
 #   the five crates  the members of the cargo workspace
-#   claw.qxw         the claw's patch (what is where) and its scenes
+#   claw.qxw         the claw's patch (what is where) and its presets
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
 #   stem/           the broker configuration, and whatever else Stem grows
 #   etc/            what the deploy installs onto the Pi that belongs to no daemon: the

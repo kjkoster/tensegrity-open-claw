@@ -3,19 +3,27 @@
 //!
 //! Holding both buttons for two seconds turns it on, starting from the show state the show is
 //! in, and the same again turns it off. While it is on, the left button steps to the next show
-//! state and the motor runs for as long as the right button is held. The calendar and the sun
-//! are ignored; the audio is not, so the strobe still follows the room.
+//! state — the base states, then the incidents — and the motor runs for as long as the right
+//! button is held. The calendar, the sun and the incident schedule are ignored, so an incident
+//! can be seen before it is enabled; the audio is not, so the strobe and Heart still follow the
+//! room.
 //!
 //! The motor runs only when asked, never on its beat, so stepping through the show states cannot
 //! start it by surprise. And test mode ends itself after a quiet spell, because the rig runs
 //! unattended, and one left in test mode would ignore the calendar for the rest of the event.
 
 use crate::face::FaceState;
-use crate::show_state::{Cue, ShowState};
+use crate::show_state::ShowState;
 use std::time::{Duration, Instant};
 
 /// How long test mode lasts without a gesture.
 const TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// What test mode asks for this frame.
+pub struct Manual {
+    pub state: ShowState,
+    pub motor: bool,
+}
 
 pub struct TestMode {
     /// The face's counts as last read; the face counts from zero, and so does this.
@@ -38,9 +46,9 @@ impl TestMode {
         }
     }
 
-    /// The cue while test mode is on, or `None` while the calendar has the show. `current` is
-    /// the show state to start from when a chord turns it on.
-    pub fn frame(&mut self, current: ShowState, face: &FaceState) -> Option<Cue> {
+    /// What test mode asks for while it is on, or `None` while the calendar has the show.
+    /// `current` is the show state to start from when a chord turns it on.
+    pub fn frame(&mut self, current: ShowState, face: &FaceState) -> Option<Manual> {
         let now = Instant::now();
         let chords = face.chords.wrapping_sub(self.seen_chords);
         let steps = face.left_presses.wrapping_sub(self.seen_left_presses);
@@ -72,11 +80,9 @@ impl TestMode {
         for _ in 0..steps {
             on.state = on.state.next();
         }
-        Some(Cue {
+        Some(Manual {
             state: on.state,
             motor: running,
-            testing: true,
-            sleep: false,
         })
     }
 }

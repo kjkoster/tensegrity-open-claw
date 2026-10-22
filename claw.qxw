@@ -12,7 +12,7 @@
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
     <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
-     <PluginParameters UniverseChannels="75" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
+     <PluginParameters UniverseChannels="58" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>
    <Universe Name="Universe 2" ID="1"/>
@@ -24,9 +24,9 @@
    <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>1</ID>
-   <Name>ZQ02015 leg A</Name>
+   <Name>Head red leg</Name>
    <Universe>0</Universe>
-   <Address>39</Address>
+   <Address>14</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
@@ -34,9 +34,9 @@
    <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>2</ID>
-   <Name>ZQ02015 leg B</Name>
+   <Name>Head green leg</Name>
    <Universe>0</Universe>
-   <Address>51</Address>
+   <Address>30</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
@@ -44,9 +44,9 @@
    <Model>ZQ02015</Model>
    <Mode>12 Channel</Mode>
    <ID>3</ID>
-   <Name>ZQ02015 leg C</Name>
+   <Name>Head blue leg</Name>
    <Universe>0</Universe>
-   <Address>63</Address>
+   <Address>46</Address>
    <Channels>12</Channels>
   </Fixture>
   <Fixture>
@@ -56,7 +56,7 @@
    <ID>4</ID>
    <Name>Ball</Name>
    <Universe>0</Universe>
-   <Address>9</Address>
+   <Address>2</Address>
    <Channels>8</Channels>
   </Fixture>
   <Fixture>
@@ -66,7 +66,7 @@
    <ID>5</ID>
    <Name>Wash red leg</Name>
    <Universe>0</Universe>
-   <Address>19</Address>
+   <Address>10</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
@@ -76,7 +76,7 @@
    <ID>6</ID>
    <Name>Wash green leg</Name>
    <Universe>0</Universe>
-   <Address>23</Address>
+   <Address>26</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
@@ -86,7 +86,7 @@
    <ID>7</ID>
    <Name>Wash blue leg</Name>
    <Universe>0</Universe>
-   <Address>27</Address>
+   <Address>42</Address>
    <Channels>4</Channels>
   </Fixture>
   <Fixture>
@@ -99,6 +99,42 @@
    <Address>0</Address>
    <Channels>2</Channels>
   </Fixture>
+  <Function ID="0" Type="Scene" Name="Look at ball">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,128,1,0,2,170,3,0</FixtureVal>
+   <FixtureVal ID="2">0,128,1,0,2,170,3,0</FixtureVal>
+   <FixtureVal ID="3">0,128,1,0,2,170,3,0</FixtureVal>
+  </Function>
+  <Function ID="1" Type="Scene" Name="Look at heaven">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,128,1,0,2,128,3,0</FixtureVal>
+   <FixtureVal ID="2">0,128,1,0,2,128,3,0</FixtureVal>
+   <FixtureVal ID="3">0,128,1,0,2,128,3,0</FixtureVal>
+  </Function>
+  <Function ID="2" Type="Scene" Name="Sky corner A">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,112,1,0,2,100,3,0</FixtureVal>
+   <FixtureVal ID="2">0,112,1,0,2,100,3,0</FixtureVal>
+   <FixtureVal ID="3">0,112,1,0,2,100,3,0</FixtureVal>
+  </Function>
+  <Function ID="3" Type="Scene" Name="Sky corner B">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,144,1,0,2,150,3,0</FixtureVal>
+   <FixtureVal ID="2">0,144,1,0,2,150,3,0</FixtureVal>
+   <FixtureVal ID="3">0,144,1,0,2,150,3,0</FixtureVal>
+  </Function>
+  <Function ID="4" Type="Scene" Name="Look at centre">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,128,1,0,2,200,3,0</FixtureVal>
+   <FixtureVal ID="2">0,128,1,0,2,200,3,0</FixtureVal>
+   <FixtureVal ID="3">0,128,1,0,2,200,3,0</FixtureVal>
+  </Function>
+  <Function ID="5" Type="Scene" Name="Look at centre wide">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,128,1,0,2,215,3,0</FixtureVal>
+   <FixtureVal ID="2">0,128,1,0,2,215,3,0</FixtureVal>
+   <FixtureVal ID="3">0,128,1,0,2,215,3,0</FixtureVal>
+  </Function>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>
    <ChannelStyle>0</ChannelStyle>

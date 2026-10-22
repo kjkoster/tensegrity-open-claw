@@ -52,6 +52,8 @@ pub struct AudioFeatures {
     pub onset_count: u64, // counters survive latest-value snapshots; flags would not
     pub last_onset_strength: f32,
     pub onset_density: f32,
+    // kicks: onsets of the low band alone, counted the same way
+    pub kick_count: u64,
     // spectral (slow path; holds last value between updates)
     pub centroid: f32,
     pub spread: f32,

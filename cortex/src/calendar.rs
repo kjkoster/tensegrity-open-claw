@@ -98,8 +98,9 @@ impl Span {
 }
 
 impl Show {
-    pub fn is_dark(&self, now: f64) -> bool {
-        self.dark.iter().any(|span| span.contains(now))
+    /// The stretch of the show between civil dusk and civil dawn that `now` is in, if any.
+    pub fn dark_stretch(&self, now: f64) -> Option<Span> {
+        self.dark.iter().copied().find(|span| span.contains(now))
     }
 }
 

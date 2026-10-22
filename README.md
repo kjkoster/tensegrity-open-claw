@@ -269,41 +269,47 @@ The deploy ships **only what the Pi builds from and installs** — the five crat
 `claw.qxw`, `fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh`
 rather than filtered by exclusions, so adding something is a decision; the design documents,
 the reference PDFs and the git history stay on the Mac. The workspace goes because the build
-compiles **its fixture patch and its scenes** in — so saving in QLC+ and deploying is all it
-takes to get an edited scene onto the rig.
+compiles **its fixture patch and its presets** in — so saving in QLC+ and deploying is all it
+takes to get a re-aimed preset onto the rig.
 
 > The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
 > hand — the deploy leaves it alone rather than removing things on the Pi on its own.
 
 ### What the build does with the workspace
 
-`cortex-build` — *Scene* — ingests a rig's `.qxw` at build time, called from that rig's
-`build.rs`. Worth understanding, because it is why saving in QLC+ is the whole workflow, and
+`cortex-build` ingests a rig's `.qxw` at build time, called from that rig's `build.rs`. Worth understanding, because it is why saving in QLC+ is the whole workflow, and
 because every way it can go wrong is a failed build with a message rather than a wrong-looking
 rig.
 
 **What it reads.** Two sources of truth, neither of them Rust. The workspace says *where*
-fixtures sit; the `.qxf` definitions in `fixtures/` say *what their channels mean*. Scene
-reads both, resolves each patched fixture against its definition's mode, and generates a
-`patch` module with a struct per fixture — a named field per channel — plus a `scenes` module,
-into the rig crate that asked for them. The build reads every definition in `fixtures/` and
+fixtures sit; the `.qxf` definitions in `fixtures/` say *what their channels mean*. The
+ingest reads both, resolves each patched fixture against its definition's mode, and generates
+a `patch` module with a struct per fixture — a named field per channel — plus a `presets`
+module, into the rig crate that asked for them. The build reads every definition in `fixtures/` and
 resolves only what the patch names.
 
 **Why it happens at build time.** Ingesting rather than committing a generated file means
 there is no stale copy to go stale. `cargo` is told to watch the workspace, so saving in QLC+
 is enough to make the next build pick the change up.
 
-**How scene values get resolved.** QLC+ stores them *fixture-relative*:
+**How presets get resolved.** A preset is a QLC+ scene holding where every head points. QLC+
+stores scene values *fixture-relative*:
 
 ```
 <FixtureVal ID="3">0,255,1,0</FixtureVal>
 ```
 
 means "on the fixture whose QLC+ ID is 3, set its channel 0 to 255 and channel 1 to 0". Those
-numbers are meaningless without the `<Fixture>` patch in the same file — which is exactly why
-the patch is authoritative. Scene resolves them through it into absolute DMX slot indices,
-the only thing the daemon speaks. Note `<Address>` in the file is **0-based**: DMX address 1
-on the wire is `<Address>0</Address>`.
+numbers are meaningless without the `<Fixture>` patch and the definitions — which is exactly
+why the patch is authoritative. The ingest resolves them through it into a pan and a tilt in
+degrees per head, through each head's travel range, so `presets::LOOK_AT_BALL.head_red_leg`
+is a pose. Note `<Address>` in the file is **0-based**: DMX address 1 on the wire is
+`<Address>0</Address>`.
+
+**The presets are a prescribed set.** `brain/presets.rs` lists the names the show is written
+against — "Look at ball", "Look at heaven", "Sky corner A", "Sky corner B", "Look at centre",
+"Look at centre wide" — and the workspace's scenes must be exactly that set. A name becomes its
+constant the way a fixture name does: "Look at ball" → `LOOK_AT_BALL`.
 
 **Why channels are named, not numbered.** Because they become *named fields* rather than
 offsets, drift is caught by the compiler in every direction:
@@ -326,8 +332,14 @@ offsets, drift is caught by the compiler in every direction:
 | delete or rename a ball a board is provisioned as | the ball firmware stops compiling at that board's row |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
 | patch a fixture whose shutter, Effect or Maintenance channel marks no off band | fails, naming the band the e-stop needs marked |
-| name a scene anything but `[a-z][a-z0-9_]*` | fails — scene names are the keys the daemon knows scenes by |
+| add a scene that is not in `brain/presets.rs` | fails, naming it — and the preset it is most likely a typo of |
+| delete or rename a preset's scene | fails, naming the preset that has no scene |
+| record a preset without Pan, Pan Fine, Tilt or Tilt Fine for some head | fails, naming the preset, the head and the channel — a missing pan would be 0°, the end of the head's travel |
+| record a preset with any other channel ticked | fails, naming the preset, fixture and channel — untick it in the Scene Editor |
 | give two scenes the same name | fails; QLC+ does not enforce uniqueness, the daemon needs it |
+| list two names in `brain/presets.rs` that yield the same Rust constant | fails |
+| list a name in `brain/presets.rs` that yields `SUMMARIES` | fails — the presets module uses that name for its log lines |
+| remove a name from `brain/presets.rs` the show still uses | its constant is gone → the use site stops compiling |
 
 There is no drift checker because none is needed. A fixture with no red simply has no `red`
 field, so the engine can only be wired to a fixture that genuinely has one.
@@ -336,16 +348,19 @@ field, so the engine can only be wired to a fixture that genuinely has one.
 the daemon and has no QLC+ library to fall back on, so a missing `.qxf` fails the build
 outright, with a message naming the manufacturer and model.
 
-**Confirming it landed.** The startup log names the patch and the scenes the running binary
+**Confirming it landed.** The startup log names the patch and the presets the running binary
 was built from:
 
 ```
 brain: 8 fixtures
-brain:   Wash red leg @ 100–103 — CLF Yara, 4 Channel
+brain:   Wash red leg @ 11–14 — CLF Yara, 4 Channel
 brain: 32 e-stop overrides
-brain: 1 scenes
-brain:   front_wash_warm (18 values)
+brain: 6 presets
+brain:   Look at ball — Head red leg 270.0°/119.5°, Head green leg 270.0°/119.5°, Head blue leg 270.0°/119.5°
 ```
+
+A preset still at its old pose after you re-aimed and deployed means the build never saw
+the save.
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
@@ -358,7 +373,7 @@ rig is black except for the ball's status LED.
 
 During a show the ball's motor runs for one second every four minutes, the first run as the
 show opens. From civil dusk to civil dawn its power LEDs pulse in silence and strobe to the
-music.
+music. The heads rest dark on "Look at ball" whenever no incident has them.
 
 The build looks the city up, finds its zone, and works out every show's instants and dark
 stretches, all offline. It fails on:
@@ -388,11 +403,48 @@ The brain publishes its state under `brain/state/`, retained, on every change:
 | topic | values |
 |---|---|
 | `brain/state/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
-| `brain/state/show` | `blackout`, `daylight`, `pulse` or `strobe` |
+| `brain/state/show` | `blackout`, `daylight`, `pulse`, `strobe`, `searchlights`, `ball_lighting` or `heart` |
 | `brain/state/testmode` | whether test mode is on |
 
 The log has a `rig: …` line for each change of the rig state, and a `show: …` or
 `show: test mode …` line for each change of the show state.
+
+### Incidents
+
+After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes to an
+**incident** — Searchlights, Ball Lighting or Heart — and then return. None ends later than
+20 minutes before dawn or the show's stop. Which ones may run is `ENABLED_INCIDENTS` in
+`brain/src/schedule.rs`, and it **ships empty**: the base show runs all night. Add an incident
+to it once you have seen it on the rig in test mode, and deploy.
+
+At an incident's start the heads light up and glide, lit, to its preset; over its last five
+seconds their light falls away, and they glide back dark to the ball. Washes and ball switch
+at the start and the end. Searchlights starts snapping a few seconds after all three heads
+have reached "Look at heaven".
+
+| incident | heads | washes | ball |
+|---|---|---|---|
+| Searchlights | white, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
+| Ball Lighting | on "Look at ball"; white, then each leg's colour, then back, every ten seconds | the same fade | white LED to blue LED and back |
+| Heart | red, breathing between "Look at centre" and "Look at centre wide" | red | dark |
+
+Heart beats a lub-dub on the kick drum, never slower than 60 BPM: in silence, between kicks
+and without the ear it beats once a second.
+
+**Confirming it landed.** At the start of each dark stretch, and at startup inside one, the
+log prints the stretch's whole schedule:
+
+```
+show: dark 19:08 → 22:00, 2 incidents
+show:   #0 at +37m12s: heart for 3m05s
+show:   #1 at +81m40s: searchlights for 2m31s
+```
+
+The offsets count from the start of the dark stretch on the line above: dusk, or the show's
+start if it opens after dusk.
+
+With nothing enabled it says `0 incidents (none enabled)`. A restart prints the same schedule
+again: it is drawn from the dark stretch and nothing else.
 
 ### Test mode
 
@@ -401,12 +453,14 @@ To try each show state without a console or waiting for dusk, use the cabinet do
 | | |
 |---|---|
 | hold both buttons for 2 s | test mode on, starting from the current show state; both lamps light |
-| left button | the next show state: blackout → daylight → pulse → strobe → blackout |
+| left button | the next show state: blackout → daylight → pulse → strobe → searchlights → ball lighting → heart → blackout |
 | right button | the motor, for as long as it is held |
 | hold both buttons for 2 s again | test mode off; the calendar has the show again |
 
-The calendar and the sun are ignored while it is on, but the audio is not: the strobe still
-follows the room. The motor runs only while the right button is held, never on its beat,
+The calendar, the sun and `ENABLED_INCIDENTS` are ignored while it is on, so every incident
+can be tried by day; the washes and ball under Searchlights show their night look, pulse or
+strobe by the room. The audio is not ignored: the strobe and Heart still follow the room. An
+incident in test mode runs until you step on, with no fade at the end. The motor runs only while the right button is held, never on its beat,
 and the ball's firmware still stops any run at 2 s. The e-stop still wins, as it wins over
 everything. The buttons are published as
 `face/left_button` and `face/right_button`. Test mode turns itself off after 15
@@ -549,8 +603,8 @@ as broken aiming code, not as a menu.
 
 # QLC+ on the Mac
 
-QLC+ does two jobs here and nothing else: taking the rig over by hand, and programming
-scenes. It is stock — no plugins, no patches.
+QLC+ does two jobs here and nothing else: taking the rig over by hand, and aiming the heads'
+presets. It is stock — no plugins, no patches.
 
 The workspace is [`claw.qxw`](claw.qxw), and it is the **source of truth** for what the rig
 has patched where. `cortex-build` reads
@@ -617,40 +671,26 @@ Takeover needs priority **strictly above 100**, which is what the daemon transmi
 is deliberate: every sACN source ships defaulted to 100, so a laptop joining the network
 with a live universe cannot seize the rig by accident.
 
-## Creating a scene
+## Aiming a preset
 
-1. Take the rig over as above, so you are shaping real light rather than guessing.
-2. Build the look in **Simple Desk**.
-3. **Dump DMX values** into a new Scene.
-4. Rename it to something `snake_case` — `front_wash_warm`. This is not cosmetic: scene
-   names are the keys the daemon knows scenes by, and the build **fails** on a name that is
-   not `[a-z][a-z0-9_]*`. QLC+'s default "New Scene 0" trips it, so renaming is forced
-   rather than remembered.
-5. **File → Save.**
-6. `./deploy.sh`, then check the startup log names your scene:
+The workspace holds exactly the six presets `brain/presets.rs` names, and no other scenes.
+Each holds **only Pan, Pan Fine, Tilt and Tilt Fine, for all three heads** — the build fails on
+anything else, so the dimmer you raised to see the beam must not be saved into it. The
+placeholders in the workspace are rough; aim every one on the rig.
 
-   ```
-   brain: 1 scenes
-   brain:   front_wash_warm (18 values)
-   ```
+1. Take the rig over as above, so you are aiming real beams rather than guessing.
+2. **Function Manager**, open the preset in the **Scene Editor**.
+3. Enable its **live-output toggle**. In Simple Desk, raise each head's dimmer so you can see
+   where it points — that dimmer is not part of the scene, and stays out of it.
+4. Move the heads in the Scene Editor. It updates the Function in place.
+5. **File → Save**, then deploy. The startup log lists the six presets with every head's pan
+   and tilt; check the one you re-aimed has moved.
 
-   That line is the confirmation the build ingested the save. Scenes have no runtime role
-   yet — they are compiled in and logged, and nothing reads them in the frame loop.
-
-Duplicate scene names fail the build too. QLC+ does not enforce uniqueness; the daemon needs
-it, so it is enforced where it is cheap to fix.
-
-## Editing a scene
-
-1. **Function Manager**, open the scene in the **Scene Editor**.
-2. Enable its **live-output toggle**. The rig goes to the scene's state and your edits move
-   real fixtures — you are editing what you are looking at.
-3. Tweak. The editor updates the Function in place.
-4. **File → Save**, then deploy.
-
-A **DMX dump always creates a new scene; it never updates an existing one.** Iterate in the
-Scene Editor, and use dumps only for genuinely new looks — otherwise you end up with
-`front_wash_warm` twice and a failed build telling you so.
+Re-aim in the Scene Editor rather than dumping from Simple Desk. A **DMX dump always creates
+a new scene, never updates one**, and it carries every channel you touched: the build then
+fails on a scene that is not a preset, or on a preset with a dimmer in it. If a preset has to
+be recorded from scratch, name it exactly as `brain/presets.rs` has it and untick every
+channel but the four position channels of each head.
 
 Simple Desk fader positions are runtime-only. QLC+ does not persist them, so a look that
 exists only on the desk is gone on reload. Persistent looks are Scenes.

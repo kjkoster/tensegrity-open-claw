@@ -1,18 +1,18 @@
-//! Ingests the patch and the scenes from a QLC+ workspace at build time, and resolves the
-//! show calendar (see [`calendar`]).
+//! Ingests the patch and the pointing presets from a QLC+ workspace at build time, and
+//! resolves the show calendar (see [`calendar`]).
 //!
 //! One rig, one workspace: the rig crate's build script calls [`ingest`] with its own
 //! `.qxw`, and the fixtures it names are generated inside that rig's crate.
 //!
-//! QLC+ stores scene values **fixture-relative**:
+//! A preset is a QLC+ scene holding where every head points. QLC+ stores scene values
+//! **fixture-relative**:
 //!
 //!     <FixtureVal ID="3">0,255,1,0</FixtureVal>
 //!
 //! means "on the fixture whose QLC+ ID is 3, set its channel 0 to 255 and its channel 1
-//! to 0". Those numbers are meaningless without the `<Fixture>` patch in the same file,
-//! which is why the patch is authoritative: this script resolves them through it —
-//! universe, start address, channel count — into absolute DMX slot indices, the only
-//! thing the daemon speaks.
+//! to 0". Those numbers are meaningless without the `<Fixture>` patch and the fixture
+//! definitions, which is why the patch is authoritative: this script resolves them through
+//! it into a pan and a tilt in degrees per head, through each head's own travel range.
 //!
 //! Ingesting at build time rather than committing a generated file means the workspace
 //! and the daemon cannot drift apart: there is no stale copy to go stale. `cargo` is
@@ -235,25 +235,31 @@ impl Patched {
     }
 }
 
-/// Generates `patch.rs` and `scenes.rs` into `OUT_DIR` from one QLC+ workspace.
+/// Generates the `patch` and `presets` modules into `OUT_DIR` from one QLC+ workspace.
 ///
 /// The fixture definitions are taken from the `fixtures/` directory beside the workspace,
 /// which is one directory for every rig: a CLF Yara definition is the same object whichever
 /// sculpture it hangs on. Each rig reads every definition and resolves only what its own
 /// patch names.
-pub fn ingest(workspace: &Path) {
+///
+/// `presets` is the set of preset names the rig's show is written against, by their names in
+/// QLC+. The workspace's scenes must be exactly that set: the show refers to every one of them
+/// by its generated constant, and a scene it does not know is a look nothing will ever play.
+pub fn ingest(workspace: &Path, presets: &[&str]) {
     let xml = read_workspace(workspace);
     let doc = parse_workspace(&xml, workspace);
     let engine = engine_of(&doc, workspace);
 
     let sacn = parse_sacn(engine, workspace);
     let mut patch = parse_patch(engine);
-    let scenes = parse_scenes(engine, &patch);
 
     // The workspace names a definition; the definition says what the channels mean. Both
-    // are needed before a fixture can be given typed channels, so this runs before render.
+    // are needed before a fixture can be given typed channels, and before a preset's bytes
+    // can become a head's degrees.
     resolve_definitions(&mut patch, &fixtures_dir(workspace));
     assign_type_names(&mut patch);
+    let heads = aimable(&patch);
+    let presets = parse_presets(engine, &patch, &heads, presets);
 
     // The generated file names the workspace it came from, so a stray copy found on its own
     // still says which rig it belongs to.
@@ -263,7 +269,7 @@ pub fn ingest(workspace: &Path) {
         .unwrap_or_else(|| panic!("{} has no file name", workspace.display()));
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &scenes, source)).unwrap();
+    fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &heads, &presets, source)).unwrap();
 }
 
 /// Reads one QLC+ workspace for its addressing and its fixtures' channels, and generates
@@ -345,7 +351,7 @@ fn read_workspace(workspace: &Path) -> String {
     fs::read_to_string(workspace).unwrap_or_else(|e| {
         panic!(
             "cannot read the QLC+ workspace at {}: {e}\n\
-             The rig's patch and scenes come from that file. deploy.sh rsyncs the whole \
+             The rig's patch and presets come from that file. deploy.sh rsyncs the whole \
              repository to the Pi; if you are building by hand, make sure it is there.",
             workspace.display()
         )
@@ -478,23 +484,20 @@ fn parse_sacn(engine: roxmltree::Node, workspace: &Path) -> Sacn {
     sacn
 }
 
-/// Renders the whole of a rig's generated half: both modules and the check between them.
-///
-/// One file rather than two, included at the rig crate's root, because the two halves are
-/// cross-checked against each other and that check is generated from numbers only this
-/// function has. Splitting them would put the assertion in a hand-written file, where it is
-/// a line each rig has to remember to copy.
+/// Renders the whole of a rig's generated half: the patch and the presets, as one file
+/// included at the rig crate's root.
 fn render_rig(
     sacn: &Sacn,
     patch: &BTreeMap<u32, Patched>,
-    scenes: &[(String, Vec<(u32, u8)>)],
+    heads: &[(u32, &Patched)],
+    presets: &[Preset],
     source: &str,
 ) -> String {
     let mut out = String::new();
     writeln!(out, "// Generated from {source}. Do not edit.").unwrap();
     writeln!(out).unwrap();
     write_module(&mut out, "patch", &render_patch(sacn, patch));
-    write_module(&mut out, "scenes", &render_scenes(scenes));
+    write_module(&mut out, "presets", &render_presets(heads, presets));
     out
 }
 
@@ -1173,7 +1176,7 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
             panic!(
                 "fixture {id} {name:?} is patched to workspace universe index {universe}. \
                  The daemon sends exactly one universe (index {WORKSPACE_UNIVERSE_INDEX}); \
-                 teaching Scene about universes is a deliberate change, not something to \
+                 teaching the daemon about universes is a deliberate change, not something to \
                  fold in silently."
             );
         }
@@ -1233,7 +1236,7 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
     if patch.is_empty() {
         panic!(
             "the workspace has no <Fixture> elements. The patch is authoritative — the \
-             daemon's scenes are resolved through it — so an empty one is never right."
+             daemon's presets are resolved through it — so an empty one is never right."
         );
     }
 
@@ -1266,29 +1269,71 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
     patch
 }
 
-/// Resolves every `<Function Type="Scene">` into a name and its absolute (slot, value)
-/// pairs, in document order.
-fn parse_scenes(engine: roxmltree::Node, patch: &BTreeMap<u32, Patched>) -> Vec<(String, Vec<(u32, u8)>)> {
-    let mut scenes: Vec<(String, Vec<(u32, u8)>)> = Vec::new();
+/// The generated `presets` module's one value that is not a preset, so no preset may take
+/// its name.
+const SUMMARIES: &str = "SUMMARIES";
 
+/// One preset as the show gets it: where every aimable head points.
+struct Preset {
+    /// The scene's name in QLC+.
+    name: String,
+    /// One pose per aimable head, in address order.
+    poses: Vec<HeadPose>,
+}
+
+/// One head's pose in a preset, in the unreferenced degrees `cortex`'s `Position` speaks.
+struct HeadPose {
+    /// The head's field in the generated `Preset` struct.
+    field: String,
+    pan_deg: f64,
+    tilt_deg: f64,
+}
+
+/// Resolves the workspace's scenes into the presets the rig prescribes, in the rig's order.
+///
+/// The workspace must hold exactly the prescribed set. A missing preset is a look the show
+/// asks for and would not get; an extra one is a look nothing plays, and as likely as not a
+/// typo of one that is missing. Both are reported together, so one build says everything
+/// that is wrong with the set.
+///
+/// A preset carries pan and tilt, coarse and fine, for every head and nothing else. A missing
+/// channel is the dangerous case: it would resolve to 0°, which is the end of the head's
+/// travel rather than "no opinion". An extra one is the quiet case: a dump still carrying a
+/// dimmer or a motor speed holds a value the show never sends, and whoever recorded it would
+/// expect it to matter.
+fn parse_presets(
+    engine: roxmltree::Node,
+    patch: &BTreeMap<u32, Patched>,
+    heads: &[(u32, &Patched)],
+    prescribed: &[&str],
+) -> Vec<Preset> {
+    for (index, name) in prescribed.iter().enumerate() {
+        let ident = ident_of(name);
+        if !ident.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            panic!(
+                "prescribed preset {name:?} does not yield a usable Rust name (got {ident:?}). \
+                 Rename it to something starting with a letter."
+            );
+        }
+        if let Some(other) = prescribed[..index].iter().find(|other| ident_of(other) == ident) {
+            panic!("prescribed presets {other:?} and {name:?} both map to the constant {ident}. Rename one.");
+        }
+        if ident == SUMMARIES {
+            panic!(
+                "prescribed preset {name:?} maps to the constant {ident}, which the presets module \
+                 already uses for its log lines. Rename it."
+            );
+        }
+    }
+
+    let mut scenes: BTreeMap<&str, roxmltree::Node> = BTreeMap::new();
     for element in engine.children().filter(|node| {
         node.is_element()
             && node.tag_name().name() == "Function"
             && node.attribute("Type") == Some("Scene")
     }) {
         let name = element.attribute("Name").unwrap_or_default().trim();
-
-        // Scene names are the stable keys: they are what crosses into Rust, while QLC+'s
-        // numeric Function IDs shift whenever functions are deleted. Enforce the shape at
-        // the boundary so a name can never need escaping or disambiguating downstream.
-        if !is_snake_case(name) {
-            panic!(
-                "scene {name:?} is not snake_case. Scene names are the stable keys the \
-                 daemon knows scenes by, so keep them to [a-z][a-z0-9_]* — rename it in \
-                 QLC+'s Function Manager."
-            );
-        }
-        if scenes.iter().any(|(seen, _)| seen == name) {
+        if scenes.insert(name, element).is_some() {
             panic!(
                 "duplicate scene name {name:?}. QLC+ does not enforce unique Function \
                  names, but the daemon needs them unique — rename one in the Function \
@@ -1296,90 +1341,228 @@ fn parse_scenes(engine: roxmltree::Node, patch: &BTreeMap<u32, Patched>) -> Vec<
                  updates an existing one.)"
             );
         }
+    }
 
-        // A QLC+ channel group is a console-side abstraction — one fader driving several
-        // channels — with no fixture-relative address to resolve through. Refuse it rather
-        // than drop it silently and export a scene that is missing what the operator set.
-        if element.children().any(|node| {
-            node.is_element()
-                && node.tag_name().name() == "ChannelGroupsVal"
-                && node.text().is_some_and(|text| !text.trim().is_empty())
-        }) {
+    let missing: Vec<&str> = prescribed
+        .iter()
+        .copied()
+        .filter(|name| !scenes.contains_key(name))
+        .collect();
+    let extra: Vec<&str> = scenes
+        .keys()
+        .copied()
+        .filter(|name| !prescribed.contains(name))
+        .collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        let mut problems = String::new();
+        for name in &extra {
+            match nearest(name, &missing) {
+                Some(meant) => writeln!(
+                    problems,
+                    "  scene {name:?} is not a preset the show knows — did you mean {meant:?}? \
+                     Rename it in QLC+'s Function Manager."
+                ),
+                None => writeln!(
+                    problems,
+                    "  scene {name:?} is not a preset the show knows. Delete it in QLC+'s \
+                     Function Manager, or add it to the rig's presets."
+                ),
+            }
+            .unwrap();
+        }
+        for name in &missing {
+            writeln!(
+                problems,
+                "  preset {name:?} has no scene. Record it in QLC+ with only the heads' Pan, \
+                 Pan Fine, Tilt and Tilt Fine ticked."
+            )
+            .unwrap();
+        }
+        panic!("the workspace's scenes are not the presets the show is written against:\n{problems}");
+    }
+
+    prescribed
+        .iter()
+        .map(|name| {
+            let values = scene_values(name, scenes[name], patch);
+
+            for &(id, offset) in values.keys() {
+                let fixture = &patch[&id];
+                let positional = aims(fixture)
+                    && ["pan", "tilt"].iter().any(|axis| {
+                        let (coarse, fine) = pair_of(fixture, axis);
+                        offset == coarse || offset == fine
+                    });
+                if !positional {
+                    panic!(
+                        "preset {name:?} sets {:?} on {:?}. A preset holds only the heads' Pan, \
+                         Pan Fine, Tilt and Tilt Fine — untick that channel in QLC+'s Scene \
+                         Editor.",
+                        fixture.resolved[offset].name, fixture.name,
+                    );
+                }
+            }
+
+            let poses = heads
+                .iter()
+                .map(|(id, head)| {
+                    let focus = head.focus.as_ref().expect("aims() checked the focus");
+                    // The same conversion as `pose_of` in `cortex`, so a preset recorded from a
+                    // console and replayed through `aim` lands on the bytes it was saved as.
+                    let degrees = |axis: &str, range_deg: f64| {
+                        let (coarse, fine) = pair_of(head, axis);
+                        let byte = |index: usize| {
+                            *values.get(&(*id, index)).unwrap_or_else(|| {
+                                panic!(
+                                    "preset {name:?} has no {:?} for {:?}. Every preset holds Pan, \
+                                     Pan Fine, Tilt and Tilt Fine for every head — tick it in \
+                                     QLC+'s Scene Editor.",
+                                    head.resolved[index].name, head.name,
+                                )
+                            })
+                        };
+                        let value = (u16::from(byte(coarse)) << 8) | u16::from(byte(fine));
+                        f64::from(value) / 65535.0 * range_deg
+                    };
+                    HeadPose {
+                        field: field_of(&head.name),
+                        pan_deg: degrees("pan", focus.pan_max_deg),
+                        tilt_deg: degrees("tilt", focus.tilt_max_deg),
+                    }
+                })
+                .collect();
+
+            Preset {
+                name: name.to_string(),
+                poses,
+            }
+        })
+        .collect()
+}
+
+/// Every fixture that can be aimed, with its QLC+ ID, in address order: the heads a preset
+/// holds a pose for.
+fn aimable(patch: &BTreeMap<u32, Patched>) -> Vec<(u32, &Patched)> {
+    let mut heads: Vec<(u32, &Patched)> = patch
+        .iter()
+        .filter(|(_, fixture)| aims(fixture))
+        .map(|(id, fixture)| (*id, fixture))
+        .collect();
+    heads.sort_by_key(|(_, head)| head.address);
+    heads
+}
+
+/// A scene's values, keyed by QLC+ fixture ID and channel offset within that fixture's mode.
+fn scene_values(name: &str, element: roxmltree::Node, patch: &BTreeMap<u32, Patched>) -> BTreeMap<(u32, usize), u8> {
+    // A QLC+ channel group is a console-side abstraction — one fader driving several
+    // channels — with no fixture-relative address to resolve through. Refuse it rather
+    // than drop it silently and lose what the operator set.
+    if element.children().any(|node| {
+        node.is_element()
+            && node.tag_name().name() == "ChannelGroupsVal"
+            && node.text().is_some_and(|text| !text.trim().is_empty())
+    }) {
+        panic!(
+            "scene {name:?} uses a QLC+ channel group, which has no DMX address to \
+             resolve through — set the fixture channels directly instead."
+        );
+    }
+
+    // A map de-duplicates repeated channels within a scene, which is serialisation noise:
+    // the last one wins.
+    let mut values = BTreeMap::new();
+    for fixture_val in element
+        .children()
+        .filter(|node| node.is_element() && node.tag_name().name() == "FixtureVal")
+    {
+        let id: u32 = fixture_val
+            .attribute("ID")
+            .unwrap_or_else(|| panic!("scene {name:?} has a <FixtureVal> with no ID"))
+            .parse()
+            .unwrap_or_else(|e| panic!("scene {name:?} has a non-numeric FixtureVal ID: {e}"));
+        let fixture = patch.get(&id).unwrap_or_else(|| {
+            panic!("scene {name:?} references fixture ID {id}, which is not in the patch")
+        });
+
+        let body = fixture_val.text().unwrap_or_default().trim();
+        if body.is_empty() {
+            continue;
+        }
+        let numbers: Vec<u32> = body
+            .split(',')
+            .map(|part| {
+                part.trim().parse().unwrap_or_else(|e| {
+                    panic!("scene {name:?}, fixture {id}: {part:?} is not a number: {e}")
+                })
+            })
+            .collect();
+        if numbers.len() % 2 != 0 {
             panic!(
-                "scene {name:?} uses a QLC+ channel group, which has no DMX address to \
-                 resolve through — set the fixture channels directly instead."
+                "scene {name:?}, fixture {id}: {} channel/value entries, which cannot \
+                 pair up",
+                numbers.len()
             );
         }
 
-        // A BTreeMap both de-duplicates repeated channels within a scene (serialisation
-        // noise, last one wins) and leaves the pairs sorted by slot, which keeps the
-        // generated table stable and readable.
-        let mut values: BTreeMap<u32, u8> = BTreeMap::new();
-
-        for fixture_val in element
-            .children()
-            .filter(|node| node.is_element() && node.tag_name().name() == "FixtureVal")
-        {
-            let id: u32 = fixture_val
-                .attribute("ID")
-                .unwrap_or_else(|| panic!("scene {name:?} has a <FixtureVal> with no ID"))
-                .parse()
-                .unwrap_or_else(|e| panic!("scene {name:?} has a non-numeric FixtureVal ID: {e}"));
-            let fixture = patch.get(&id).unwrap_or_else(|| {
-                panic!("scene {name:?} references fixture ID {id}, which is not in the patch")
-            });
-
-            let body = fixture_val.text().unwrap_or_default().trim();
-            if body.is_empty() {
-                continue;
-            }
-            let numbers: Vec<u32> = body
-                .split(',')
-                .map(|part| {
-                    part.trim().parse().unwrap_or_else(|e| {
-                        panic!("scene {name:?}, fixture {id}: {part:?} is not a number: {e}")
-                    })
-                })
-                .collect();
-            if numbers.len() % 2 != 0 {
+        for pair in numbers.chunks_exact(2) {
+            let (offset, value) = (pair[0], pair[1]);
+            if offset >= fixture.channels {
                 panic!(
-                    "scene {name:?}, fixture {id}: {} channel/value entries, which cannot \
-                     pair up",
-                    numbers.len()
+                    "scene {name:?} sets channel {offset} on fixture {id} {:?}, which \
+                     the patch gives only {} channels — the scene and the patch \
+                     disagree about that fixture's mode",
+                    fixture.name, fixture.channels
                 );
             }
-
-            for pair in numbers.chunks_exact(2) {
-                let (offset, value) = (pair[0], pair[1]);
-                if offset >= fixture.channels {
-                    panic!(
-                        "scene {name:?} sets channel {offset} on fixture {id} {:?}, which \
-                         the patch gives only {} channels — the scene and the patch \
-                         disagree about that fixture's mode",
-                        fixture.name, fixture.channels
-                    );
-                }
-                let value = u8::try_from(value).unwrap_or_else(|_| {
-                    panic!(
-                        "scene {name:?}, fixture {id}, channel {offset}: {value} is not a \
-                         DMX byte"
-                    )
-                });
-                values.insert(fixture.slot(offset), value);
-            }
+            let value = u8::try_from(value).unwrap_or_else(|_| {
+                panic!(
+                    "scene {name:?}, fixture {id}, channel {offset}: {value} is not a \
+                     DMX byte"
+                )
+            });
+            values.insert((id, offset as usize), value);
         }
-
-        scenes.push((name.to_string(), values.into_iter().collect()));
     }
-
-    scenes
+    values
 }
 
-fn is_snake_case(name: &str) -> bool {
-    name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+/// The mode indices of a fixture's 16-bit field `name`, coarse then fine.
+fn pair_of(fixture: &Patched, name: &str) -> (usize, usize) {
+    fixture
+        .fields
+        .iter()
+        .find_map(|field| match field {
+            Field::Pair { coarse, fine, name: field_name } if field_name == name => Some((*coarse, *fine)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{:?} has no 16-bit {name} field", fixture.name))
+}
+
+/// The candidate a scene name is most likely a typo of, if any is close enough to suggest.
+fn nearest<'a>(name: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    let name = name.to_lowercase();
+    candidates
+        .iter()
+        .map(|candidate| (edit_distance(&name, &candidate.to_lowercase()), *candidate))
+        .min()
+        .filter(|(distance, candidate)| *distance <= 2.max(candidate.chars().count() / 3))
+        .map(|(_, candidate)| candidate)
+}
+
+/// Levenshtein distance, by characters.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1).min(row[j] + 1).min(diagonal + usize::from(ca != *cb));
+            diagonal = above;
+        }
+    }
+    row[b.len()]
 }
 
 /// Whether a fixture can be aimed: its definition declares travel, and its mode carries pan
@@ -1528,7 +1711,7 @@ fn write_value_constants(out: &mut String, shape: &Patched) {
 }
 
 /// Renders the fixture table: one named constant per fixture in the QLC+ patch, a struct per
-/// fixture *type* with a named field per channel, and the width of the frame they span.
+/// fixture *type* with a named field per channel, and the e-stop's mask over them.
 ///
 /// Naming each fixture is what makes the workspace the source of truth, because it hands
 /// every direction of drift to the compiler:
@@ -1828,65 +2011,65 @@ fn render_patch(sacn: &Sacn, patch: &BTreeMap<u32, Patched>) -> String {
 
     render_stop(&mut out, &fixtures);
 
-    let top = fixtures
-        .iter()
-        .map(|fixture| fixture.address + fixture.channels)
-        .max()
-        .unwrap_or(0);
-    // The daemon derives the frame width from the channels the fixtures occupy, so this is
-    // not what it sends; it exists for the scene bound below, where a compile-time number is
-    // the only thing an assertion can be written against.
-    writeln!(out, "/// Slots the sACN frame spans: 1 through the last patched slot.").unwrap();
-    writeln!(out, "pub const DMX_SLOTS: usize = {top};").unwrap();
-
     out
 }
 
-/// Renders the scene table, and the one check that spans both halves of a rig.
+/// Renders the presets: a `Preset` struct with a pose per aimable head, one constant per
+/// preset, and a line per preset for the startup log.
 ///
-/// Only the data is generated; the `Scene` type and everything that reads it stay
-/// hand-written and reviewable in `cortex`.
-fn render_scenes(scenes: &[(String, Vec<(u32, u8)>)]) -> String {
+/// The struct is generated rather than shared from `cortex` because its fields are this rig's
+/// heads, so a preset is read as `LOOK_AT_BALL.head_red_leg` and a head that leaves the patch
+/// takes its field with it.
+fn render_presets(heads: &[(u32, &Patched)], presets: &[Preset]) -> String {
     let mut out = String::new();
 
-    writeln!(out, "use cortex::scenes::Scene;").unwrap();
+    if !heads.is_empty() {
+        writeln!(out, "use cortex::moving_head::Pose;").unwrap();
+        writeln!(out).unwrap();
+    }
+    writeln!(out, "/// Where every head points in one preset.").unwrap();
+    writeln!(out, "pub struct Preset {{").unwrap();
+    for (_, head) in heads {
+        writeln!(out, "    /// {}.", head.name).unwrap();
+        writeln!(out, "    pub {}: Pose,", field_of(&head.name)).unwrap();
+    }
+    writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "pub static SCENES: [Scene; {}] = [", scenes.len()).unwrap();
-    for (name, values) in scenes {
-        writeln!(out, "    Scene {{").unwrap();
-        writeln!(out, "        name: \"{name}\",").unwrap();
-        if values.is_empty() {
-            writeln!(out, "        values: &[],").unwrap();
-        } else {
-            writeln!(out, "        values: &[").unwrap();
-            // Six pairs per line, so a typical fixture's channels read as one row.
-            for row in values.chunks(6) {
-                let row: Vec<String> = row
-                    .iter()
-                    .map(|(slot, value)| format!("({slot}, {value}),"))
-                    .collect();
-                writeln!(out, "            {}", row.join(" ")).unwrap();
-            }
-            writeln!(out, "        ],").unwrap();
+
+    for preset in presets {
+        writeln!(out, "/// {:?} in the workspace.", preset.name).unwrap();
+        writeln!(out, "pub const {}: Preset = Preset {{", ident_of(&preset.name)).unwrap();
+        for pose in &preset.poses {
+            writeln!(
+                out,
+                "    {}: Pose::new({:?}, {:?}),",
+                pose.field, pose.pan_deg, pose.tilt_deg
+            )
+            .unwrap();
         }
-        writeln!(out, "    }},").unwrap();
+        writeln!(out, "}};").unwrap();
+        writeln!(out).unwrap();
+    }
+
+    // The poses and not just the names, which are fixed: a re-aimed preset the build never
+    // saw would otherwise log exactly like one it did.
+    writeln!(
+        out,
+        "/// Every preset as the startup log prints it — its name in QLC+ and each head's pose — \
+         in the order the rig prescribes them."
+    )
+    .unwrap();
+    writeln!(out, "pub static {SUMMARIES}: [&str; {}] = [", presets.len()).unwrap();
+    for preset in presets {
+        let poses: Vec<String> = preset
+            .poses
+            .iter()
+            .zip(heads)
+            .map(|(pose, (_, head))| format!("{} {:.1}°/{:.1}°", head.name, pose.pan_deg, pose.tilt_deg))
+            .collect();
+        writeln!(out, "    {:?},", format!("{} — {}", preset.name, poses.join(", "))).unwrap();
     }
     writeln!(out, "];").unwrap();
-    writeln!(out).unwrap();
-
-    let highest = scenes
-        .iter()
-        .flat_map(|(_, values)| values.iter().map(|(slot, _)| *slot))
-        .max()
-        .unwrap_or(0);
-    writeln!(out, "/// Highest slot index any scene above touches.").unwrap();
-    writeln!(out, "const HIGHEST_SLOT: usize = {highest};").unwrap();
-    writeln!(out).unwrap();
-
-    // A scene reaching past the end of the frame the daemon sends would be silently truncated
-    // on the wire. This is the one place a rig's patch and its scenes are checked against each
-    // other, and the compiler does it for free.
-    writeln!(out, "const _: () = assert!(HIGHEST_SLOT < super::patch::DMX_SLOTS);").unwrap();
 
     out
 }

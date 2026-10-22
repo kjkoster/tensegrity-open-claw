@@ -120,6 +120,53 @@ impl OnePole {
     }
 }
 
+/// Picks onsets out of an envelope: its rise from one block to the next, against an adaptive
+/// threshold of that rise's own recent mean and spread, so the bar moves with the music.
+pub struct OnsetDetector {
+    k: f32,
+    min_strength: f32,
+    refractory_s: f32,
+    prev: f32,
+    mean: OnePole,
+    sq: OnePole,
+    since_s: f32,
+}
+
+impl OnsetDetector {
+    /// Fires above the mean plus `k` standard deviations over the last `stats_s`, and above
+    /// `min_strength` regardless, which vetoes digital silence; and no sooner than
+    /// `refractory_s` after the last.
+    pub fn new(stats_s: f32, k: f32, min_strength: f32, refractory_s: f32, block_rate_hz: f32) -> Self {
+        Self {
+            k,
+            min_strength,
+            refractory_s,
+            prev: 0.0,
+            mean: OnePole::new(stats_s, block_rate_hz),
+            sq: OnePole::new(stats_s, block_rate_hz),
+            since_s: f32::MAX,
+        }
+    }
+
+    /// This block's onset strength — the envelope's rise relative to `reference`, the AGC's
+    /// level — and whether it is an onset.
+    pub fn process(&mut self, env: f32, reference: f32, dt: f32) -> (f32, bool) {
+        let strength = ((env - self.prev).max(0.0) / (reference + 1e-6)).min(4.0);
+        self.prev = env;
+        let mean = self.mean.process(strength);
+        let sq = self.sq.process(strength * strength);
+        let std = (sq - mean * mean).max(0.0).sqrt();
+        self.since_s = (self.since_s + dt).min(f32::MAX / 2.0);
+        let fired = strength > mean + self.k * std
+            && strength > self.min_strength
+            && self.since_s >= self.refractory_s;
+        if fired {
+            self.since_s = 0.0;
+        }
+        (strength, fired)
+    }
+}
+
 /// Running-minimum noise floor over a sliding window, implemented as
 /// sub-window minima so it is O(1) per block.
 /// Adaptation is frozen while in MUSIC state.

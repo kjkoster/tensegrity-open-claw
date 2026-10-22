@@ -155,6 +155,15 @@ pub const ONSET_REFRACTORY_S: f32 = 0.09;
 pub const ONSET_DENSITY_WINDOW_S: f32 = 3.0;
 pub const ONSET_DENSITY_FULL_HZ: f32 = 8.0; // onsets/s that read as density 1.0
 
+// ── Ear — kicks ──────────────────────────────────────────────────────────────
+// The onset detector again, on the low band (HPF_HZ..BAND_LOW_MAX_HZ), through its own envelope
+// at the onset envelope's times. The high-pass takes the lowest of a kick's fundamental, so what
+// this hears is its punch; tune on the rig.
+pub const KICK_STATS_S: f32 = 1.5;
+pub const KICK_K: f32 = 2.0;
+pub const KICK_MIN_STRENGTH: f32 = 0.02;
+pub const KICK_REFRACTORY_S: f32 = 0.25; // below a beat at 180 BPM, above a flam
+
 // ── Ear — spectral (slow path) ───────────────────────────────────────────────
 pub const FFT_SIZE: usize = 2048;
 pub const FFT_INTERVAL_S: f32 = 0.25;

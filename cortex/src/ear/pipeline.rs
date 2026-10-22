@@ -2,7 +2,7 @@
 //! silence ↔ music state machine. Runs on the ear's thread,
 //! once per ALSA period. FFT-free; the slow path lives in spectral.rs.
 
-use super::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole};
+use super::dsp::{AgcRef, Biquad, EnvFollower, NoiseFloor, OnePole, OnsetDetector};
 use super::spectral::SpectralProcessor;
 use super::AudioFeatures;
 use crate::clock::now_us;
@@ -31,6 +31,7 @@ pub struct FeaturePipeline {
     env_mid: EnvFollower,
     env_high: EnvFollower,
     env_fast: EnvFollower, // onset detector input, not blunted by display smoothing
+    env_kick: EnvFollower, // the same for the low band: the kick detector's input
     // noise floor and AGC
     floor: NoiseFloor,
     agc: AgcRef,
@@ -44,13 +45,13 @@ pub struct FeaturePipeline {
     rms_mean: OnePole,
     rms_sq: OnePole,
     // onsets
-    prev_env_fast: f32,
-    onset_mean: OnePole,
-    onset_sq: OnePole,
-    since_onset_s: f32,
+    onsets: OnsetDetector,
     onset_count: u64,
     last_onset_strength: f32,
     onset_times: VecDeque<f64>,
+    // kicks: onsets in the low band alone, where hats and offbeats do not reach
+    kicks: OnsetDetector,
+    kick_count: u64,
     // long horizon
     energy_3min: OnePole,
     quiet_seconds: f32,
@@ -84,6 +85,7 @@ impl FeaturePipeline {
             env_mid: EnvFollower::new(cfg::ENV_ATTACK_S, cfg::ENV_RELEASE_S, rate),
             env_high: EnvFollower::new(cfg::ENV_ATTACK_S, cfg::ENV_RELEASE_S, rate),
             env_fast: EnvFollower::new(cfg::ONSET_ENV_ATTACK_S, cfg::ONSET_ENV_RELEASE_S, rate),
+            env_kick: EnvFollower::new(cfg::ONSET_ENV_ATTACK_S, cfg::ONSET_ENV_RELEASE_S, rate),
             floor: NoiseFloor::new(cfg::FLOOR_WINDOW_S, cfg::FLOOR_SUBWINDOWS, block_rate),
             agc: AgcRef::new(cfg::AGC_RISE_S, cfg::AGC_FALL_S, block_rate, cfg::AGC_MIN_REF),
             energy_slow: OnePole::new(cfg::ENERGY_SLOW_S, block_rate),
@@ -93,13 +95,24 @@ impl FeaturePipeline {
             rms_smooth: OnePole::new(cfg::CREST_SMOOTH_S, block_rate),
             rms_mean: OnePole::new(cfg::RMS_VAR_WINDOW_S, block_rate),
             rms_sq: OnePole::new(cfg::RMS_VAR_WINDOW_S, block_rate),
-            prev_env_fast: 0.0,
-            onset_mean: OnePole::new(cfg::ONSET_STATS_S, block_rate),
-            onset_sq: OnePole::new(cfg::ONSET_STATS_S, block_rate),
-            since_onset_s: f32::MAX,
+            onsets: OnsetDetector::new(
+                cfg::ONSET_STATS_S,
+                cfg::ONSET_K,
+                cfg::ONSET_MIN_STRENGTH,
+                cfg::ONSET_REFRACTORY_S,
+                block_rate,
+            ),
             onset_count: 0,
             last_onset_strength: 0.0,
             onset_times: VecDeque::new(),
+            kicks: OnsetDetector::new(
+                cfg::KICK_STATS_S,
+                cfg::KICK_K,
+                cfg::KICK_MIN_STRENGTH,
+                cfg::KICK_REFRACTORY_S,
+                block_rate,
+            ),
+            kick_count: 0,
             energy_3min: OnePole::new(cfg::ENERGY_3MIN_S, block_rate),
             quiet_seconds: 0.0,
             state: State::Silence,
@@ -143,6 +156,7 @@ impl FeaturePipeline {
             self.env_mid.process(mid);
             self.env_high.process(high);
             self.env_fast.process(x);
+            self.env_kick.process(low);
             self.mono.push(x);
         }
         let block_rms = (sum_sq / frames.max(1) as f32).sqrt();
@@ -151,6 +165,7 @@ impl FeaturePipeline {
         let em = self.env_mid.value();
         let eh = self.env_high.value();
         let ef = self.env_fast.value();
+        let ek = self.env_kick.value();
 
         // noise floor (frozen in MUSIC) and AGC (frozen outside MUSIC)
         self.floor.frozen = self.state == State::Music;
@@ -184,20 +199,16 @@ impl FeaturePipeline {
         let rms_var = ((m2 - m * m).max(0.0).sqrt() / (m + EPS)).clamp(0.0, 1.0);
 
         // onsets: rectified derivative of the fast envelope, adaptive threshold
-        let onset_strength = ((ef - self.prev_env_fast).max(0.0) / (agc_ref + EPS)).min(4.0);
-        self.prev_env_fast = ef;
-        let omean = self.onset_mean.process(onset_strength);
-        let osq = self.onset_sq.process(onset_strength * onset_strength);
-        let ostd = (osq - omean * omean).max(0.0).sqrt();
-        self.since_onset_s = (self.since_onset_s + dt).min(f32::MAX / 2.0);
-        if onset_strength > omean + cfg::ONSET_K * ostd
-            && onset_strength > cfg::ONSET_MIN_STRENGTH
-            && self.since_onset_s >= cfg::ONSET_REFRACTORY_S
-        {
+        let (onset_strength, onset) = self.onsets.process(ef, agc_ref, dt);
+        if onset {
             self.onset_count += 1;
             self.last_onset_strength = onset_strength.min(cfg::NORM_HEADROOM);
-            self.since_onset_s = 0.0;
             self.onset_times.push_back(self.clock_s);
+        }
+        // The fast low-band envelope, not `el`: that one's release holds it up through a bass
+        // line, and the next kick would barely rise above it.
+        if self.kicks.process(ek, agc_ref, dt).1 {
+            self.kick_count += 1;
         }
         let horizon = self.clock_s - cfg::ONSET_DENSITY_WINDOW_S as f64;
         while self.onset_times.front().is_some_and(|&t| t < horizon) {
@@ -270,6 +281,7 @@ impl FeaturePipeline {
             onset_count: self.onset_count,
             last_onset_strength: self.last_onset_strength,
             onset_density,
+            kick_count: self.kick_count,
             centroid: spec.centroid,
             spread: spec.spread,
             flatness: spec.flatness,

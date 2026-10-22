@@ -80,12 +80,18 @@ impl SlewRate {
 /// does anyway.
 pub struct Slew {
     pose: Pose,
+    /// Where the head was last sent, for [`Self::landed`].
+    target: Pose,
     rate: SlewRate,
 }
 
 impl Slew {
     pub fn new(start: Pose, rate: SlewRate) -> Self {
-        Self { pose: start, rate }
+        Self {
+            pose: start,
+            target: start,
+            rate,
+        }
     }
 
     /// Where the head points now.
@@ -107,12 +113,41 @@ impl Slew {
         self.rate = rate;
     }
 
-    /// Advances one frame toward `target` and returns where the head now points.
-    pub fn step(&mut self, target: Pose, dt: f64) -> Pose {
+    /// Sends the head toward `target`, which [`Self::step`] then walks it to at the slew's rate.
+    ///
+    /// Kept here rather than passed to every step, so the target has one copy too, and
+    /// [`Self::landed`] judges against the one the head is actually going to.
+    pub fn glide_to(&mut self, target: Pose) {
+        self.target = target;
+    }
+
+    /// Advances one frame toward the target and returns where the head now points.
+    pub fn step(&mut self, dt: f64) -> Pose {
         let step = self.rate.deg_s() * dt;
-        self.pose.pan_deg = approach(self.pose.pan_deg, target.pan_deg, step);
-        self.pose.tilt_deg = approach(self.pose.tilt_deg, target.tilt_deg, step);
+        self.pose.pan_deg = approach(self.pose.pan_deg, self.target.pan_deg, step);
+        self.pose.tilt_deg = approach(self.pose.tilt_deg, self.target.tilt_deg, step);
         self.pose
+    }
+
+    /// Sends the head to `target` in one frame, leaving the travel to its own motors.
+    ///
+    /// For a move whose speed is the head's to choose: a snap meant to be seen as one, or a
+    /// stream of poses already shaped by the caller. Going through here rather than around the
+    /// slew keeps [`Self::pose`] the one copy of where the head was sent.
+    pub fn jump(&mut self, target: Pose) -> Pose {
+        self.target = target;
+        self.pose = target;
+        self.pose
+    }
+
+    /// Whether the head has arrived where it was last sent.
+    ///
+    /// Exact, because [`approach`] lands on the target rather than nearing it. After a
+    /// [`Self::jump`] this is true at once, while the head itself is still travelling: it says
+    /// where the head was sent, and only a glide keeps the head close enough behind that for
+    /// the two to be the same.
+    pub fn landed(&self) -> bool {
+        self.pose == self.target
     }
 }
 

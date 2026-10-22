@@ -10,6 +10,7 @@ pub mod calendar;
 pub mod clock;
 pub mod config;
 pub mod dmx;
+pub mod draw;
 pub mod ear;
 pub mod envelope;
 pub mod estop;
@@ -17,7 +18,6 @@ pub mod latest;
 pub mod moving_head;
 pub mod perlin;
 pub mod qlc_plus;
-pub mod scenes;
 pub mod sparkle;
 pub mod telemetry;
 
@@ -29,7 +29,6 @@ use ear::AudioFeatures;
 use config::FRAME_RATE_HZ;
 use embassy_executor::{Executor, Spawner};
 use qlc_plus::{PatchEntry, Sacn};
-use scenes::Scene;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signal_hook::low_level::signal_name;
@@ -60,8 +59,10 @@ pub struct Rig {
     /// The generated patch, as plain data, so the startup log can name what this binary was
     /// built against — and so the frame width can be derived from it.
     pub patch: &'static [PatchEntry],
-    /// The generated scenes, likewise.
-    pub scenes: &'static [Scene],
+    /// The generated presets, likewise, one line each: its name and every head's pose. Lines
+    /// rather than the presets themselves, because a preset's shape is the rig's own — its
+    /// fields are the rig's heads.
+    pub presets: &'static [&'static str],
     /// The generated stop mask: what the e-stop overrides in the held frame.
     pub stop: &'static [estop::StopOverride],
     /// Whether the e-stop is pressed, asked once per frame. The stop acts on the frame that
@@ -142,7 +143,7 @@ fn installed_ram_kb() -> Option<u64> {
 
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
 ///
-/// The executor lives here rather than in the rig, so a rig binary is its patch, its scenes
+/// The executor lives here rather than in the rig, so a rig binary is its patch, its presets
 /// and its show, and nothing else — `fn main` is one call. The ear always listens, on every
 /// rig: a rig with no use for it simply never reads the features it is handed, and an ear
 /// with nothing listening to it is cheaper than two configurations that can disagree about
@@ -173,9 +174,9 @@ pub fn run(mut rig: Rig) -> ! {
         sacn.universe, sacn.port
     );
 
-    // The patch and scenes the build compiled in. Logged so a running binary can be checked
-    // against the workspace that produced it: a fixture at the wrong address, or an edited
-    // scene missing from these lines, means the build never saw the save.
+    // The patch and presets the build compiled in. Logged so a running binary can be checked
+    // against the workspace that produced it: a fixture at the wrong address, or a preset still
+    // at its old pose, means the build never saw the save.
     eprintln!("{name}: {} fixtures", rig.patch.len());
     for fixture in rig.patch {
         // The slot span, not the channel count: the mode name already carries the count,
@@ -189,9 +190,9 @@ pub fn run(mut rig: Rig) -> ! {
         );
     }
     eprintln!("{name}: {} e-stop overrides", rig.stop.len());
-    eprintln!("{name}: {} scenes", rig.scenes.len());
-    for scene in rig.scenes {
-        eprintln!("{name}:   {} ({} values)", scene.name, scene.values.len());
+    eprintln!("{name}: {} presets", rig.presets.len());
+    for preset in rig.presets {
+        eprintln!("{name}:   {preset}");
     }
 
     // What the brain was built as and against goes under `brain/`, retained, so a subscriber
@@ -201,7 +202,7 @@ pub fn run(mut rig: Rig) -> ! {
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
     publisher.publish("fixtures", rig.patch.len().to_string(), true);
-    publisher.publish("scenes", rig.scenes.len().to_string(), true);
+    publisher.publish("presets", rig.presets.len().to_string(), true);
     publish_system(publisher);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with

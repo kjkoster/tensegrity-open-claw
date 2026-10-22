@@ -6,9 +6,14 @@
 //! the frame loop would come out as a staircase with a stutter. What the brain sends is which
 //! pattern, how bright, and — for the strobe — how long its flashes and gaps are, which is how
 //! the music still reaches it.
+//!
+//! Ball Lighting is the one exception: its fade is drawn here, frame by frame, in Direct. At
+//! five seconds a crossfade the bunching steps it about a percent at a time, which reads as
+//! smooth.
 
+use crate::ball_lighting;
 use crate::patch::{BALL, Ball};
-use crate::show_state::{Cue, ShowState};
+use crate::show_state::{Base, Cue, Look};
 use ball_dmx::STROBE_STEP_MS;
 use cortex::ear::AudioFeatures;
 use std::f64::consts::TAU;
@@ -53,24 +58,33 @@ impl BallShow {
     }
 }
 
-/// The motor and the power LEDs, as the show state asks for them.
+/// The motor and the power LEDs, as the show state asks for them. The motor keeps its beat
+/// whatever the power LEDs do.
 fn fill_look(slots: &mut [u8], cue: Cue, features: &AudioFeatures) {
     let motor = if cue.motor { Ball::MOTOR_ON } else { Ball::MOTOR_OFF };
     BALL.motor.set(slots, motor.center());
 
-    let (pattern, level, flash_ms, gap_ms) = match cue.state {
-        ShowState::Blackout | ShowState::Daylight => (Ball::PATTERN_DIRECT, 0.0, 0.0, 0.0),
-        ShowState::Pulse => (Ball::PATTERN_PULSE, PULSE_LEVEL, 0.0, 0.0),
-        ShowState::Strobe => (
+    let (pattern, white, blue, flash_ms, gap_ms) = match cue.look() {
+        Look::Base(Base::Blackout | Base::Daylight) => (Ball::PATTERN_DIRECT, 0.0, 0.0, 0.0, 0.0),
+        Look::Base(Base::Pulse) => (Ball::PATTERN_PULSE, PULSE_LEVEL, PULSE_LEVEL, 0.0, 0.0),
+        Look::Base(Base::Strobe) => (
             Ball::PATTERN_STROBE,
+            STROBE_LEVEL,
             STROBE_LEVEL,
             mix(STROBE_FLASH_MS, features.energy_high),
             mix(STROBE_GAP_MS, features.energy),
         ),
+        // White at the fade's white end, blue at its colour end: the ball has no other colour.
+        Look::BallLighting => {
+            let colour = ball_lighting::phase(&cue);
+            (Ball::PATTERN_DIRECT, 1.0 - colour, colour, 0.0, 0.0)
+        }
+        // Heart is red, and the ball has no red, so it goes dark.
+        Look::Heart => (Ball::PATTERN_DIRECT, 0.0, 0.0, 0.0, 0.0),
     };
     BALL.pattern.set(slots, pattern.center());
-    BALL.white.set_unit(slots, level);
-    BALL.blue.set_unit(slots, level);
+    BALL.white.set_unit(slots, white);
+    BALL.blue.set_unit(slots, blue);
     BALL.strobe_flash.set(slots, strobe_steps(flash_ms));
     BALL.strobe_gap.set(slots, strobe_steps(gap_ms));
 }
