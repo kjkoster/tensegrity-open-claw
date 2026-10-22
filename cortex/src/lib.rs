@@ -201,8 +201,6 @@ pub fn run(mut rig: Rig) -> ! {
     let publisher = &rig.telemetry;
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
-    publisher.publish("fixtures", rig.patch.len().to_string(), true);
-    publisher.publish("presets", rig.presets.len().to_string(), true);
     publish_system(publisher);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with

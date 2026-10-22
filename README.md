@@ -371,7 +371,7 @@ The rig plays only during the shows listed in `brain/shows.rs`: a `CITY`, and lo
 `(start, stop)` pairs in that city's time, in order. Edit it and deploy. Outside a show the
 rig is black except for the ball's status LED.
 
-During a show the ball's motor runs for one second every four minutes, the first run as the
+During a show the ball's motor runs for one second every two minutes, the first run as the
 show opens. From civil dusk to civil dawn its power LEDs pulse in silence and strobe to the
 music. The heads rest dark on "Look at ball" whenever no incident has them.
 
