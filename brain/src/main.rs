@@ -75,7 +75,7 @@ fn main() {
             let sparkle = modulation.frame(features, dt).powf(1.0 / cfg::GAMMA);
 
             wash_show::fill(slots, cue, sparkle);
-            heads.fill(slots, cue, dt);
+            heads.fill(slots, cue, sparkle, features, dt);
             ball_show.fill(slots, cue, dt);
             face_show::fill(slots, cue);
         }),

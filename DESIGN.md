@@ -243,7 +243,19 @@ changes no show state; it reaches the rig through the washes. In those base stat
 holds its own colour —
 red, green or blue — with white beside it, and one sparkle modulation drives all three, so the
 rig breathes in silence and flashes on the music's onsets in step rather than three ways at
-once. The heads rest dark on the ball.
+once. The heads park dark at heaven in blackout and daylight. At dusk they light the ball in
+their legs' colours against the modulation — brightest, at a shallow 35%, when the washes are
+darkest — so when the rig goes dark the ball lights up instead.
+
+**The dots dance rather than jump.** At dusk each head's dot wanders over the ball on a
+smooth path of its own, its pace and reach set by how much music there is and each beat
+surging it along. A head needs a tenth of a second or more to reach a new point, so a dot sent
+to a new place on every beat would always land after it; a continuous path the beats push along
+never shows that lag. The path is worked out as angles around the ball's centre and turned into
+pan and tilt for the sideways mounting: tilt moves the dot one for one, while pan, turning the
+beam around an axis the ball sits only a little way off, moves it by the sine of that angle and
+is scaled up to match. That angle is read from each head's preset, with the middle of the tilt
+range taken as the axis.
 
 **Incidents are show states with a schedule.** After dusk, every half hour or so, an incident
 — Searchlights or Ball Lighting — takes the place of dusk for a few minutes. Making them
@@ -263,8 +275,8 @@ every incident there is.
 **Only the heads fade.** Washes and ball switch looks in one frame at both ends of an
 incident. The heads light over a second at its start and glide, lit, to its preset at the
 slowest smooth rate: a beam on the move invites curiosity, so the move is part of the look
-rather than something to hide. They fade out over the incident's last seconds and glide back
-dark, since the base states keep them dark. A snap is left to the head's own motors and stays
+rather than something to hide. They fade out over the incident's last seconds, and dusk
+lights them again over a second as they return to the ball. A snap is left to the head's own motors and stays
 lit. Searchlights waits until every head has landed its glide to heaven before its first
 snap, so the glide is seen whole.
 

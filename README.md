@@ -375,8 +375,18 @@ The rig plays only during the shows listed in `brain/shows.rs`: a `CITY`, and lo
 rig is black except for the ball's status LED.
 
 During a show the ball's motor runs for one second every two minutes, the first run as the
-show opens. From civil dusk to civil dawn its power LEDs pulse. The heads rest dark on "Look at
-ball" whenever no incident has them.
+show opens. From civil dusk to civil dawn its power LEDs pulse.
+
+The heads park dark on "Look at heaven" in blackout and daylight. At dusk they turn to "Look at
+ball" and light it, each in its leg's colour, against the music: at most 35% when the washes
+are at their darkest, dipping as they flash, and breathing opposite them in silence.
+`DUSK_BALL_LEVEL` in `brain/src/head_show.rs` sets that 35%.
+
+Once on the ball, each head's dot dances over its surface on a smooth path of its own, so the
+three never move in step. In silence it drifts slowly within half its range; as the music comes
+in it speeds up and widens to all of it, and each beat surges it along the path. The range is
+`DANCE_RADIUS_DEG` (6°, about 25 cm on the ball at 2–2.5 m); the dots may now and then slip
+past the edge. The `DANCE_*` constants beside it set the pace and the surge.
 
 The build looks the city up, finds its zone, and works out every show's instants and dark
 stretches, all offline. It fails on:
@@ -419,7 +429,7 @@ After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes t
 minutes before dawn or the show's stop. Each is picked at random from both.
 
 At an incident's start the heads light up and glide, lit, to its preset; over its last five
-seconds their light falls away, and they glide back dark to the ball. Washes and ball switch
+seconds their light falls away, and they return to the dusk look on the ball. Washes and ball switch
 at the start and the end. Searchlights starts snapping a few seconds after all three heads
 have reached "Look at heaven".
 
