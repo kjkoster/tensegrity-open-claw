@@ -123,18 +123,6 @@
    <FixtureVal ID="9">0,184,1,0,2,15,3,0</FixtureVal>
    <FixtureVal ID="10">0,184,1,0,2,15,3,0</FixtureVal>
   </Function>
-  <Function ID="4" Type="Scene" Name="Look at centre">
-   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="0">0,128,1,0,2,200,3,0</FixtureVal>
-   <FixtureVal ID="9">0,128,1,0,2,200,3,0</FixtureVal>
-   <FixtureVal ID="10">0,128,1,0,2,200,3,0</FixtureVal>
-  </Function>
-  <Function ID="5" Type="Scene" Name="Look at centre wide">
-   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
-   <FixtureVal ID="0">0,128,1,0,2,215,3,0</FixtureVal>
-   <FixtureVal ID="9">0,128,1,0,2,215,3,0</FixtureVal>
-   <FixtureVal ID="10">0,128,1,0,2,215,3,0</FixtureVal>
-  </Function>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>
    <ChannelStyle>0</ChannelStyle>

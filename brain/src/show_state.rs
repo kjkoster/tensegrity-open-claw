@@ -6,17 +6,15 @@
 //! | from             | when                   | to                                        |
 //! |------------------|------------------------|-------------------------------------------|
 //! | any              | test mode is on        | test mode's show state; the left button steps it |
-//! | blackout         | a show starts          | daylight, or pulse or strobe if it is dark |
-//! | daylight         | civil dusk             | pulse or strobe                           |
-//! | pulse or strobe  | an incident starts     | that incident                             |
-//! | an incident      | its scheduled end      | pulse or strobe                           |
-//! | pulse            | music starts           | strobe                                    |
-//! | strobe           | music stops            | pulse                                     |
+//! | blackout         | a show starts          | daylight, or dusk if it is dark           |
+//! | daylight         | civil dusk             | dusk                                      |
+//! | dusk             | an incident starts     | that incident                             |
+//! | an incident      | its scheduled end      | dusk                                      |
 //! | any but blackout | the show ends          | blackout                                  |
 //!
-//! Pulse, strobe, daylight and blackout are the base states, chosen by the calendar and the
-//! room. An incident is chosen by the schedule, and only in place of pulse or strobe; it
-//! carries on unchanged when the music starts or stops.
+//! Blackout, daylight and dusk are the base states, chosen by the calendar and the sun. An
+//! incident is chosen by the schedule, and only in place of dusk. The music changes none of
+//! them: it reaches the rig through the washes' modulation, in every state.
 //!
 //! The e-stop is not among them. It is a rig state, in the frame loop's rig state machine, a
 //! layer above this one, and the show runs on underneath it unaware.
@@ -28,7 +26,6 @@ use crate::face::FaceState;
 use crate::schedule::{self, Scheduled};
 use crate::test_mode::TestMode;
 use cortex::calendar::{Calendar, Show, Span};
-use cortex::ear::AudioFeatures;
 use cortex::telemetry::Publisher;
 
 /// The motor runs this long, then rests, on a beat counted from the start of the show, so the
@@ -43,28 +40,24 @@ const MOTOR_START_GRACE_S: f64 = 0.1;
 /// sleep, a wake, and a margin, so it is up when the show starts.
 const BALL_WAKE_AHEAD_S: f64 = 10.0 * 60.0;
 
-/// The show states the calendar and the room choose between.
+/// The show states the calendar and the sun choose between.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Base {
     /// No show: dark but for the ball's status LED, and the motor still.
     Blackout,
     /// A show, with the sun up: the motor on its beat, and the ball's power LEDs dark.
     Daylight,
-    /// A show after dusk, in silence: the motor, and the power LEDs pulsing.
-    Pulse,
-    /// A show after dusk, with music: the motor, and the power LEDs strobing to it.
-    Strobe,
+    /// A show after dusk: the motor, and the power LEDs pulsing.
+    Dusk,
 }
 
 /// A few minutes of something else, every half hour or so after dusk.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Incident {
-    /// One head at a time snaps to a random point in its patch of sky, in its leg's colour.
+    /// One head at a time snaps to a random point in its patch of sky, white.
     Searchlights,
     /// Heads, washes and ball fade together between white and each leg's colour.
     BallLighting,
-    /// All red, beating a lub-dub, the heads breathing out from the centre with it.
-    Heart,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -79,12 +72,10 @@ impl ShowState {
     pub fn next(self) -> ShowState {
         match self {
             ShowState::Base(Base::Blackout) => ShowState::Base(Base::Daylight),
-            ShowState::Base(Base::Daylight) => ShowState::Base(Base::Pulse),
-            ShowState::Base(Base::Pulse) => ShowState::Base(Base::Strobe),
-            ShowState::Base(Base::Strobe) => ShowState::Incident(Incident::Searchlights),
+            ShowState::Base(Base::Daylight) => ShowState::Base(Base::Dusk),
+            ShowState::Base(Base::Dusk) => ShowState::Incident(Incident::Searchlights),
             ShowState::Incident(Incident::Searchlights) => ShowState::Incident(Incident::BallLighting),
-            ShowState::Incident(Incident::BallLighting) => ShowState::Incident(Incident::Heart),
-            ShowState::Incident(Incident::Heart) => ShowState::Base(Base::Blackout),
+            ShowState::Incident(Incident::BallLighting) => ShowState::Base(Base::Blackout),
         }
     }
 
@@ -93,11 +84,9 @@ impl ShowState {
         match self {
             ShowState::Base(Base::Blackout) => "blackout",
             ShowState::Base(Base::Daylight) => "daylight",
-            ShowState::Base(Base::Pulse) => "pulse",
-            ShowState::Base(Base::Strobe) => "strobe",
+            ShowState::Base(Base::Dusk) => "dusk",
             ShowState::Incident(Incident::Searchlights) => "searchlights",
             ShowState::Incident(Incident::BallLighting) => "ball_lighting",
-            ShowState::Incident(Incident::Heart) => "heart",
         }
     }
 }
@@ -108,16 +97,15 @@ impl ShowState {
 pub enum Look {
     Base(Base),
     BallLighting,
-    Heart,
 }
 
 /// What the show does this frame.
 #[derive(Clone, Copy)]
 pub struct Cue {
     pub state: ShowState,
-    /// What the calendar and the room chose this frame, which an incident that runs the base
-    /// show underneath it wears. Under test mode it is pulse or strobe by the room, as if it
-    /// were dark, so an incident tested by day shows its night look.
+    /// What the calendar and the sun chose this frame, which an incident that runs the base
+    /// show underneath it wears. Under test mode it is dusk, as if it were dark, so an incident
+    /// tested by day shows its night look.
     pub base: Base,
     /// Whether this is the state's first frame.
     pub entering: bool,
@@ -144,7 +132,6 @@ impl Cue {
             ShowState::Base(base) => Look::Base(base),
             ShowState::Incident(Incident::Searchlights) => Look::Base(self.base),
             ShowState::Incident(Incident::BallLighting) => Look::BallLighting,
-            ShowState::Incident(Incident::Heart) => Look::Heart,
         }
     }
 }
@@ -176,9 +163,8 @@ impl Director {
         }
     }
 
-    /// The cue for the moment `now`, in Unix seconds, given what the room sounds like and
-    /// what the door's buttons say.
-    pub fn cue(&mut self, now: f64, features: &AudioFeatures, face: &FaceState) -> Cue {
+    /// The cue for the moment `now`, in Unix seconds, given what the door's buttons say.
+    pub fn cue(&mut self, now: f64, face: &FaceState) -> Cue {
         let show = self.calendar.current(now);
         let stretch = show.and_then(|show| show.dark_stretch(now));
         if let Some(stretch) = stretch {
@@ -190,17 +176,15 @@ impl Director {
         let (state, base, scheduled, motor, testing, sleep) = match self.test.frame(current, face) {
             Some(manual) => {
                 self.running = false;
-                let base = if features.hears_music() { Base::Strobe } else { Base::Pulse };
-                (manual.state, base, None, manual.motor, true, false)
+                (manual.state, Base::Dusk, None, manual.motor, true, false)
             }
             None => {
                 let base = match show {
                     None => Base::Blackout,
                     Some(_) if stretch.is_none() => Base::Daylight,
-                    Some(_) if features.hears_music() => Base::Strobe,
-                    Some(_) => Base::Pulse,
+                    Some(_) => Base::Dusk,
                 };
-                // Pulse and strobe are exactly the base states a dark stretch gives.
+                // Dusk is exactly the base state a dark stretch gives.
                 let scheduled = stretch.and_then(|stretch| schedule::running(stretch, now));
                 let state = scheduled.map_or(ShowState::Base(base), |s| ShowState::Incident(s.incident));
                 self.running = show.is_some_and(|show| self.on_beat(show, now));
@@ -254,11 +238,10 @@ impl Director {
         self.announced = Some(stretch.start.unix);
         let plan: Vec<Scheduled> = schedule::plan(stretch).collect();
         eprintln!(
-            "show: dark {} → {}, {} incidents{}",
+            "show: dark {} → {}, {} incidents",
             stretch.start.time,
             stretch.stop.time,
             plan.len(),
-            if schedule::ENABLED_INCIDENTS.is_empty() { " (none enabled)" } else { "" },
         );
         // Offsets from the stretch's start, which is dusk or the show's start, whichever is
         // later.

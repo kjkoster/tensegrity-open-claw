@@ -5,7 +5,6 @@
 //! incidents that have washes of their own replace that outright, at the state change.
 
 use crate::ball_lighting;
-use crate::heart;
 use crate::legs::{Colour, LEGS, paint_wash};
 use crate::show_state::{Base, Cue, Look};
 
@@ -19,9 +18,8 @@ const WHITE_LEVEL: f64 = 0.5;
 const DAYLIGHT_FLOOR: f64 = 0.35;
 const NIGHT_FLOOR: f64 = 0.20;
 
-/// Fills the washes for this frame. `sparkle` is the modulation's level, and `beat` the height
-/// of Heart's lub-dub.
-pub fn fill(slots: &mut [u8], cue: Cue, sparkle: f64, beat: f64) {
+/// Fills the washes for this frame. `sparkle` is the modulation's level.
+pub fn fill(slots: &mut [u8], cue: Cue, sparkle: f64) {
     for leg in &LEGS {
         match cue.look() {
             Look::Base(Base::Blackout) => paint_wash(&leg.wash, slots, &[]),
@@ -43,7 +41,6 @@ pub fn fill(slots: &mut [u8], cue: Cue, sparkle: f64, beat: f64) {
                 let colour = ball_lighting::phase(&cue);
                 paint_wash(&leg.wash, slots, &[(leg.colour, colour), (Colour::White, 1.0 - colour)]);
             }
-            Look::Heart => paint_wash(&leg.wash, slots, &[(Colour::Red, heart::level(beat))]),
         }
     }
 }

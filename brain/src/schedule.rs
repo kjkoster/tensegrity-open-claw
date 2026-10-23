@@ -15,10 +15,8 @@ use crate::show_state::Incident;
 use cortex::calendar::Span;
 use cortex::draw::Draw;
 
-/// The incidents the schedule may pick. Empty means the base show all night: an incident
-/// joins once it has been seen on the rig, and stays in the code but out of the show until
-/// then.
-pub const ENABLED_INCIDENTS: &[Incident] = &[Incident::Searchlights, Incident::BallLighting];
+/// The incidents the schedule picks from: every one there is.
+const INCIDENTS: [Incident; 2] = [Incident::Searchlights, Incident::BallLighting];
 
 /// From dusk, or from the end of the last incident, to the start of the next.
 const GAP_S: (f64, f64) = (30.0 * 60.0, 45.0 * 60.0);
@@ -67,15 +65,12 @@ impl Iterator for Plan {
 
     fn next(&mut self) -> Option<Scheduled> {
         let from = self.from?;
-        if ENABLED_INCIDENTS.is_empty() {
-            return None;
-        }
-        // The times are drawn before the pick, so enabling another incident changes which
+        // The times are drawn before the pick, so adding or removing an incident changes which
         // ones run but not when.
         let mut draw = Draw::new(SEED, &[self.stretch.start.unix, self.number]);
         let start = from + draw.between(GAP_S.0, GAP_S.1);
         let end = start + draw.between(DURATION_S.0, DURATION_S.1);
-        let incident = ENABLED_INCIDENTS[draw.index(ENABLED_INCIDENTS.len())];
+        let incident = INCIDENTS[draw.index(INCIDENTS.len())];
         if end > self.stretch.stop.unix as f64 - END_MARGIN_S {
             self.from = None;
             return None;

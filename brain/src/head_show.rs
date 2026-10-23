@@ -7,7 +7,6 @@
 //! incident's last seconds. Looks elsewhere switch in one frame; only the heads fade.
 
 use crate::ball_lighting;
-use crate::heart;
 use crate::legs::{Colour, LEGS, paint_head};
 use crate::patch::PoseidonLaserBeamXs;
 use crate::presets::{self, Preset};
@@ -54,9 +53,8 @@ impl HeadShow {
         }
     }
 
-    /// Fills the heads' channels for this frame, `dt` seconds after the last, with `beat` the
-    /// height of Heart's lub-dub.
-    pub fn fill(&mut self, slots: &mut [u8], cue: Cue, beat: f64, dt: f64) {
+    /// Fills the heads' channels for this frame, `dt` seconds after the last.
+    pub fn fill(&mut self, slots: &mut [u8], cue: Cue, dt: f64) {
         if cue.entering {
             self.enter(cue);
         }
@@ -67,32 +65,17 @@ impl HeadShow {
         let rise = (cue.state_elapsed / LIGHT_RISE_S).clamp(0.0, 1.0);
         let fall = cue.state_remaining.map_or(1.0, |remaining| (remaining / LIGHT_FALL_S).clamp(0.0, 1.0));
         for (head, leg) in self.heads.iter_mut().zip(&LEGS) {
-            match (cue.state, head.arrived) {
-                // Once arrived, Heart's pose follows the beat: shaped already, so it goes out as
-                // it is rather than through the glide's speed limit.
-                (ShowState::Incident(Incident::Heart), true) => {
-                    let centre = (leg.pose)(&presets::LOOK_AT_CENTRE);
-                    let wide = (leg.pose)(&presets::LOOK_AT_CENTRE_WIDE);
-                    head.slew.jump(Pose::new(
-                        mix(centre.pan_deg, wide.pan_deg, beat),
-                        mix(centre.tilt_deg, wide.tilt_deg, beat),
-                    ));
-                }
-                _ => {
-                    head.slew.step(dt);
-                }
-            }
+            head.slew.step(dt);
             head.arrived |= head.slew.landed();
 
             let (colour, level) = match cue.state {
                 ShowState::Base(_) => (Colour::White, 0.0),
-                ShowState::Incident(Incident::Searchlights) => (leg.colour, 1.0),
+                ShowState::Incident(Incident::Searchlights) => (Colour::White, 1.0),
                 ShowState::Incident(Incident::BallLighting) => {
                     // The wheel steps where the washes and the ball are halfway.
                     let colour = if ball_lighting::phase(&cue) < 0.5 { Colour::White } else { leg.colour };
                     (colour, 1.0)
                 }
-                ShowState::Incident(Incident::Heart) => (Colour::Red, heart::level(beat)),
             };
             write(&leg.head, slots, head.slew.pose(), colour, level * rise * fall);
         }
@@ -103,7 +86,6 @@ impl HeadShow {
         let preset: &Preset = match cue.state {
             ShowState::Base(_) | ShowState::Incident(Incident::BallLighting) => &presets::LOOK_AT_BALL,
             ShowState::Incident(Incident::Searchlights) => &presets::LOOK_AT_HEAVEN,
-            ShowState::Incident(Incident::Heart) => &presets::LOOK_AT_CENTRE,
         };
         for (head, leg) in self.heads.iter_mut().zip(&LEGS) {
             head.slew.glide_to((leg.pose)(preset));

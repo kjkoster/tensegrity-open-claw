@@ -95,10 +95,6 @@ pub const DEVICE_RETRY_MAX_S: u64 = 30;
 pub const HPF_HZ: f32 = 90.0;
 pub const FILTER_Q: f32 = 0.707;
 
-// ── Ear — band split ─────────────────────────────────────────────────────────
-pub const BAND_LOW_MAX_HZ: f32 = 250.0; // the kick detector's band, above the HPF
-pub const BAND_HIGH_MIN_HZ: f32 = 4_000.0; // the ball's strobe flash follows this band
-
 // ── Ear — envelope followers ─────────────────────────────────────────────────
 pub const ENV_ATTACK_S: f32 = 0.010; // ≤ 15 ms keeps lights tight on hits
 pub const ENV_RELEASE_S: f32 = 0.200;
@@ -121,15 +117,6 @@ pub const ONSET_STATS_S: f32 = 1.5; // history window for the adaptive threshold
 pub const ONSET_K: f32 = 2.0; // fire above mean + k·std
 pub const ONSET_MIN_STRENGTH: f32 = 0.02; // absolute veto against digital silence
 pub const ONSET_REFRACTORY_S: f32 = 0.09;
-
-// ── Ear — kicks ──────────────────────────────────────────────────────────────
-// The onset detector again, on the low band (HPF_HZ..BAND_LOW_MAX_HZ), through its own envelope
-// at the onset envelope's times. The high-pass takes the lowest of a kick's fundamental, so what
-// this hears is its punch; tune on the rig.
-pub const KICK_STATS_S: f32 = 1.5;
-pub const KICK_K: f32 = 2.0;
-pub const KICK_MIN_STRENGTH: f32 = 0.02;
-pub const KICK_REFRACTORY_S: f32 = 0.25; // below a beat at 180 BPM, above a flam
 
 // ── Ear — published features ─────────────────────────────────────────────────
 pub const STALE_US: u64 = 250_000; // older snapshots read as silence

@@ -194,8 +194,8 @@ The brain runs **two state machines, layered**, and keeps their states apart by 
 - The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes
   out. Its machine is in `cortex`'s frame loop, after the arbitration, and it is published on
   `brain/state/rig`.
-- The **show state** — the base states blackout, daylight, pulse and strobe, and the incidents
-  searchlights, ball lighting and heart — says what the show asks for. Its
+- The **show state** — the base states blackout, daylight and dusk, and the incidents
+  searchlights and ball lighting — says what the show asks for. Its
   machine is the brain's Director, with test mode as one of its rules, and it is published on
   `brain/state/show`, with test mode on `brain/state/testmode`.
 
@@ -238,15 +238,16 @@ chosen each frame by the show state machine: test mode first, then the incident 
 then the calendar. Outside a show the show state is blackout: black but for the ball's status
 LED, which keeps breathing so a ball that hears the rig can be told apart from one that does
 not. Inside one, the ball's motor runs on a beat counted from the show's start; until civil
-dusk the show state is daylight, and after it pulse or strobe, the ball's power LEDs pulsing
-in silence and strobing with the music. In those base states each wash holds its own colour —
+dusk the show state is daylight, and after it dusk, the ball's power LEDs pulsing. The music
+changes no show state; it reaches the rig through the washes. In those base states each wash
+holds its own colour —
 red, green or blue — with white beside it, and one sparkle modulation drives all three, so the
 rig breathes in silence and flashes on the music's onsets in step rather than three ways at
 once. The heads rest dark on the ball.
 
 **Incidents are show states with a schedule.** After dusk, every half hour or so, an incident
-— Searchlights, Ball Lighting or Heart — takes the place of pulse or strobe for a few minutes.
-Making them show states rather than a modulation inside pulse and strobe means every consumer
+— Searchlights or Ball Lighting — takes the place of dusk for a few minutes. Making them
+show states rather than a modulation inside dusk means every consumer
 matches them exhaustively, test mode reaches them by stepping, and `brain/state/show` says
 which is running; an incident that runs the base show underneath it (Searchlights' washes and
 ball) reads the base state the calendar chose, which the cue carries beside the state.
@@ -254,11 +255,10 @@ ball) reads the base state the calendar chose, which the cue carries beside the 
 The schedule runs per dark stretch and is drawn, not stored: every draw is a pure function of
 a seed, the stretch's start and the incident's number, so the director recomputes the night
 each frame and a restart lands back in it. The draws are uniform rather than taken from the
-noise fields, whose values cluster. Times are drawn before the pick, so enabling another
+noise fields, whose values cluster. Times are drawn before the pick, so adding or removing an
 incident changes which run but not when. An incident starts only if it ends a margin before
-the dark stretch does, which covers dawn and the show's stop with one rule. Which incidents
-may run is a guard in the rig crate, which lists only the incidents seen on the rig, because
-an incident nobody has seen there must stay in the code but out of the show.
+the dark stretch does, which covers dawn and the show's stop with one rule. The pick is from
+every incident there is.
 
 **Only the heads fade.** Washes and ball switch looks in one frame at both ends of an
 incident. The heads light over a second at its start and glide, lit, to its preset at the
@@ -266,14 +266,7 @@ slowest smooth rate: a beam on the move invites curiosity, so the move is part o
 rather than something to hide. They fade out over the incident's last seconds and glide back
 dark, since the base states keep them dark. A snap is left to the head's own motors and stays
 lit. Searchlights waits until every head has landed its glide to heaven before its first
-snap, so the glide is seen whole; Heart's heads start breathing once they have landed on
-the centre.
-
-**Heart is never slower than 60 BPM.** It beats on the first kick after a refractory, or at
-the longest gap with no kick, so it locks to the kick where one falls in that window and beats
-once a second in silence, between kicks and without the ear. The kick is the ear's onset
-detector run again on the low band, because the broadband onsets count hats and offbeats. Its
-lub-dub has one fixed, soft shape; only the gap between beats moves.
+snap, so the glide is seen whole.
 
 **All of the time work happens at build time.** The table names a city and lists local
 start/stop pairs; the build turns that into coordinates, a zone, UTC instants with their
@@ -294,10 +287,9 @@ decision corrects itself when NTP steps the clock.
 
 **The ball draws its own waveforms.** At 40 Hz a frame is 25 ms, longer than the pulse's
 hold, and multicast over WiFi arrives bunched. So the brain sends a pattern and its
-parameters, and the ball renders them once per period of its 500 Hz PWM. The brain still
-modulates the strobe live, through the flash and gap lengths. Those lengths are a unit a
-`.qxf` cannot express, so it lives in `ball-dmx`, the one crate both sides read it from.
-Everything the `.qxf` can express — which channel sits where, and the bands of the motor and
+parameters, and the ball renders them once per period of its 500 Hz PWM. The firmware's
+strobe takes its flash and gap lengths in a unit a `.qxf` cannot express, so that unit lives
+in `ball-dmx`; the show does not use the strobe. Everything the `.qxf` can express — which channel sits where, and the bands of the motor and
 the pattern — the firmware's build reads out of the definition, as §2.3 asks.
 
 Ball Lighting is the one exception: its fade is drawn by the brain, per frame, in Direct. At
@@ -308,8 +300,8 @@ smooth; a fast waveform would not.
 dusk, for silence, or for a laptop on the network, so the face's two buttons can take the
 show over: a two-second chord toggles test mode, and the buttons then step through every show
 state, incidents included, and run the motor for as long as one is held. It ignores the
-incident guard, so an incident is seen on the rig before it is enabled, and under it an
-incident's base show is pulse or strobe by the room, so a test by day shows the night look. A step is counted on release, which is what tells a
+incident schedule, and under it an incident's base show is dusk, so a test by day shows the
+night look. A step is counted on release, which is what tells a
 lone press from half of a chord. The motor runs only when asked, so stepping show states cannot start it by
 surprise, and test mode ends itself after fifteen quiet minutes, because a rig left in it
 would ignore the calendar unattended.
@@ -441,23 +433,11 @@ Prices are indicative only and must be verified at purchase.
 ### 4.3 Show times, the ball show and the face
 
 The design is §2.6 and §2.7. Written but not yet run on the rig: the calendar, the show states,
-test mode, the face as a fixture with its PWM lamps and its `FaceState`, the ball's pulse and
-strobe, and the brain's `state/rig`, `state/show` and `state/testmode` topics.
+test mode, the face as a fixture with its PWM lamps and its `FaceState`, the ball's pulse,
+and the brain's `state/rig`, `state/show` and `state/testmode` topics.
 
-Also written but not yet built or run: the incidents, their schedule and guard, the heads'
-baseline, the presets as a prescribed set, and the ear's kick onset. The six presets in the
-workspace are rough placeholders, and the kick detector's thresholds are untuned.
-
-1. **Flash-rate cap.** The strobe's flash and gap ranges reach 12.5 Hz, inside the 3–30 Hz
-   band that can set off photosensitive seizures. Settle whether the gap needs a floor that
-   keeps the strobe below 3 Hz; the ranges carry a `TODO` until then. Heart is soft-edged and
-   lazy — a lub-dub at most every 0.8 s — but when lub-dubs come under 0.88 s apart a
-   one-second window can hold four peaks, over the common guideline of three flashes a
-   second; accepted.
-2. **Aim the presets** on the rig and save.
-3. **Tune the kick** on real music: what fires, what is missed, and whether the high-pass
-   leaves enough of the kick to hear.
-4. **Enable each incident** once it has been seen in test mode.
+Searchlights and Ball Lighting, their schedule, the heads' baseline and the four presets have
+been seen on the rig and approved for the show.
 
 ### 4.4 The ball sleeps outside shows
 

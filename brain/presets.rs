@@ -13,8 +13,4 @@ const PRESETS: &[&str] = &[
     // Searchlights snaps to random points in the box between them.
     "Sky corner A",
     "Sky corner B",
-    // Three spots tight around the centre of the circle, and the same spots pulled out toward
-    // their own legs: Heart's contracted and expanded poses.
-    "Look at centre",
-    "Look at centre wide",
 ];

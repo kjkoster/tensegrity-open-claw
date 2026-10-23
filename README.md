@@ -258,7 +258,7 @@ The cargo workspace is five crates:
 | `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
 | `brain/` | the claw: `claw.qxw`'s patch, its show times, and the show |
 | `rig-mqtt/` | the MQTT conventions the brain and the ball share |
-| `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, shared by the brain and the ball |
+| `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, read by the ball firmware |
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
 `main.rs` includes the generated patch and calendar and writes the show.
@@ -310,8 +310,8 @@ is a pose. Note `<Address>` in the file is **0-based**: DMX address 1 on the wir
 `<Address>0</Address>`.
 
 **The presets are a prescribed set.** `brain/presets.rs` lists the names the show is written
-against — "Look at ball", "Look at heaven", "Sky corner A", "Sky corner B", "Look at centre",
-"Look at centre wide" — and the workspace's scenes must be exactly that set. A name becomes its
+against — "Look at ball", "Look at heaven", "Sky corner A" and "Sky corner B" — and the
+workspace's scenes must be exactly that set. A name becomes its
 constant the way a fixture name does: "Look at ball" → `LOOK_AT_BALL`.
 
 **Why channels are named, not numbered.** Because they become *named fields* rather than
@@ -358,7 +358,7 @@ was built from:
 brain: 8 fixtures
 brain:   Wash red leg @ 11–14 — CLF Yara, 4 Channel
 brain: 32 e-stop overrides
-brain: 6 presets
+brain: 4 presets
 brain:   Look at ball — Head red leg 270.0°/119.5°, Head green leg 270.0°/119.5°, Head blue leg 270.0°/119.5°
 ```
 
@@ -375,8 +375,8 @@ The rig plays only during the shows listed in `brain/shows.rs`: a `CITY`, and lo
 rig is black except for the ball's status LED.
 
 During a show the ball's motor runs for one second every two minutes, the first run as the
-show opens. From civil dusk to civil dawn its power LEDs pulse in silence and strobe to the
-music. The heads rest dark on "Look at ball" whenever no incident has them.
+show opens. From civil dusk to civil dawn its power LEDs pulse. The heads rest dark on "Look at
+ball" whenever no incident has them.
 
 The build looks the city up, finds its zone, and works out every show's instants and dark
 stretches, all offline. It fails on:
@@ -406,7 +406,7 @@ The brain publishes its state under `brain/state/`, retained, on every change:
 | topic | values |
 |---|---|
 | `brain/state/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
-| `brain/state/show` | `blackout`, `daylight`, `pulse`, `strobe`, `searchlights`, `ball_lighting` or `heart` |
+| `brain/state/show` | `blackout`, `daylight`, `dusk`, `searchlights` or `ball_lighting` |
 | `brain/state/testmode` | whether test mode is on |
 
 The log has a `rig: …` line for each change of the rig state, and a `show: …` or
@@ -415,10 +415,8 @@ The log has a `rig: …` line for each change of the rig state, and a `show: …
 ### Incidents
 
 After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes to an
-**incident** — Searchlights, Ball Lighting or Heart — and then return. None ends later than
-20 minutes before dawn or the show's stop. Which ones may run is `ENABLED_INCIDENTS` in
-`brain/src/schedule.rs`: today Searchlights and Ball Lighting, with Heart left out. Add an
-incident to it only once you have seen it on the rig in test mode, and deploy.
+**incident** — Searchlights or Ball Lighting — and then return. None ends later than 20
+minutes before dawn or the show's stop. Each is picked at random from both.
 
 At an incident's start the heads light up and glide, lit, to its preset; over its last five
 seconds their light falls away, and they glide back dark to the ball. Washes and ball switch
@@ -427,27 +425,22 @@ have reached "Look at heaven".
 
 | incident | heads | washes | ball |
 |---|---|---|---|
-| Searchlights | each in its leg's colour, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
+| Searchlights | white, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
 | Ball Lighting | on "Look at ball"; white, then each leg's colour, then back, every ten seconds | the same fade | white LED to blue LED and back |
-| Heart | red, breathing between "Look at centre" and "Look at centre wide" | red | dark |
-
-Heart beats a lub-dub on the kick drum, never slower than 60 BPM: in silence, between kicks
-and without the ear it beats once a second.
 
 **Confirming it landed.** At the start of each dark stretch, and at startup inside one, the
 log prints the stretch's whole schedule:
 
 ```
 show: dark 19:08 → 22:00, 2 incidents
-show:   #0 at +37m12s: heart for 3m05s
+show:   #0 at +37m12s: ball_lighting for 3m05s
 show:   #1 at +81m40s: searchlights for 2m31s
 ```
 
 The offsets count from the start of the dark stretch on the line above: dusk, or the show's
 start if it opens after dusk.
 
-With nothing enabled it says `0 incidents (none enabled)`. A restart prints the same schedule
-again: it is drawn from the dark stretch and nothing else.
+A restart prints the same schedule again: it is drawn from the dark stretch and nothing else.
 
 ### Test mode
 
@@ -456,13 +449,12 @@ To try each show state without a console or waiting for dusk, use the cabinet do
 | | |
 |---|---|
 | hold both buttons for 2 s | test mode on, starting from the current show state; both lamps light |
-| left button | the next show state: blackout → daylight → pulse → strobe → searchlights → ball lighting → heart → blackout |
+| left button | the next show state: blackout → daylight → dusk → searchlights → ball lighting → blackout |
 | right button | the motor, for as long as it is held |
 | hold both buttons for 2 s again | test mode off; the calendar has the show again |
 
-The calendar, the sun and `ENABLED_INCIDENTS` are ignored while it is on, so every incident
-can be tried by day; the washes and ball under Searchlights show their night look, pulse or
-strobe by the room. The audio is not ignored: the strobe and Heart still follow the room. An
+The calendar, the sun and the incident schedule are ignored while it is on, so every incident
+can be tried by day; the washes and ball under Searchlights show their night look, dusk. An
 incident in test mode runs until you step on, with no fade at the end. The motor runs only while the right button is held, never on its beat,
 and the ball's firmware still stops any run at 2 s. The e-stop still wins, as it wins over
 everything. The buttons are published as
@@ -677,7 +669,7 @@ with a live universe cannot seize the rig by accident.
 
 ## Aiming a preset
 
-The workspace holds exactly the six presets `brain/presets.rs` names, and no other scenes.
+The workspace holds exactly the four presets `brain/presets.rs` names, and no other scenes.
 Each holds **only Pan, Pan Fine, Tilt and Tilt Fine, for all three heads** — the build fails on
 anything else, so the dimmer you raised to see the beam must not be saved into it. The
 placeholders in the workspace are rough; aim every one on the rig.
@@ -687,7 +679,7 @@ placeholders in the workspace are rough; aim every one on the rig.
 3. Enable its **live-output toggle**. In Simple Desk, raise each head's dimmer so you can see
    where it points — that dimmer is not part of the scene, and stays out of it.
 4. Move the heads in the Scene Editor. It updates the Function in place.
-5. **File → Save**, then deploy. The startup log lists the six presets with every head's pan
+5. **File → Save**, then deploy. The startup log lists the four presets with every head's pan
    and tilt; check the one you re-aimed has moved.
 
 Re-aim in the Scene Editor rather than dumping from Simple Desk. A **DMX dump always creates

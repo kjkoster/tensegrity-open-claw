@@ -33,24 +33,6 @@ impl Biquad {
         }
     }
 
-    pub fn lowpass(fs: f32, f0: f32, q: f32) -> Self {
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let (sw, cw) = (w0.sin(), w0.cos());
-        let alpha = sw / (2.0 * q);
-        let a0 = 1.0 + alpha;
-        Self {
-            b0: ((1.0 - cw) / 2.0) / a0,
-            b1: (1.0 - cw) / a0,
-            b2: ((1.0 - cw) / 2.0) / a0,
-            a1: (-2.0 * cw) / a0,
-            a2: (1.0 - alpha) / a0,
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
-        }
-    }
-
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2

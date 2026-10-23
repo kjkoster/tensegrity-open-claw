@@ -16,7 +16,6 @@ use cortex::sparkle::SparkleMapping;
 use cortex::telemetry;
 use ball_show::BallShow;
 use head_show::HeadShow;
-use heart::Heart;
 use show_state::Director;
 
 mod ball_lighting;
@@ -24,7 +23,6 @@ mod ball_show;
 mod face;
 mod face_show;
 mod head_show;
-mod heart;
 mod legs;
 mod schedule;
 mod show_state;
@@ -55,7 +53,6 @@ fn main() {
     // between onsets once the music is in. One instance for all three legs, so the rig pulses
     // in step.
     let mut modulation = SparkleMapping::new();
-    let mut heart = Heart::new();
     let mut heads = HeadShow::new();
     let mut ball_show = BallShow::new();
 
@@ -69,18 +66,17 @@ fn main() {
         // Every fixture named here comes from the QLC+ patch, so this closure is also the
         // record of which patched fixtures the daemon actually drives.
         show: Box::new(move |features: &AudioFeatures, dt: f64, slots: &mut [u8]| {
-            let cue = director.cue(cortex::calendar::now(), features, &face_state.snapshot());
+            let cue = director.cue(cortex::calendar::now(), &face_state.snapshot());
 
-            // The modulation and the heart run in every show state, so they resume mid-stride
-            // rather than out of a frozen frame.
+            // The modulation runs in every show state, so it resumes mid-stride rather than out
+            // of a frozen frame.
             //
             // Gamma-corrected, because the breathing is shaped in perceived brightness.
             let sparkle = modulation.frame(features, dt).powf(1.0 / cfg::GAMMA);
-            let beat = heart.frame(features, dt);
 
-            wash_show::fill(slots, cue, sparkle, beat);
-            heads.fill(slots, cue, beat, dt);
-            ball_show.fill(slots, cue, features, dt);
+            wash_show::fill(slots, cue, sparkle);
+            heads.fill(slots, cue, dt);
+            ball_show.fill(slots, cue, dt);
             face_show::fill(slots, cue);
         }),
         tasks: Box::new(move |spawner| {

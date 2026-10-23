@@ -5,8 +5,7 @@
 //! in, and the same again turns it off. While it is on, the left button steps to the next show
 //! state — the base states, then the incidents — and the motor runs for as long as the right
 //! button is held. The calendar, the sun and the incident schedule are ignored, so an incident
-//! can be seen before it is enabled; the audio is not, so the strobe and Heart still follow the
-//! room.
+//! can be seen by day.
 //!
 //! The motor runs only when asked, never on its beat, so stepping through the show states cannot
 //! start it by surprise. And test mode ends itself after a quiet spell, because the rig runs

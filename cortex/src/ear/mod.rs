@@ -36,21 +36,17 @@ pub fn spawn(telemetry: Publisher) -> (JoinHandle<()>, LatestRx<AudioFeatures>) 
 #[derive(Clone, Copy, Default)]
 pub struct AudioFeatures {
     pub timestamp_us: u64,
-    /// Broadband loudness: the ball's strobe gap, and the music state machine's input.
-    pub energy: f32,
-    /// Loudness above the mid band: the ball's strobe flash length.
-    pub energy_high: f32,
     /// Onsets so far, and how strong the last one was: the washes' glints. Counters survive
     /// latest-value snapshots where a flag would be missed between two frames.
     pub onset_count: u64,
     pub last_onset_strength: f32,
-    /// Onsets of the low band alone, counted the same way: Heart's beat.
-    pub kick_count: u64,
     /// 0..1, fading between silence and music: how much the glints count.
     pub music_amount: f32,
-    /// 0 = SILENCE, 1 = MUSIC: pulse or strobe.
+    // diagnostics, for the ear's status line and its `ear/state` and `ear/xruns` topics
+    /// 0 = SILENCE, 1 = MUSIC: the state machine's discrete call.
     pub state: u8,
-    // diagnostics, for the ear's status line and `ear/xruns`
+    /// Broadband loudness: the state machine's input.
+    pub energy: f32,
     pub noise_floor: f32,
     pub agc_ref: f32,
     pub xrun_count: u64,
@@ -64,10 +60,5 @@ impl AudioFeatures {
     /// silence, not as the last thing it heard.
     pub fn is_stale(&self) -> bool {
         now_us().saturating_sub(self.timestamp_us) > cfg::STALE_US
-    }
-
-    /// Whether the room has music in it, by the state machine's discrete call.
-    pub fn hears_music(&self) -> bool {
-        !self.is_stale() && self.state == Self::MUSIC
     }
 }
