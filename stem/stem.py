@@ -6,10 +6,9 @@ publishes, and it does nothing else — no watchdog petting, no restarting, no r
 Those duties are designed but not built here yet, and keeping them out means Stem's death
 costs telemetry and never uptime.
 
-Three subtrees, all retained, because all answer questions asked after the interesting moment:
+Two subtrees, both retained, because both answer questions asked after the interesting moment:
 
     stem/sys/…     the hardware: board, cores, CPU frequency and installed RAM — written once
-    stem/specs/…   the rest of what this machine is — written once, never changes while it runs
     stem/stats/…   how it is doing — temperature, throttling, memory, load, uplink
 
 One field per topic: `stem/stats/temperature_c`, `stem/stats/throttling/since_boot/under_voltage`.
@@ -26,7 +25,6 @@ crashed Stem.
 """
 
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -80,7 +78,7 @@ def run(command):
     return finished.stdout.strip() if finished.returncode == 0 else None
 
 
-# ── Specs ────────────────────────────────────────────────────────────────────
+# ── System ───────────────────────────────────────────────────────────────────
 
 
 def cpu_field(name):
@@ -91,8 +89,8 @@ def cpu_field(name):
 
 def system():
     """The hardware, under the `sys` subtree every part of the rig publishes its own under.
-    Published once, retained, like the specs. Stem is not compiled, so unlike the Rust parts it
-    has no target triplet to report.
+    Published once, retained. Stem is not compiled, so unlike the Rust parts it has no target
+    triplet to report.
     """
     return {
         "board": read("/proc/device-tree/model"),
@@ -124,36 +122,6 @@ def cpu_frequency_mhz():
     rig is busy, rather than wherever the governor happens to have it at the moment."""
     khz = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
     return int(khz) // 1000 if khz and khz.isdigit() else None
-
-
-def total_memory_mb():
-    found = re.search(r"^MemTotal:\s+(\d+) kB", read("/proc/meminfo", ""), re.MULTILINE)
-    return round(int(found.group(1)) / 1024) if found else None
-
-
-def os_name():
-    found = re.search(r'^PRETTY_NAME="?([^"\n]+)"?', read("/etc/os-release", ""), re.MULTILINE)
-    return found.group(1) if found else None
-
-
-def specs():
-    """What this machine is. Published once, retained, and never republished.
-
-    It exists because the numbers that matter downstream — what a core can sustain, whether
-    a wheel exists for this interpreter — are answers to questions about this exact board, and reading them out of a telemetry tree beats an SSH session and a remembered
-    command line.
-    """
-    return {
-        "revision": cpu_field("Revision"),
-        "serial": cpu_field("Serial"),
-        "kernel": platform.release(),
-        "architecture": platform.machine(),
-        "word_size": 64 if sys.maxsize > 2**32 else 32,
-        "os": os_name(),
-        "memory_mb": total_memory_mb(),
-        "python": platform.python_version(),
-        "firmware": run(["vcgencmd", "version"]),
-    }
 
 
 # ── Stats ────────────────────────────────────────────────────────────────────
@@ -316,10 +284,7 @@ def main():
 
     hardware = system()
     telemetry.publish("sys", hardware, retain=True)
-    inventory = specs()
-    telemetry.publish("specs", inventory, retain=True)
-    log(f"{hardware['board']} — {inventory['os']}, {hardware['cores']} cores, "
-        f"{inventory['memory_mb']} MB, python {inventory['python']}")
+    log(f"{hardware['board']}, {hardware['cores']} cores, {hardware['ram_kb']} KB RAM")
 
     # Latched flags are worth a line in the journal the first time they are seen, because a
     # brownout that happened before the last reboot explains a slow show that nobody would
