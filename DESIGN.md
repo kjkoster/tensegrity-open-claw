@@ -393,8 +393,8 @@ connect instead.
 Written but not yet run on the rig: the `face`, `ear` and `ball` clients, the brain client's
 retained-topic replay, and the broker without persistence.
 
-Stem also absorbs the 4G watchdog that currently lives as an unversioned script on the Pi,
-so there is one health daemon rather than two overlapping ones.
+Stem may later absorb the 4G watchdog (`etc/4g-watchdog.sh`, run by a systemd timer), so
+there is one health daemon rather than two overlapping ones.
 
 ### 4.2 Installation cabinet
 

@@ -4,11 +4,13 @@
 //! same values, in the same order, every time they are asked for. So whoever draws stores
 //! nothing — a schedule is recomputed from its key each frame and comes out the same — and a
 //! restart reproduces every decision made before it.
-//!
-//! The noise fields in [`crate::perlin`] are no substitute: they are smooth, and their values
-//! cluster around zero, so a threshold on them is not a fair coin.
 
-use crate::perlin::splitmix64;
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
 
 /// The values one key gives, in order.
 pub struct Draw {

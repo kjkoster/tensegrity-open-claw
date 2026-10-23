@@ -16,5 +16,4 @@ embassy-time     = { version = "0.5.0",  features = ["std"] }
 libc = "0.2.189"
 rig-mqtt = { path = "../rig-mqtt" }
 rusb = "0.9.4"
-rustfft = "6.2"
 zihatec-rs-485-dmx = "0.1.0"

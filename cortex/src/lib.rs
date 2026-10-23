@@ -16,7 +16,6 @@ pub mod envelope;
 pub mod estop;
 pub mod latest;
 pub mod moving_head;
-pub mod perlin;
 pub mod qlc_plus;
 pub mod sparkle;
 pub mod telemetry;

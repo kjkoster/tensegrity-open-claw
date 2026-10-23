@@ -193,15 +193,14 @@ fn capture(
                     }
                     eprintln!(
                         "ear: status {} music={:.2} energy={:.2} floor={:.4} agc_ref={:.4} \
-                         bpm={:.0}/{:.2} onset_density={:.2} xruns={}",
+                         onsets={} kicks={} xruns={}",
                         word(state.state),
                         state.music_amount,
                         state.energy,
                         state.noise_floor,
                         state.agc_ref,
-                        state.bpm,
-                        state.tempo_confidence,
-                        state.onset_density,
+                        state.onset_count,
+                        state.kick_count,
                         state.xrun_count,
                     );
                 }

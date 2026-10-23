@@ -1,49 +1,47 @@
 #!/usr/bin/env bash
 #
-# Escalating watchdog for the 4G USB dongle. A brownout (or plain firmware
-# mood) can wedge the dongle so badly that only cutting its power brings it
-# back — and since the dongle is the Pi's uplink, nobody can ssh in to do
-# that by hand. Runs once a minute from a systemd timer and walks a ladder:
+# Escalating watchdog for the USB 4G modem, the Pi's only uplink: when it wedges, nobody can
+# ssh in to fix it, and the rigs stand hours away with nobody on site. Runs once a minute from a
+# systemd timer.
 #
-#   minute FAIL_RESTART  restart the connection (nmcli / mmcli / ip link)
-#   minute FAIL_HILINK   ask the HiLink dongle to reboot itself via its API
-#   minute FAIL_USB      cut USB power with uhubctl (sysfs unbind as fallback)
-#   minute FAIL_REBOOT   reboot the Pi (guarded against reboot loops)
+# The modem is found afresh on every run, starting from the most reliable fact about it — a
+# Huawei device on the USB bus — and working up: its network interface and its control port are
+# read off that USB device in sysfs, and the ModemManager modem is the one whose physical
+# device is that USB device. Nothing here names a port, a hub or an interface, because the
+# control cabinet is reshuffled for every show and build, and a hardcoded one is wrong the next
+# time.
 #
-# Each of the first three rungs fires ONCE, on the minute it is reached, and
-# then the ladder waits for the next one. Repeating them every minute was
-# worse than doing nothing: a dongle needs 30-60s to register after a reset,
-# so a remedy re-applied each minute is a remedy that never lets the dongle
-# finish coming back.
+# On a run of failed checks it climbs a ladder of remedies that touch the modem alone, so none
+# of them disturbs the show:
 #
-# NOTE a warm Pi reboot does NOT cut USB VBUS — a wedged dongle rides
-# through it. The reboot rung only fixes Linux-side problems; the rung that
-# clears a wedged dongle is the uhubctl one, so its hub/port MUST be
-# verified by eye: run the cycle command and confirm the dongle LED goes
-# dark. On a Pi 4 the dongle is usually under hub 1-1 (ports ganged), NOT
-# hub 2 (that is the USB3 root hub — cycling it exits 0 without touching
-# the dongle).
+#   minute FAIL_RECONNECT    NetworkManager disconnects and reconnects the modem
+#   minute FAIL_RESET        ModemManager resets the modem
+#   minute FAIL_REENUMERATE  the modem is dropped from the USB bus and re-enumerated, a replug
+#                            without cutting power; repeated every REENUMERATE_EVERY minutes
+#                            for as long as the outage lasts
 #
-# The reboot rung is the exception, because it can be deferred: it is tried
-# on every minute past its threshold, and refuses itself when the Pi has just
-# booted, when the interface is not there to be fixed, and when it already
-# rebooted recently. A show that reboots every quarter of an hour because the
-# campsite has no coverage is worse than a show with no telemetry.
+# Each of the first two fires once, on the minute it is reached, and the gap to the next is what
+# gives it time to work: a modem needs 30–60 s to register after a reset, so a remedy re-applied
+# every minute never lets it finish coming back.
 #
-# Separately from the ladder: when the internet is up but the WireGuard
-# tunnel is not, wg-quick is restarted. That covers the tunnel-side
-# failures the uplink ladder can't see.
+# There is deliberately no reboot and no power cut. A reboot breaks the show for a link the show
+# does not need, and a warm reboot does not cut USB power anyway. A power cut can only be trusted
+# to cut the modem's port alone when the hub really switches ports individually, and a hub's own
+# claim to do so is not reliable; on a hub that gangs its ports it would cut the audio interface
+# beside the modem too.
 #
-# Installed at /usr/local/sbin/4g-watchdog.sh by remote-deploy.sh. The configuration below
-# is the source of truth for it: edited on the Pi, it is gone at the next deploy.
+# Separately from the ladder: when the internet is up but the WireGuard tunnel is not, wg-quick
+# is restarted. That covers the tunnel-side failures the uplink ladder cannot see.
+#
+# Installed at /usr/local/sbin/4g-watchdog.sh by remote-deploy.sh. The configuration below is
+# the source of truth for it: edited on the Pi, it is gone at the next deploy.
 
 set -u
 
 # --- configuration ------------------------------------------------------------
-# The dongle's network interface. HiLink dongles present as an ethernet
-# interface (eth1 or an enx... name), QMI/MBIM modems as wwan0, serial ones
-# as ppp0. Check with: ip -br link
-IFACE=eth1
+# The modem's USB vendor: Huawei. The vendor rather than a product ID, because a Huawei stick
+# changes its product ID with its USB mode, and the rig has no other Huawei hardware.
+MODEM_VENDOR=12d1
 
 # Connectivity targets, tried in order; the link counts as up when ANY answers.
 PING_TARGETS="1.1.1.1 8.8.8.8"
@@ -55,59 +53,15 @@ WG_TUNNEL_IP="10.8.0.1"
 WG_UNIT="wg-quick@wg0"
 WG_TUNNEL_FAILS=2
 
-# HiLink dongle web API (192.168.8.1 on stock firmware). Used to ask the
-# dongle to reboot itself — gentler than cutting power and works even when
-# uhubctl is not an option. Leave empty to skip this rung. If the dongle's
-# web UI is password-protected this best-effort call will fail and the
-# ladder simply continues to the USB rung.
-HILINK_BASE="http://192.168.8.1"
-
-# uhubctl hub location and port for the USB power cycle. Find them with
-# `sudo uhubctl` (the hub whose device listing shows the Huawei), then
-# VERIFY by running the cycle and watching the dongle LED go dark:
-#   sudo uhubctl -l <loc> -p <port> -a cycle -d 5
-# Pi 4: usually -l 1-1 with ports ganged. Pi 3B+: often -l 1-1.1 -p 2.
-# Leave LOCATION empty to skip straight to the sysfs unbind/rebind fallback.
-#
-# Port 2 rather than 1, because the sysfs id read off this Pi by matching
-# idVendor:idProduct was 1-1.2 — which is this hub's port 2. The two used to
-# disagree and it did not show, because a Pi 4 gangs its ports: cutting port
-# 1 cuts the dongle anyway, so a wrong port number here works right up until
-# the day it is a Pi whose ports are switched individually.
-UHUBCTL_LOCATION="1-1"
-UHUBCTL_PORT="2"
-POWER_OFF_SECONDS=5
-
-# sysfs device id for the unbind/rebind fallback. Weaker than a real power
-# cut (resets the USB side only), but better than nothing.
-#
-# Empty means "whatever port uhubctl is aimed at", which is the only setting
-# that cannot quietly disagree with the rung above — and disagreeing is the
-# failure that hides, because both rungs report success while one of them
-# resets a device the other never touched. Set it only to name a device that
-# is genuinely somewhere else: compare `lsusb` against
-# `ls /sys/bus/usb/devices` and pick the id whose .../idVendor:idProduct
-# matches the dongle. Setting it to "-" skips the fallback altogether.
-USB_DEV=""
-
 # Escalation thresholds, in consecutive failed checks (= minutes of outage).
-# Each rung fires once, on the minute it is reached, and the gap to the next
-# is what gives that remedy time to work — a dongle reboot alone takes 30-60s.
-FAIL_RESTART=3
-FAIL_HILINK=5
-FAIL_USB=8
-FAIL_REBOOT=13
-
-# Never reboot within this many seconds of boot: whatever is wrong, a Pi that
-# has only just come up has not yet had time to fix it.
-MIN_UPTIME_FOR_REBOOT=900
-
-# And never twice inside this many seconds. The failure counter lives in /run
-# and a reboot is precisely the event that clears it, so without a stamp that
-# outlives the boot, a dead SIM or a campsite with no coverage reboots the rig
-# every quarter of an hour, for as long as the outage lasts, in front of
-# whoever is watching the show.
-MIN_SECONDS_BETWEEN_REBOOTS=3600
+FAIL_RECONNECT=3
+FAIL_RESET=5
+FAIL_REENUMERATE=8
+# The last rung repeats, because past it there is nothing stronger left to try.
+REENUMERATE_EVERY=5
+# How long the modem stays off the bus: long enough for the kernel and ModemManager to let go
+# of it, so it comes back as a new device rather than a resumed one.
+REENUMERATE_PAUSE_S=5
 # -------------------------------------------------------------------------------
 
 STATE_DIR=/run/4g-watchdog
@@ -115,28 +69,49 @@ FAIL_FILE=$STATE_DIR/consecutive-failures
 WG_FAIL_FILE=$STATE_DIR/wg-consecutive-failures
 mkdir -p "$STATE_DIR"
 
-# The one piece of state that has to survive the reboot it records. /var/lib
-# rather than /run for exactly that reason.
-STAMP_DIR=/var/lib/4g-watchdog
-LAST_REBOOT_FILE=$STAMP_DIR/last-reboot
-mkdir -p "$STAMP_DIR"
-
 log() {
     logger -t 4g-watchdog "$*"
 }
 
-# Asked separately from the ping, because the two failures want different
-# remedies: no interface is a dongle that has fallen off the bus or an IFACE
-# that names something this Pi has never had, and neither of those is fixed by
-# a reboot. The ladder still climbs — a vanished dongle is exactly what the
-# power cut is for — but the reboot rung refuses itself while this is false.
-iface_exists() {
-    ip link show "$IFACE" > /dev/null 2>&1
+# The modem's USB device, as its sysfs name (e.g. 1-1.1.3.4), or nothing. Interfaces (names with
+# a colon) and root hubs carry no idVendor of their own worth matching, so only devices are read.
+find_modem() {
+    local device
+    for device in /sys/bus/usb/devices/*; do
+        case "${device##*/}" in *:*) continue ;; esac
+        if [ "$(cat "$device/idVendor" 2> /dev/null)" = "$MODEM_VENDOR" ]; then
+            echo "${device##*/}"
+            return
+        fi
+    done
+}
+
+# The first entry of `kind` (net, usbmisc) under any of the modem's USB interfaces. Any rather
+# than a fixed one, because which interface carries it depends on the USB configuration the
+# stick came up in.
+modem_child() {
+    local usb=$1 kind=$2 entry
+    for entry in /sys/bus/usb/devices/"$usb":*/"$kind"/*; do
+        [ -e "$entry" ] && { echo "${entry##*/}"; return; }
+    done
+}
+
+# The ModemManager modem whose physical device is this USB device, as its D-Bus path, or nothing
+# when ModemManager does not have it.
+mm_modem() {
+    local usb=$1 path
+    for path in $(mmcli -L -K 2> /dev/null | sed -n 's/^modem-list\.value\[[0-9]*\] *: *//p'); do
+        if mmcli -m "$path" -K 2> /dev/null \
+            | grep -q "^modem\.generic\.physdev *: .*/$usb\$"; then
+            echo "$path"
+            return
+        fi
+    done
 }
 
 link_is_up() {
     local target
-    iface_exists || return 1
+    [ -n "$IFACE" ] || return 1
     for target in $PING_TARGETS; do
         if ping -I "$IFACE" -c 1 -W 5 "$target" > /dev/null 2>&1; then
             return 0
@@ -172,108 +147,52 @@ check_tunnel() {
     fi
 }
 
-# Ladder step 1: ask whatever network manager is present to bring the
-# connection back up. Cheap, and enough when only the Linux side lost track.
-restart_connection() {
-    if command -v nmcli > /dev/null 2>&1; then
-        log "restarting connection on $IFACE via NetworkManager"
-        nmcli device disconnect "$IFACE" > /dev/null 2>&1
-        nmcli device connect "$IFACE" > /dev/null 2>&1 && return
-    fi
-    if command -v mmcli > /dev/null 2>&1; then
-        log "resetting modem via ModemManager"
-        mmcli -m any --reset > /dev/null 2>&1 && return
-    fi
-    log "bouncing $IFACE via ip link"
-    ip link set "$IFACE" down 2> /dev/null
-    sleep 2
-    ip link set "$IFACE" up 2> /dev/null
-}
-
-# Ladder step 2: ask the HiLink firmware to reboot the dongle. Best-effort:
-# needs the stock unauthenticated API; a password-protected or thoroughly
-# wedged firmware will refuse, and the ladder moves on to cutting power.
-hilink_reboot() {
-    [ -n "$HILINK_BASE" ] || { log "no HILINK_BASE configured, skipping"; return 1; }
-    command -v curl > /dev/null 2>&1 || { log "curl not installed, skipping HiLink rung"; return 1; }
-    local ses_tok ses tok reply
-    ses_tok=$(curl -s -m 5 "$HILINK_BASE/api/webserver/SesTokInfo") || {
-        log "HiLink API unreachable"; return 1; }
-    ses=$(printf '%s' "$ses_tok" | sed -n 's/.*<SesInfo>\(.*\)<\/SesInfo>.*/\1/p')
-    tok=$(printf '%s' "$ses_tok" | sed -n 's/.*<TokInfo>\(.*\)<\/TokInfo>.*/\1/p')
-    reply=$(curl -s -m 5 -X POST "$HILINK_BASE/api/device/control" \
-        -H "Cookie: $ses" \
-        -H "__RequestVerificationToken: $tok" \
-        -H "Content-Type: application/xml" \
-        --data '<?xml version="1.0" encoding="UTF-8"?><request><Control>1</Control></request>')
-    if printf '%s' "$reply" | grep -q "<response>OK</response>"; then
-        log "HiLink dongle accepted reboot request"
-        return 0
-    fi
-    log "HiLink reboot refused: $reply"
-    return 1
-}
-
-# Ladder step 3: the equivalent of pulling the dongle out and plugging it
-# back in. uhubctl actually cuts VBUS; the sysfs unbind/rebind fallback only
-# resets the USB side, which is weaker but better than nothing.
-power_cycle_usb() {
-    if [ -n "$UHUBCTL_LOCATION" ] && command -v uhubctl > /dev/null 2>&1; then
-        log "power-cycling USB hub $UHUBCTL_LOCATION port $UHUBCTL_PORT"
-        uhubctl -l "$UHUBCTL_LOCATION" -p "$UHUBCTL_PORT" -a cycle \
-            -d "$POWER_OFF_SECONDS" > /dev/null 2>&1 && return
-        log "uhubctl failed, falling back to driver unbind/rebind"
-    fi
-    local device="$USB_DEV"
-    if [ -z "$device" ] && [ -n "$UHUBCTL_LOCATION" ]; then
-        device="$UHUBCTL_LOCATION.$UHUBCTL_PORT"
-    fi
-    if [ "$device" = "-" ]; then
-        log "sysfs fallback disabled (USB_DEV=-)"
-    elif [ -n "$device" ] && [ -e "/sys/bus/usb/devices/$device" ]; then
-        log "unbinding and rebinding USB device $device"
-        echo "$device" > /sys/bus/usb/drivers/usb/unbind 2> /dev/null
-        sleep "$POWER_OFF_SECONDS"
-        echo "$device" > /sys/bus/usb/drivers/usb/bind 2> /dev/null
-    elif [ -n "$device" ]; then
-        # Named, and not there. Worth saying out loud with the neighbours
-        # listed: this is the rung that silently does nothing when the id is
-        # stale, and the answer is almost always in that listing.
-        log "USB device $device is not in /sys/bus/usb/devices — present: $(ls /sys/bus/usb/devices 2> /dev/null | tr '\n' ' ')"
-    else
-        log "no usable USB recovery configured (UHUBCTL_LOCATION/USB_DEV)"
-    fi
-}
-
-# Ladder step 4: reboot. Fixes anything wrong on the Linux side, but note:
-# it does NOT cut USB power, so a dongle the USB rung failed to revive will
-# still be wedged afterwards. Last resort, not a guarantee.
-reboot_pi() {
-    local uptime now last
-    uptime=$(cut -d. -f1 /proc/uptime 2> /dev/null || echo 0)
-    if [ "$uptime" -lt "$MIN_UPTIME_FOR_REBOOT" ]; then
-        log "uplink still down but uptime ${uptime}s < ${MIN_UPTIME_FOR_REBOOT}s, holding off reboot"
+# Rung 1: NetworkManager drops the connection and brings it back. Cheap, and enough when only
+# the Linux side lost track. NetworkManager knows a modem by its control port, not its network
+# interface.
+reconnect() {
+    if [ -z "$CONTROL" ]; then
+        log "not reconnecting: modem $USB has no control port in sysfs"
         return
     fi
-    # A reboot does not cut USB power and cannot invent an interface that is
-    # not there, so against a dongle that has fallen off the bus — or an IFACE
-    # naming something this Pi has never had — it buys nothing and costs the
-    # show. The USB rung is the one that could still bring it back, and it has
-    # already had its turn by the time this is reached.
-    if ! iface_exists; then
-        log "not rebooting: interface $IFACE does not exist, which no reboot fixes — check ip -br link against IFACE"
-        return
-    fi
-    now=$(date +%s)
-    last=$(cat "$LAST_REBOOT_FILE" 2> /dev/null || echo 0)
-    if [ "$((now - last))" -lt "$MIN_SECONDS_BETWEEN_REBOOTS" ]; then
-        log "not rebooting: last watchdog reboot was $((now - last))s ago, under ${MIN_SECONDS_BETWEEN_REBOOTS}s — treating this as an outage to sit out"
-        return
-    fi
-    echo "$now" > "$LAST_REBOOT_FILE"
-    log "uplink down for $failures checks, rebooting"
-    systemctl reboot
+    log "reconnecting $CONTROL via NetworkManager"
+    nmcli device disconnect "$CONTROL" > /dev/null 2>&1
+    nmcli device connect "$CONTROL" > /dev/null 2>&1 \
+        || log "NetworkManager could not reconnect $CONTROL"
 }
+
+# Rung 2: ModemManager resets the modem's firmware. Only possible while ModemManager still has
+# the modem; when it has lost it, the next rung is the one that brings it back.
+reset_modem() {
+    local modem
+    modem=$(mm_modem "$USB")
+    if [ -z "$modem" ]; then
+        log "not resetting: ModemManager has no modem on USB $USB"
+        return
+    fi
+    log "resetting $modem via ModemManager"
+    mmcli -m "$modem" --reset > /dev/null 2>&1 || log "ModemManager could not reset $modem"
+}
+
+# Rung 3: off the bus and back on, as a replug would, without touching power. Acts on the modem's
+# own USB device alone, so the hub and everything else on it are left as they are.
+reenumerate() {
+    log "re-enumerating USB $USB"
+    if ! echo 0 > "/sys/bus/usb/devices/$USB/authorized"; then
+        log "could not take USB $USB off the bus"
+        return
+    fi
+    sleep "$REENUMERATE_PAUSE_S"
+    echo 1 > "/sys/bus/usb/devices/$USB/authorized" || log "could not bring USB $USB back on the bus"
+}
+
+USB=$(find_modem)
+IFACE=""
+CONTROL=""
+if [ -n "$USB" ]; then
+    IFACE=$(modem_child "$USB" net)
+    CONTROL=$(modem_child "$USB" usbmisc)
+fi
 
 failures=$(cat "$FAIL_FILE" 2> /dev/null || echo 0)
 
@@ -288,23 +207,20 @@ fi
 
 failures=$((failures + 1))
 echo "$failures" > "$FAIL_FILE"
-if iface_exists; then
-    log "uplink check failed ($failures consecutive)"
-else
-    log "uplink check failed ($failures consecutive): interface $IFACE does not exist (see ip -br link)"
+if [ -z "$USB" ]; then
+    # Nothing on the bus to act on, and no remembered port to try: a modem that has gone is
+    # logged, and the ladder resumes the moment it is back.
+    log "uplink check failed ($failures consecutive): no modem (USB vendor $MODEM_VENDOR) on the bus"
+    exit 0
 fi
+log "uplink check failed ($failures consecutive) on USB $USB, interface ${IFACE:-none}, control port ${CONTROL:-none}"
 
-# `-eq` on the three remedies and `-ge` only on the reboot. The counter climbs
-# by exactly one per run, so equality fires each rung once and the gap to the
-# next rung is what lets the remedy work. The reboot keeps `-ge` because it is
-# the one rung that refuses itself and therefore has to be able to come back:
-# hit at a five-minute uptime it declines, and asks again a minute later.
-if [ "$failures" -ge "$FAIL_REBOOT" ]; then
-    reboot_pi
-elif [ "$failures" -eq "$FAIL_USB" ]; then
-    power_cycle_usb
-elif [ "$failures" -eq "$FAIL_HILINK" ]; then
-    hilink_reboot
-elif [ "$failures" -eq "$FAIL_RESTART" ]; then
-    restart_connection
+if [ "$failures" -ge "$FAIL_REENUMERATE" ]; then
+    if [ $(((failures - FAIL_REENUMERATE) % REENUMERATE_EVERY)) -eq 0 ]; then
+        reenumerate
+    fi
+elif [ "$failures" -eq "$FAIL_RESET" ]; then
+    reset_modem
+elif [ "$failures" -eq "$FAIL_RECONNECT" ]; then
+    reconnect
 fi

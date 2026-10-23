@@ -54,12 +54,7 @@ fn main() {
     // The sparkle engine: silence breathing, a flash on each musical onset, and nothing
     // between onsets once the music is in. One instance for all three legs, so the rig pulses
     // in step.
-    let mut modulation = SparkleMapping::new(
-        cfg::SEEDS[0],
-        cfg::SEEDS[1],
-        cfg::SEEDS[2],
-        cfg::WHITE_MODE_PERLIN_SEED,
-    );
+    let mut modulation = SparkleMapping::new();
     let mut heart = Heart::new();
     let mut heads = HeadShow::new();
     let mut ball_show = BallShow::new();
@@ -79,9 +74,8 @@ fn main() {
             // The modulation and the heart run in every show state, so they resume mid-stride
             // rather than out of a frozen frame.
             //
-            // Only the modulation's intensity is used: each leg keeps its own colour. It is
-            // gamma-corrected, because the breathing is shaped in perceived brightness.
-            let sparkle = modulation.frame(features, dt).intensity.powf(1.0 / cfg::GAMMA);
+            // Gamma-corrected, because the breathing is shaped in perceived brightness.
+            let sparkle = modulation.frame(features, dt).powf(1.0 / cfg::GAMMA);
             let beat = heart.frame(features, dt);
 
             wash_show::fill(slots, cue, sparkle, beat);

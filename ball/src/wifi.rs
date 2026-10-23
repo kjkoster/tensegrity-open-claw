@@ -1,7 +1,7 @@
 use alloc::format;
 use core::convert::Infallible;
 use embassy_executor::Spawner;
-use embassy_futures::select::select;
+use embassy_futures::select::{Either, select};
 use embassy_net::{Runner, Stack, StackResources};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -19,6 +19,10 @@ use crate::{config::WIFI_RETRY_SILENCE, models::WifiConfig, telemetry};
 // with everything else: nobody is there to power-cycle it. Long enough for many silences,
 // because a restart does not help against a stale entry and only the silence does.
 const RESTART_AFTER: Duration = Duration::from_secs(300);
+
+// How often the signal strength is read while connected. A reading from the last beacon,
+// so it costs nothing on the air, but it moves slowly and a minute is plenty to chart.
+const RSSI_PERIOD: Duration = Duration::from_secs(60);
 
 // DHCP, the sACN listener's UDP socket and the broker's TCP socket, and one spare: a socket
 // the stack has no room for is a panic, not an error.
@@ -89,7 +93,7 @@ async fn supervise(controller: &mut WifiController<'static>, wifi_config: WifiCo
             }
 
             attempts += 1;
-            telemetry::publish("wifi_attempts", format!("{}", attempts));
+            telemetry::publish("wifi/attempts", format!("{}", attempts));
             match controller.connect_async().await {
                 Ok(_) => break,
                 Err(e) => {
@@ -113,8 +117,27 @@ async fn supervise(controller: &mut WifiController<'static>, wifi_config: WifiCo
         }
         rprintln!("wifi connected");
 
-        let disconnect = controller.wait_for_disconnect_async().await;
-        rprintln!("wifi disconnected ({:?})", disconnect);
+        // A disconnect that lands while the wait is being re-armed is not lost: the next wait
+        // sees the station already down and returns at once.
+        loop {
+            publish_rssi(controller);
+            match select(controller.wait_for_disconnect_async(), Timer::after(RSSI_PERIOD)).await {
+                Either::First(disconnect) => {
+                    rprintln!("wifi disconnected ({:?})", disconnect);
+                    break;
+                }
+                Either::Second(()) => {}
+            }
+        }
+    }
+}
+
+fn publish_rssi(controller: &WifiController<'static>) {
+    match controller.rssi() {
+        Ok(rssi) => telemetry::publish("wifi/rssi_dbm", format!("{}", rssi)),
+        Err(e) => {
+            rprintln!("wifi rssi unavailable ({:?})", e);
+        }
     }
 }
 

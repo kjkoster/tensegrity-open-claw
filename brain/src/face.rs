@@ -165,6 +165,11 @@ pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<F
         input.trace();
         input.publish(&telemetry);
     }
+    // Where the lamps sit on the wire, under the same topics the ball uses, read off the patch
+    // so they follow the workspace. The face has no address field: its first channel is its
+    // start address.
+    telemetry.publish("dmx/universe", patch::SACN.universe.to_string(), true);
+    telemetry.publish("dmx/address", (patch::FACE.all()[0].slot() + 1).to_string(), true);
 
     let state = FaceState {
         estop: contacts.decide(&telemetry),

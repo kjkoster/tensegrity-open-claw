@@ -51,6 +51,10 @@ THROTTLE_FLAGS = {
 }
 THROTTLE_LATCHED_SHIFT = 16
 
+# The access point's interface, whose stations' signal is what "WiFi strength" means on a Pi
+# that is the access point and has no signal of its own.
+AP_INTERFACE = "wlan0"
+
 
 def log(message):
     print(f"stem: {message}", file=sys.stderr, flush=True)
@@ -217,6 +221,68 @@ def addresses():
     return found
 
 
+def wifi_stations():
+    """Station MAC → how strongly the access point hears it, in dBm.
+
+    The ball's own `ball/wifi/rssi_dbm` is the same link heard from the other end; the two
+    disagreeing by a lot points at an antenna rather than at distance.
+    """
+    output = run(["iw", "dev", AP_INTERFACE, "station", "dump"])
+    if output is None:
+        return None
+    stations = {}
+    station = None
+    for line in output.splitlines():
+        found = re.match(r"Station ([0-9a-f:]{17})", line)
+        if found:
+            station = found.group(1)
+            continue
+        found = re.match(r"\s*signal:\s*(-?\d+)", line)
+        if found and station:
+            stations[station] = {"signal_dbm": int(found.group(1))}
+    return stations
+
+
+def mmcli(*arguments):
+    """`mmcli … -K` as key → value, with ModemManager's `--` for "nothing" left out."""
+    output = run(["mmcli", *arguments, "-K"])
+    if output is None:
+        return {}
+    fields = {}
+    for line in output.splitlines():
+        key, separator, value = line.partition(" : ")
+        value = value.strip()
+        if separator and value != "--":
+            fields[key.strip()] = value
+    return fields
+
+
+def cellular():
+    """The uplink modem as ModemManager sees it.
+
+    Looked up by its listing on every read rather than by a fixed number, because ModemManager
+    numbers a modem afresh each time it reappears, and a dongle that has been power-cycled by
+    the watchdog comes back as the next one.
+
+    No dBm figures: this modem has no extended signal support, so ModemManager's 0–100 quality
+    is all there is. Every key is always present, so a modem that drops out clears its topics
+    instead of leaving the last reading standing.
+    """
+    path = mmcli("-L").get("modem-list.value[1]")
+    modem = mmcli("-m", path) if path else {}
+    quality = modem.get("modem.generic.signal-quality.value")
+    recent = modem.get("modem.generic.signal-quality.recent")
+    return {
+        "status": modem.get("modem.generic.state"),
+        "network": modem.get("modem.generic.access-technologies.value[1]"),
+        "registration": modem.get("modem.3gpp.registration-state"),
+        "operator": modem.get("modem.3gpp.operator-name"),
+        "signal_quality_pct": int(quality) if quality and quality.isdigit() else None,
+        # ModemManager's own word on whether the quality is a fresh reading or a held one.
+        "signal_quality_recent": recent == "yes" if recent else None,
+    }
+
+
 def disk_free_mb(path="/"):
     try:
         usage = os.statvfs(path)
@@ -237,6 +303,8 @@ def stats():
         "memory_mb": memory_mb(),
         "disk_free_mb": disk_free_mb(),
         "addresses": addresses(),
+        "wifi": {"stations": wifi_stations()},
+        "4g": cellular(),
     }
 
 
@@ -257,10 +325,18 @@ def main():
     # brownout that happened before the last reboot explains a slow show that nobody would
     # otherwise connect to the power supply.
     warned = set()
+    # Stations seen last time, so one that leaves has its topics cleared rather than left
+    # standing at its last signal, which would read as a station that is still there.
+    stations = set()
 
     while True:
         reading = stats()
         telemetry.publish("stats", reading, retain=True)
+
+        present = set(reading["wifi"]["stations"] or {})
+        for gone in stations - present:
+            telemetry.publish(f"stats/wifi/stations/{gone}/signal_dbm", None, retain=True)
+        stations = present
 
         latched = reading["throttling"]["since_boot"] if reading["throttling"] else {}
         for name, raised in latched.items():

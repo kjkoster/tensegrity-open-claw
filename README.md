@@ -61,11 +61,15 @@ macOS.
 
 ### 4G uplink
 
-> ⚠️ **The link itself is not captured in the repo.** The deployed Pi reaches the internet over
-> a 4G modem, and no config for the connection lives in this tree. To document: modem device +
-> connection method (USB dongle vs. tethering; ModemManager/`mmcli`, `usb0` DHCP, or `ppp`),
-> APN/SIM, routing metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet
-> `10.0.1.0/24` stay local), and boot-time bring-up so a reboot reconnects.
+The modem is a Huawei E3372 USB stick (Vodafone-branded, vendor `12d1`) in MBIM mode: ModemManager
+drives it as `cdc-wdm0` with network interface `wwan0`, and NetworkManager brings the link up as
+its `cellular` connection. ModemManager can neither keep it off 2G (it offers one mode
+combination only) nor report signal in dBm (no extended signal support), so Stem publishes its
+0–100 signal quality instead.
+
+> ⚠️ **The connection's configuration is not captured in the repo.** The APN, SIM and routing
+> metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet `10.0.1.0/24` stay
+> local) live only in the Pi's NetworkManager profile.
 
 The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs it:
 
@@ -76,18 +80,23 @@ The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs 
 | `etc/4g-watchdog.timer` | `/etc/systemd/system/4g-watchdog.timer` |
 
 The timer runs the check every minute and is the only one of the two enabled — the service is
-`oneshot` and exists to be fired. On a consecutive run of failed checks it escalates, at minute
-3, 5 and 8: restart the connection, ask the HiLink dongle to reboot itself, cut the dongle's USB
-power with `uhubctl`. **Each of those fires once**, and the gap to the next rung is what gives it
-time to work — a dongle needs 30–60 s to register after a reset, so a remedy re-applied every
-minute is one that never lets the dongle finish coming back.
+`oneshot` and exists to be fired.
 
-At minute 13 it reboots the Pi, and that rung refuses itself three ways: within 15 minutes of
-boot, while `IFACE` does not exist (no reboot fixes a renamed interface, and a warm reboot does
-not cut USB power), and within an hour of the last watchdog reboot. That last guard is why the
-timestamp lives in `/var/lib` — a reboot is precisely the event that clears `/run`, and without it
-a campsite with no coverage reboots the rig every quarter of an hour, mid-show, for as long as the
-outage lasts.
+**It finds the modem itself, every run**, because the cabinet is rewired for every show: the
+Huawei device on the USB bus (vendor `12d1`), then its network interface and its control port
+under that USB device in sysfs, then the ModemManager modem whose physical device it is. Nothing in
+the script names a port, a hub or an interface.
+
+On a consecutive run of failed pings through the modem's interface it escalates, touching the
+modem alone so the show is never disturbed: at minute 3 NetworkManager reconnects it, at minute 5
+ModemManager resets it, and from minute 8 it is dropped off the USB bus and re-enumerated — a
+replug without cutting power — again every 5 minutes for as long as the outage lasts. The first
+two fire once, and the gap to the next rung is what gives each time to work: a modem needs
+30–60 s to register after a reset.
+
+There is no reboot and no power cut. A reboot breaks the show for a link the show does not need.
+A per-port power cut can only be trusted on a hub that really switches its ports individually,
+which a hub's own claim does not prove, and on a ganged hub it would also cut the audio interface.
 
 Separately, when the internet is up but the WireGuard tunnel is not, `wg-quick` is restarted.
 
@@ -95,18 +104,12 @@ Separately, when the internet is up but the WireGuard tunnel is not, `wg-quick` 
 systemctl list-timers 4g-watchdog.timer     # when it last ran and when it runs next
 journalctl -t 4g-watchdog                   # what it has been doing
 cat /run/4g-watchdog/consecutive-failures   # how far up the ladder it currently is
-cat /var/lib/4g-watchdog/last-reboot        # epoch seconds of the last watchdog reboot
 sudo /usr/local/sbin/4g-watchdog.sh         # run one check by hand
 ```
 
-**The script's configuration lives inside the script**, at the top: the modem's interface, the
-`uhubctl` hub and port, the tunnel address, and the thresholds. Those are the repo's copy to
-change — a value edited on the Pi is overwritten by the next deploy. The hub and port in
-particular have to be confirmed by eye, because a wrong pair exits 0 without cutting anything: run
-`sudo uhubctl -l <loc> -p <port> -a cycle -d 5` and watch the dongle's LED go dark. The sysfs
-unbind/rebind fallback follows that same port unless `USB_DEV` names another one, so the two
-cannot disagree by accident — which they did, silently, because a Pi 4 gangs its USB ports and
-cutting the wrong one cuts the dongle anyway.
+**The script's configuration lives inside the script**, at the top: the modem's USB vendor, the
+ping targets, the tunnel address and the thresholds. Those are the repo's copy to change — a value
+edited on the Pi is overwritten by the next deploy.
 
 ## Attached hardware
 

@@ -7,14 +7,12 @@
 //! `ear/usb/address`, `ear/usb/device` and `ear/usb/rate_hz`, retained.
 //!
 //! Capture reads blocks off the USB interface (`capture`), and per-block feature extraction
-//! (`pipeline`, with its DSP and spectral building blocks) turns each into a fresh
-//! `AudioFeatures`. That snapshot is the contract between the ear and the show: a single Copy
+//! (`pipeline`, with its DSP building blocks) turns each into a fresh `AudioFeatures`. That snapshot is the contract between the ear and the show: a single Copy
 //! struct carried over a latest-value seam. The ear never waits; the show never blocks.
 
 mod capture;
 mod dsp;
 mod pipeline;
-mod spectral;
 
 use crate::clock::now_us;
 use crate::config as cfg;
@@ -31,46 +29,28 @@ pub fn spawn(telemetry: Publisher) -> (JoinHandle<()>, LatestRx<AudioFeatures>) 
 }
 
 /// Written by the ear's thread at block rate, read by the DMX loop at the frame
-/// rate. All features are nominally 0..1 (post-AGC, post-floor) unless noted.
+/// rate. Levels are nominally 0..1 (post-AGC, post-floor).
+///
+/// Only what the show reads, plus the diagnostics the ear reports: everything here is
+/// computed on every block, so a field nobody reads is work done for nothing.
 #[derive(Clone, Copy, Default)]
 pub struct AudioFeatures {
-    pub seq: u64,
     pub timestamp_us: u64,
-    // energy family
+    /// Broadband loudness: the ball's strobe gap, and the music state machine's input.
     pub energy: f32,
-    pub energy_low: f32,
-    pub energy_mid: f32,
+    /// Loudness above the mid band: the ball's strobe flash length.
     pub energy_high: f32,
-    pub energy_slow: f32,
-    pub bass_ratio: f32,
-    pub tilt: f32, // −1..+1
-    // dynamics
-    pub crest: f32,
-    pub rms_var: f32,
-    // onsets
-    pub onset_strength: f32,
-    pub onset_count: u64, // counters survive latest-value snapshots; flags would not
+    /// Onsets so far, and how strong the last one was: the washes' glints. Counters survive
+    /// latest-value snapshots where a flag would be missed between two frames.
+    pub onset_count: u64,
     pub last_onset_strength: f32,
-    pub onset_density: f32,
-    // kicks: onsets of the low band alone, counted the same way
+    /// Onsets of the low band alone, counted the same way: Heart's beat.
     pub kick_count: u64,
-    // spectral (slow path; holds last value between updates)
-    pub centroid: f32,
-    pub spread: f32,
-    pub flatness: f32,
-    pub rolloff: f32,
-    pub spectral_flux: f32,
-    // tempo (never load-bearing; gate on tempo_confidence)
-    pub bpm: f32,
-    pub tempo_confidence: f32,
-    pub beat_phase: f32,
-    // long horizon
-    pub energy_3min: f32,
-    pub quiet_seconds: f32,
-    // state machine
-    pub music_amount: f32, // 0..1 crossfade between silence and music
-    pub state: u8,         // 0 = SILENCE, 1 = MUSIC (informational)
-    // diagnostics
+    /// 0..1, fading between silence and music: how much the glints count.
+    pub music_amount: f32,
+    /// 0 = SILENCE, 1 = MUSIC: pulse or strobe.
+    pub state: u8,
+    // diagnostics, for the ear's status line and `ear/xruns`
     pub noise_floor: f32,
     pub agc_ref: f32,
     pub xrun_count: u64,
