@@ -3,8 +3,9 @@
 
 The health daemon, and deliberately the least capable process on the rig. It reads, it
 publishes, and it does nothing else — no watchdog petting, no restarting, no re-dialling.
-Those duties are designed but not built here yet, and keeping them out means Stem's death
-costs telemetry and never uptime.
+Those duties belong elsewhere: systemd's watchdogs keep the brain and the OS alive, and the
+4G watchdog's timer keeps the uplink. Keeping them out means Stem's death costs telemetry and
+never uptime.
 
 Two subtrees, both retained, because both answer questions asked after the interesting moment:
 
@@ -229,8 +230,8 @@ def cellular():
     """The uplink modem as ModemManager sees it.
 
     Looked up by its listing on every read rather than by a fixed number, because ModemManager
-    numbers a modem afresh each time it reappears, and a dongle that has been power-cycled by
-    the watchdog comes back as the next one.
+    numbers a modem afresh each time it reappears, and a dongle that the 4G watchdog has reset
+    or re-enumerated comes back as the next one.
 
     No dBm figures: this modem has no extended signal support, so ModemManager's 0–100 quality
     is all there is. Every key is always present, so a modem that drops out clears its topics

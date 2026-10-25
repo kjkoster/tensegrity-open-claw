@@ -20,8 +20,8 @@ caps, various single-purpose chips) are on hand.
 
 | Machine | Details |
 |---|---|
-| `riverrain` | MacBook Air M2, local user `kjkoster`. The development machine: builds the wireless fixture firmware and the eyeball, runs QLC+, deploys to the Pi and to `eyeson`. |
-| `eyeson` | MacBook Air 2015, dual-core Broadwell i5 at 1.6 GHz, no usable GPU, macOS Monterey (its last), local user `kjkoster`. Runs the eyeball, on the cabinet's wired segment alone, through the USB Ethernet adapter; reached through the Pi. |
+| `riverrain` | MacBook Air M2, local user `kjkoster`. The development machine: builds the wireless fixture firmware, runs QLC+, deploys to the Pi. |
+| `eyeson` | MacBook Air 2015, dual-core Broadwell i5 at 1.6 GHz, no usable GPU, macOS Monterey (its last), no Ethernet port, local user `kjkoster`. Spare. |
 | Spare Raspberry Pis | Several, at least one a Pi 4, some with more than 1 GB of RAM. |
 
 ## The cabinet
@@ -34,8 +34,8 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | Raspberry Pi (`claw-pi`) | Raspberry Pi 3B+, 1 GB RAM, on a DINner Plate Pi DIN rail holder, local user `kjkoster`. Named `claw-pi` for historical reasons. |
 | DMX HAT | Zihatec RS422/485 HAT Rev D on the Pi's header: the wired DMX-512 output. |
 | USB hub | 12 V powered, which turned out to be needed so as not to overload the Pi's USB ports. The modem and the audio interface plug into it. |
-| PoE injector | Powers the camera; its data port goes to the Ethernet hub. |
-| Ethernet hub | On its own power supply. Joins the Pi's `eth0`, the PoE injector's data port and `eyeson`'s adapter into one wired segment. |
+| PoE injector | Powers the camera; its data port goes to the Pi's `eth0`. |
+| Ethernet hub | On its own power supply. For when a laptop needs the Pi's wired segment beside the camera. |
 
 ## Connectivity
 
@@ -45,8 +45,8 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | 4G modem | Huawei E3372 USB stick (Vodafone-branded, USB vendor `12d1`) in MBIM mode, on the USB hub. |
 | SIM | Odido 4G, 4 GB monthly data bundle. The Pi's address on Odido's network is publicly routable, with no DNS name. |
 | WireGuard server | `wg` / `wg.kjkoster.org`, hosted on Google Cloud. The Pi (`10.8.0.3`) and the Mac (`10.8.0.4`) each keep a permanent tunnel to it, so the Mac reaches `claw-pi` at `10.8.0.3`. |
-| USB Ethernet adapter | Puts `eyeson`, which has no Ethernet port, on the cabinet's wired segment. |
-| Ethernet leads | At least four for the eyeball's wiring — Pi to hub, injector to hub, `eyeson` to hub, injector to camera — and a spare. |
+| USB Ethernet adapter | One; location unknown. |
+| Ethernet leads | Two for the camera — injector to the Pi, injector to the camera — and a spare. |
 | DMX widget (the piggy) | Flying Pig Systems / High End HOG 3PC USB DMX widget. 5-pin DMX out, with a 5-pin to 3-pin pigtail for the mostly 3-pin fixtures. Used when a Mac drives the fixtures; the Pi's HAT is preferred. |
 
 ## Sensors and sound

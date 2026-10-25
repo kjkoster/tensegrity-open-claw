@@ -37,7 +37,7 @@ macOS.
 
   | Interface | Address | Purpose |
   |---|---|---|
-  | `eth0` | `10.0.1.1/24` | the closed wired segment, through the Ethernet hub: SSH / deploy from a laptop, OSC and MQTT from remote sensors' machines |
+  | `eth0` | `10.0.1.1/24` | the closed wired segment: a network camera, and SSH / deploy from a laptop |
   | `wlan0` | `10.0.10.1/24` | the WiFi AP |
   | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
   | `wwan0` | DHCP | 4G uplink |
@@ -62,9 +62,9 @@ macOS.
   so a wireless fixture that lost power without a goodbye can rejoin quickly; a connected one
   pings the broker every 5 s to stay well clear of it. A laptop left idle that long is dropped too and
   rejoins by itself.
-- The **Ethernet port** is a closed wired segment through an Ethernet hub in the cabinet, on
-  its own power supply: a laptop for SSH, and the machines of remote sensors. Nothing on it
-  routes anywhere; a machine on it is reached through the Pi (`ProxyJump claw-pi`).
+- The **Ethernet port** is a closed wired segment: a network camera through its PoE
+  injector, and a laptop for SSH, with an Ethernet hub in the cabinet when both need it.
+  Nothing on it routes anywhere.
 
 ### 4G uplink
 
@@ -122,32 +122,12 @@ are in [`SHOW.md`](SHOW.md).
 | The mouth (a USB audio interface) | USB on the hub (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `aplay -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `mouth/src/config.rs`. Reports under `mouth/` through the brain's connection; the topics are in [`SHOW.md`](SHOW.md). |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. Reports under `face/` through the brain's connection. |
-| Ethernet hub | `eth0`, own power supply | The closed wired segment: the Pi, a laptop, remote sensors' machines and their cameras' PoE injector. |
+| The eyeball's camera (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.90`; its host, user and password are in `eyeball/src/config.rs` and nowhere else, and the eyeball sets everything else over VAPIX on every start. The annotated feed is at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. Reports under `eyeball/` through the brain's connection; the topics are in [`SHOW.md`](SHOW.md). |
+| Ethernet hub | `eth0`, own power supply | Only when a laptop needs the wired segment beside the camera. |
 
-## Inputs over OSC
-
-A sensor on another machine reaches the brain as OSC messages over UDP, to
-**`10.0.1.1:9000`** — the `eth0` address alone, set as `OSC_ADDRESS` and `OSC_PORT` in
-`cortex/src/config.rs`. Not the wildcard: `wwan0` carries a public address, and a scare
-anyone on the internet could fire is not one. Why OSC, and why not MQTT, is in
-[`DESIGN.md`](DESIGN.md) §1.4.
-
-| address | arguments | from | sent |
-|---|---|---|---|
-| `/eyeball` | `,f` the furthest person's distance, in paths: 1 at the entry, 0 at the trigger line, `+∞` when nobody is there | the eyeball on `eyeson` | once per camera frame it processes, about 10 a second; never repeated |
-
-A sender sends when it has a new reading and never repeats one, so a sensor that stops is a
-reading that goes stale, and the show decides what that means. Anything on the wire can stand
-in for a sensor:
-
-```
-oscsend 10.0.1.1 9000 /eyeball f 0.3     # someone a third of the way from the line
-oscsend 10.0.1.1 9000 /eyeball f inf     # nobody
-```
-
-The journal logs the first message from each new sender, and a message it cannot decode once
-per sender. The face is not on the network and has no address: it hands the show its state
-inside the brain.
+The eyeball runs inside the brain, at normal priority below its real-time threads, so a slow
+model costs the eyeball frames and never a DMX one; why, and what it costs, is in
+[`DESIGN.md`](DESIGN.md) §1.6.
 
 ## OS configuration (once)
 
@@ -159,7 +139,7 @@ wired DMX, the HAT's transmit enable, the timing settings, onboard audio off, an
 overlay for the face lamps. `config.txt` itself stays as Raspberry Pi OS ships it, apart from
 one last line, `include config-claw.txt`.
 
-`deploy-clawpi.sh` copies the file to `/boot/firmware/` on every deploy and says when it changed. If
+`deploy.sh` copies the file to `/boot/firmware/` on every deploy and says when it changed. If
 `config.txt` lacks the include line it appends it, and says so. It never reboots: a changed
 boot configuration takes effect at the next `sudo reboot`, which is yours to choose.
 
@@ -257,20 +237,14 @@ the 4G watchdog's unit and timer (above).
 From the Mac at the repo root:
 
 ```
-./deploy.sh            # every machine: claw-pi, then eyeson
-./deploy-clawpi.sh     # the Pi alone
-./deploy-eyeson.sh     # eyeson alone
+./deploy.sh
 ```
 
-One script per machine, each rsyncing to its machine and running a remote script there;
-`deploy.sh` runs both, the Pi first, because `eyeson` is reached through it. Everything is
-built on the Mac except `brain`, which links ALSA and is built on the Pi.
+Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `etc/remote-deploy.sh` there, which builds
+`brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
+restarts the daemon.
 
-`deploy-clawpi.sh` rsyncs to `claw-pi:tensegrity-open-claw/`, then runs
-`etc/remote-deploy.sh` there, which builds `brain` natively, installs it as
-`/usr/local/bin/brain` along with the systemd unit, and restarts the daemon.
-
-Before any of that, `deploy-clawpi.sh` builds the wireless fixture firmware on the Mac — `ball` —
+Before any of that, `deploy.sh` builds the wireless fixture firmware on the Mac — `ball` —
 when the workspace patches a wireless fixture, and says `no wireless fixtures patched` and
 skips it when it patches none. Only the binary goes to the Pi, as `tensegrity-open-claw/binaries/ball`, and the last
 thing `remote-deploy.sh` does is flash it onto every board it finds under
@@ -279,20 +253,16 @@ bootloader until all are flashed; then the access point is told to drop its stat
 WiFi client, briefly), and only then are the boards reset — so each rejoins on its first
 attempt instead of waiting for the access point to forget it.
 
-The cargo workspace is six crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
+The cargo workspace is seven crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
 
 The deploy ships **only what the Pi builds from and installs** — the crates, `claw.qxw`,
-`fixtures/`, `sounds/`, `stem/` and `etc/`. The list is written out in `deploy-clawpi.sh` rather
+`fixtures/`, `sounds/`, `stem/` and `etc/`. The list is written out in `deploy.sh` rather
 than filtered by exclusions, so adding something is a decision; the design documents, the
 reference PDFs, the source recordings in `audio/` and the git history stay on the Mac. The
 workspace goes because the build compiles **its fixture patch and its presets** in — so
 saving in QLC+ and deploying is all it takes to get a re-aimed preset onto the rig — and
-`sounds/` because the build compiles the recordings in too.
-
-`deploy-eyeson.sh` builds the eyeball on the Mac for `x86_64-apple-darwin`, rsyncs the
-binary, its model, its launch daemon's plist and `eyeball/remote-deploy.sh` to `eyeson`
-through the Pi, and runs that script there, which installs and restarts the daemon — see
-[`eyeson`](#eyeson). It rsyncs by checksum, so over 4G only what changed travels.
+`sounds/` because the build compiles the recordings in too, as it does the eyeball's model,
+which travels inside its crate.
 
 > The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
 > hand — the deploy leaves it alone rather than removing things on the Pi on its own.
@@ -585,33 +555,4 @@ In order of how often it is the cause:
 - **Multicast.** It cannot work over WireGuard: `wg0` is POINTOPOINT with no MULTICAST flag.
   The output must be unicast.
 - **Priority.** Anything at or below 100 is ignored by design.
-
----
-
-# `eyeson`
-
-The 2015 MacBook Air that runs the eyeball (`DESIGN.md` §3.6). It is on one network, the
-Pi's wired segment, through a USB Ethernet adapter at **`10.0.1.2/24`** with no router set:
-OSC and MQTT to the Pi at `10.0.1.1`, video from the camera. It has no internet and needs
-none — the eyeball is built on the Mac and arrives as a binary.
-
-## Access
-
-- SSH alias **`eyeson`** → `10.0.1.2` with `ProxyJump claw-pi`: over WireGuard to the Pi and
-  out of its `eth0`. The deploy rides the same hop.
-- The annotated feed through the same hop: `ssh -L 8080:10.0.1.2:8080 claw-pi`, then
-  `http://localhost:8080/`. Over 4G it costs data while it is open.
-
-## Once
-
-- macOS Monterey, the last it takes. Remote Login on, with the Mac's key in
-  `authorized_keys`; both need a keyboard on `eyeson` the first time.
-- WiFi off. The USB Ethernet service: manual `10.0.1.2/24`, **no router**.
-- No sleep with the lid closed: `sudo pmset -a sleep 0 disablesleep 1`.
-- On the Mac, the target to build for: `rustup target add x86_64-apple-darwin`.
-
-The eyeball runs as a launch daemon, `/Library/LaunchDaemons/org.kjkoster.eyeball.plist`,
-from boot without a login, restarted when it dies, logging to `/var/log/eyeball.log`.
-`eyeball/remote-deploy.sh` installs and restarts it
-(`launchctl kickstart -k system/org.kjkoster.eyeball`).
 

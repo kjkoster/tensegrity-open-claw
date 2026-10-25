@@ -157,15 +157,19 @@ sensor a rig has.
 A snapshot that can miss an event between two frames counts instead of flagging: a button
 press is a counter that moves, so a reader at frame rate sees it however short it was.
 
-**A sensor on another machine arrives over OSC.** A receiver thread decodes each message into
-that sensor's snapshot and the time it arrived. UDP, because a late reading is worth nothing
+A snapshot carries the time it was taken, so a sensor that has gone quiet is a snapshot that
+has gone stale, and what stale means is the show's decision, not the sensor's.
+
+**A sensor on another machine would arrive over OSC.** None does today; this is the shape
+reserved for one, so that adding it changes the transport and nothing after it. A receiver
+thread would decode each message into that sensor's snapshot and the time it arrived, on the
+same kind of seam an in-process sensor publishes on. UDP, because a late reading is worth nothing
 and the newest one wins; OSC, because it is the smallest typed message there is, and anything
 on the network — a laptop with `oscsend` — can stand in for the sensor. Not MQTT (§1.3): the
 show reads no topic, and a broker in the path would make the broker part of the show. The
-sender sends when it has a new reading and never repeats one, so a sensor that has gone quiet
-is a snapshot that has gone stale, and what stale means is the show's decision, not the
-receiver's. The receiver binds the one address the sensors' network reaches, like the sACN
-receiver, because a wildcard would also answer the 4G uplink's public address.
+sender would send when it has a new reading and never repeat one, so silence goes stale like
+any other sensor's. The receiver would bind the one address the sensors' network reaches,
+like the sACN receiver, because a wildcard would also answer the 4G uplink's public address.
 
 ### 1.5 Time is resolved at build time
 
@@ -185,17 +189,28 @@ decision corrects itself when NTP steps the clock.
 
 ### 1.6 What may fail runs in its own process
 
-Anything the show must survive losing runs outside the brain: Stem, and the eyeball. A daemon
-that crashes, stalls or is restarted mid-tune then costs what it provides and never a frame,
-and a process aiming moving heads at people does not share an address space with anything
-that can take it down.
+Anything the show must survive losing, and that has no reason to be inside the brain, runs
+outside it: Stem. A daemon that crashes, stalls or is restarted mid-tune then costs what it
+provides and never a frame, and a process aiming moving heads at people does not share an
+address space with anything that can take it down.
 
-The exception is a part the frame has to stay in step with to the millisecond: the face, the
-ear, the mouth. A process boundary there is latency the audience sees — a cut that lands a
-hop after the light, a lamp a hop behind the frame. Those run inside the brain, and are
-written so a dead device costs what it provides: they report, retry with backoff, and never
-block the frame loop. Living and dying with the brain, they hold no broker connection of their
-own and publish their subtrees through the brain's (§3.1).
+The exceptions are parts with a reason to be inside. The face, the ear and the mouth are ones
+the frame has to stay in step with to the millisecond: a process boundary there is latency
+the audience sees — a cut that lands a hop after the light, a lamp a hop behind the frame.
+The eyeball is one whose reading would otherwise need a socket between two processes on the
+same Pi, or a second machine: inside, it is a thread and a seam.
+
+Those run inside the brain, and are written so a dead device costs what it provides: they
+report, retry with backoff, and never block the frame loop. A part that does heavy work drops
+out of the brain's real-time scheduling, so it slows itself and never a frame. Living and
+dying with the brain, they hold no broker connection of their own and publish their subtrees
+through the brain's (§3.1).
+
+What inside costs is the one thing a process boundary bought: a crash in a part is a crash
+of the brain, which systemd restarts in seconds of signal loss. That is a fair price for Rust,
+whose failures are panics the brain is built to end on. It is a real one for native code a
+part links, such as a C++ inference runtime, and it is why a pure-Rust alternative is worth
+its cost in speed when there is one.
 
 ---
 
@@ -220,7 +235,7 @@ WireGuard tunnel — which is how both deployment and console traffic get there.
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
     │  (builds brain; reads the rig's sensors)        │
-    │  OSC receiver ◄────────────── remote sensors    │
+    │  ◄── GPIO, network camera                       │
     │  Generative engine                              │
     │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
     │  ├── sACN sender ──────────── network           │
@@ -255,11 +270,12 @@ frame rate sits under.
 
 | | |
 |---|---|
-| `cortex/` | what every rig shares under its show: both transports, the OSC receiver, the frame loop, the show calendar |
+| `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
 | `cortex-build/` | the QLC+ ingest, the calendar's resolution and the recordings' compilation, a build-dependency of the rig crate |
 | `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
-| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, `no_std` for the firmware, and, behind its `std` feature, the client the daemons share. It shares its directory with Stem's daemon and broker configuration |
+| `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
+| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, `no_std` for the firmware, and, behind its `std` feature, the brain's client. It shares its directory with Stem's daemon and broker configuration |
 | `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, read by the ball firmware |
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
@@ -271,19 +287,15 @@ sound output, a sensor — is its own crate with its own configuration, and the 
 uses it depends on it and wires it in. `cortex::run` and the `Rig` it takes then never grow a
 field for a part one rig has.
 
-The ball firmware, `ball/`, and the eyeball, `eyeball/`, are not members of this workspace:
-each is built on the development Mac for its own target and shipped as a binary, and neither
-can build `cortex`, which links the HAT. What they share with the brain is the `stem` crate,
-by path. Only `brain` is built on the machine it runs on, because it links ALSA.
+The ball firmware, `ball/`, is not a member of this workspace: it is built on the Mac for its
+own target, and shares the `stem` crate with the brain by path. Everything in the workspace
+is built on the Pi, because the brain links ALSA.
 
-**One deploy script per machine**, each rsyncing to its machine and running a remote script
-there, and one that runs them all. A machine can then be deployed alone, and the scripts
-never have to know which machines a rig has.
-
-**Recordings are compiled in.** The rig crate names its recordings and their gains;
-`cortex-build` checks each WAV's format and turns it into a typed constant — the samples as
-`&'static [i16]`, and whatever the build derives from them, such as a loudness envelope at
-the frame rate. The binary on the Pi is then the whole show: no file to be missing at
+**Recordings and models are compiled in.** The rig crate names its recordings and their
+gains; `cortex-build` checks each WAV's format and turns it into a typed constant — the
+samples as `&'static [i16]`, and whatever the build derives from them, such as a loudness
+envelope at the frame rate. A sensor's model goes in the same way, with `include_bytes!`, and
+is loaded from memory. The binary on the Pi is then the whole show: no file to be missing at
 startup, no parser in the running program, and a recording in the wrong format is a build
 error naming it.
 
@@ -302,11 +314,12 @@ Standard Rust on Trixie Raspbian Linux, `std`.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
 - **ALSA** for audio, in and out.
-- **`rosc`** for OSC.
+- **ONNX Runtime** (`ort`), or `tract` where speed allows, for a sensor's neural model.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
-  producers — sensors, the OSC and sACN receivers, audio — on their own OS threads feeding
-  it, or fed by it, through a lock-free latest-value seam. A blocking `recv` on the executor's thread would
-  stall the frame loop, so anything that blocks stays off it.
+  producers — sensors, the sACN receiver, audio — on their own OS threads feeding it, or fed
+  by it, through a lock-free latest-value seam. A blocking `recv` on the executor's thread
+  would stall the frame loop, so anything that blocks stays off it, and anything that
+  computes for long runs below it in scheduling (§1.6).
 
 ### 2.5 The rig state machine
 
@@ -333,12 +346,13 @@ returned to, and neither needs a special case anywhere else.
 ### 2.6 The Pi controller
 
 The deployed unit is a **Raspberry Pi 3B** running standard Debian / Raspberry Pi OS. A Pi 4
-has more headroom and runs the same software unchanged, if thermals or CPU ever justify it.
+has more headroom and runs the same software unchanged, if thermals or CPU ever justify it —
+a neural model in the brain is the first thing likely to.
 
 The Pi runs in **AP mode** (hostapd + dnsmasq) so fixtures and laptops join its own network
 rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
-closed wired segment — a laptop for SSH, and the machines of any remote sensors — and runs
-`brain` as a systemd service for unattended operation.
+closed wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd
+service for unattended operation.
 
 Settings — SSID, serial console, DIP switches, `config.txt` — are in
 [`README.md`](README.md).
@@ -367,13 +381,12 @@ death costs telemetry and never uptime.
 
 Every process holds its own connection to the broker, announces itself on `health/<service>`,
 and leaves a will that says `gone`: `brain`, the daemon, the `ball` (over the AP, to the DHCP
-gateway) and the `eyeball` (from its own machine). A part inside the brain — the face, the
-mouth — lives and dies with it, so a will of its own would only repeat `health/brain`; it
+gateway). A part inside the brain — the face, the mouth, the eyeball — lives and dies with it, so a will of its own would only repeat `health/brain`; it
 publishes its own subtree through the brain's connection (§1.6).
 
 **The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
 program sees Stem, the process it reports to. It carries the health contract and the packets,
-`no_std` so the firmware can use them, and the std client the daemons share.
+`no_std` so the firmware can use them, and the std client a Rust daemon uses.
 `stem/rig_mqtt.py` is the Python half.
 
 ### 3.2 The 4G watchdog
@@ -500,34 +513,37 @@ no rule of its own.
 
 ### 3.6 The eyeball
 
-A vision sidecar: an Axis M3105-LVE network camera in, one small reading of the scene out to
-the brain, and an annotated feed for humans. It has had two lives. On the Pi it read a
-person's arms for the mage rig, and was removed with it; that code is on the
-`last-version-with-mage` tag (`eyeball/` and `cortex/src/eyeball.rs`). On `eyeson`, a 2015
-MacBook Air beside the cabinet, it is a Rust daemon that tells the brain how far into a
-space the furthest person has come.
+A network camera in — an Axis M3105-LVE — one small reading of the scene out to the show, and
+an annotated feed for humans. It has had two lives. First a Python process beside the brain,
+reading a person's arms for the mage rig, removed with it; that code is on the
+`last-version-with-mage` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now a Rust crate,
+`eyeball/`, running as threads inside the brain and handing the show how far into a space the
+furthest person has come.
 
-**It runs outside the brain (§1.6)**, and since the Pi could barely follow one person, on a
-machine of its own: the Pi's spare cores are not enough for a detector and the DMX loop
-together. It reaches the brain over the Pi's closed wired segment.
+**Inside the brain (§1.6).** One machine and no hop: the reading crosses a latest-value seam
+to the show, the same kind of seam an OSC receiver would publish on if a sensor ever moved to
+another machine (§1.4). The price is the one §1.6 names: a crash in the inference runtime is
+a crash of the brain. And the Pi's cores are shared with the DMX loop, so the detector runs
+below the brain's real-time threads, on at most three of the four, and a slow model costs the
+eyeball frames and never the rig one.
 
-**Three outputs, three audiences.** The reading goes to the brain as OSC messages over UDP
-(§1.4) — a standard format any OSC tool can send and read, not a stream of our own — because
-a late frame is worthless and dropping it beats delivering it in order. The first life sent
-datagrams of its own on the loopback; OSC replaced them. It is sent once per processed frame and never
-repeated, so silence and a wedged sender are the same observation, and the brain's staleness
-window is what turns either into the safe default. The annotated feed goes to a browser over
-HTTP, because that is what a human uses to aim a camera. Health goes to MQTT.
+**Three outputs, three audiences.** The reading goes to the show, once per processed frame
+and never repeated, with the time it was seen, so a stalled camera or a wedged detector is a
+snapshot going stale, which the show's staleness window turns into the safe default. The
+annotated feed goes to a browser over HTTP, because that is what a human uses to aim a
+camera; it binds the WireGuard address alone, like the sACN receiver, because a wildcard
+would show the space, and whoever is in it, to the 4G uplink's public address. Telemetry —
+the reading itself among it — goes to MQTT through the brain's connection.
 
-**The brain reads the least it needs.** The daemon reduces what the model sees to the one
+**The show reads the least it needs.** The eyeball reduces what the model sees to the one
 quantity the show uses and keeps the rest on its own side, where the feed draws it. In the
 first life that was arm angles, not the seventeen joints of one pose model; in the second it
 is one distance, not boxes or a count. The estimator is expected to be replaced, and a schema
 naming its internals would have to change with it.
 
-**The camera is configured by the daemon, not by hand.** The host, user and password are the
+**The camera is configured by the eyeball, not by hand.** The host, user and password are the
 only camera settings in its configuration; which stream, at what size and rate, the image
-rotation, and the sensor's settings are the daemon's to decide. It sets the camera's
+rotation, and the sensor's settings are the eyeball's to decide. It sets the camera's
 parameters over VAPIX on every start, reads them back, and publishes any disagreement,
 because a setting made by hand in the camera's web UI is lost on a factory reset or a
 replacement camera. Infrared beats visible light by a wide margin, so it runs the IR-cut
@@ -541,14 +557,19 @@ queue; so the reader keeps only the newest and drops what has piled up, and a sl
 shows as a lower frame rate on the broker rather than as a show that reacts late.
 
 **The feed costs nothing unwatched.** Drawing on a frame is cheap; compressing it to JPEG
-again is a tenth of the detector's budget on a two-core machine. So the feed is encoded on
-its own thread, from the latest annotated frame, and only while a browser is connected.
+again is not, on a Pi already running a detector. So the feed is encoded on its own thread,
+from the latest annotated frame, and only while a browser is connected.
 
-#### On `eyeson`: one distance
+**Footage in place of the camera.** The reader takes a recorded MJPEG file as readily as the
+camera's stream, so the model, its threshold and the aiming are judged against the same
+walks every time, and the show can be driven with nobody in the space.
+
+#### In the brain: one distance
 
 A person detector, not a pose model: boxes are enough, and a person's feet are the bottom
 of their box. A YOLOX model (Apache-2.0, published as ONNX) runs on the CPU through ONNX
-Runtime.
+Runtime, or through `tract`, pure Rust, if it is fast enough; the model is compiled into the
+binary (§2.3).
 
 **No calibration, only aiming.** The space has two benchmarks, and they are two columns
 fixed in the camera's picture: the camera, square on to the path, is aimed so the benchmarks
@@ -562,19 +583,15 @@ get wrong.
 **The unit is the space, not the metre.** The distance is 1 at one benchmark and 0 at the
 other, so nothing is ever measured with a tape, and an empty space is `+∞`: infinitely far,
 so every comparison a show makes falls the safe way with no magic number. Debouncing and
-hysteresis are the show's policy, not the daemon's: it reports what it saw in each frame,
+hysteresis are the show's policy, not the eyeball's: it reports what it saw in each frame,
 and tracks nobody.
 
-**Built on the development Mac.** The crate sits outside the cargo workspace, like the
-ball's, built on the Mac for `x86_64-apple-darwin` and shipped as a binary, sharing only the
-`stem` crate with the brain. So `eyeson` needs no toolchain and no internet, and sits on the
-closed wired segment alone, reached through the Pi.
+#### Beside the brain: arm angles
 
-#### On the Pi: arm angles
-
-It ran as its own Python process, on OpenCV and numpy, with a MoveNet pose model on TFLite
-or ONNX. The model got three of the Pi's cores, leaving one for the DMX loop. The preview was
-shown to the audience, so the drawn skeleton was a deliverable, not a debug view.
+It ran as its own Python process on the Pi, on OpenCV and numpy, with a MoveNet pose model on
+TFLite or ONNX, and sent the brain its own datagrams over UDP on the loopback. The model got
+three of the Pi's cores, leaving one for the DMX loop. The preview was shown to the audience,
+so the drawn skeleton was a deliverable, not a debug view.
 
 **A person is several landmarks.** The model now and then puts a confident landmark on a
 bush, so a person was reported only once five landmarks cleared the confidence threshold.

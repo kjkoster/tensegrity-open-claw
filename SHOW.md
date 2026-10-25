@@ -158,18 +158,17 @@ The tombstone is `+∞`: infinitely far is what an empty yard means, every compa
 show then falls the safe way without a special case, and there is no magic number to
 remember.
 
-The distance comes from one place: **the eyeball**, on `eyeson`, watching the camera. It
-sends the distance of the furthest person it sees between the benchmarks, or the tombstone,
-once per camera frame it has processed — about ten a second on `eyeson`, so a value stands
-for two or three of the rig's frames, and the heart's glide is what turns those steps into a
-pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: a dead eyeball idles the show on
-the rose, which is the safe default, and `health/eyeball` says why. Anything else on the
-network can send the same message to stand in for it — a laptop with `oscsend` is how the
-heart is heard quickening before the eyeball exists.
+The distance comes from one place: **the eyeball**, inside the brain, watching the camera.
+It hands the show the distance of the furthest person it sees between the benchmarks, or the
+tombstone, once per camera frame it has processed — a few a second on the Pi, so a value
+stands for several of the rig's frames, and the heart's glide is what turns those steps into
+a pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: an eyeball that has lost its
+camera idles the show on the rose, which is the safe default, and `eyeball/camera` says why.
+Recorded footage played into the eyeball in place of the camera is how the heart is heard
+quickening with nobody on the path.
 
-The distance arrives over OSC; the face's buttons are handed over by the face inside the
-brain. Each reaches the show as its own snapshot — the OSC transport is in
-[`README.md`](README.md); what the eyeball sends is in [§14](#14-the-eyeball-on-eyeson).
+The distance and the face's buttons each reach the show as their own snapshot; what the
+eyeball does is in [§14](#14-the-eyeball).
 
 ## 7. The lamps
 
@@ -239,7 +238,7 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `STROBE_HEADS`, `STROBE_RATE` | heads 2 and 3, fast | which heads strobe in the thunderclap |
 | `THUNDER_RADIUS_DEG`, `THUNDER_HOP_SECS` | 15°, 0.4 s | the circle each head hops around in the thunderclap, and how often it hops |
 | `DOOR_AMBER` | (255, 110, 0) | the door, as R, G, B on the wash |
-| `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone — twenty of its frames |
+| `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone; with `SCARE_CONFIRM_SECS`, set from the frame rate measured on the Pi |
 
 The sound table names each recording and its gain; everything else about a recording the
 build reads from the file:
@@ -264,9 +263,9 @@ is *how* you set them on each model, which does not change.
 |---|---|---|
 | 4× U\`King ZQ02015 moving head (the heads) | DMX off the HAT, 3-pin | Named `Head 1` to `Head 4`, left to right as seen from the street. Address (`Addr`) and mode (`CHnd`) from the display menu; `12CH`, the mode that carries Pan Fine and Tilt Fine, which the presets require. See [§12](#12-front-panel-settings-on-the-heads). |
 | 1× HQ Power VDPLPS36B2 LED par (the door wash) | DMX off the HAT, 3-pin | Named `Wash door`. HQ Power sells it as a pinspot; it is a wash. Mode and address are DIP switches: set the binary pattern from the datasheet. 3-channel RGB mode — the 5-channel mode adds a strobe and macros the show does not use and the e-stop would have to mask. |
-| The face | GPIO | Unchanged in the cabinet. Its buttons enter the brain through the same door as the OSC inputs — [`README.md`](README.md). |
+| The face | GPIO | Unchanged in the cabinet. |
 | The mouth (the Alesis io\|2 and two powered speakers) | USB on the hub; TRS to the speakers | See [§13](#13-sound). |
-| The eyeball (the Axis camera and `eyeson`) | Ethernet | See [§14](#14-the-eyeball-on-eyeson). |
+| The eyeball's camera (the Axis M3105-LVE) | Ethernet, through its PoE injector, into the Pi's `eth0` | See [§14](#14-the-eyeball). |
 
 Not in this show: the ball, the laser, and anything rented. The deploy builds no wireless
 firmware when the workspace patches no wireless fixture.
@@ -334,25 +333,15 @@ two powered speakers. Nothing captures any more.
 The e-stop silences the mouth along with the frame. A console takeover does not: sound is not
 part of the universe, so the show's sound runs on underneath a takeover.
 
-## 14. The eyeball on `eyeson`
+## 14. The eyeball
 
-The Axis M3105-LVE watches the yard; `eyeson`, the 2015 MacBook Air, runs the eyeball, a Rust
-daemon that finds people in the picture, places their feet on the path, and tells the brain
-how far the furthest of them is from the trigger line. The Pi could barely follow one person;
-the Mac follows a group. The daemon's design is [`DESIGN.md`](DESIGN.md) §3.6.
+The Axis M3105-LVE watches the yard; the eyeball, inside the brain on the Pi, finds people in
+the picture, places their feet on the path, and hands the show how far the furthest of them
+is from the trigger line. Its design is [`DESIGN.md`](DESIGN.md) §3.6.
 
-**Network.** The Ethernet hub in the cabinet, on its own power supply, joins the Pi's `eth0`, the camera's PoE
-injector and `eyeson` on one wire, `10.0.1.0/24`: the Pi at `10.0.1.1`, `eyeson` at
-`10.0.1.2` through a USB Ethernet adapter, the camera at `10.0.1.90`. On that wire `eyeson`
-reaches the Pi for OSC and MQTT and the camera for video.
-
-That wire is the only network `eyeson` is on. It is reached through the Pi —
-`ssh -J claw-pi 10.0.1.2`, over WireGuard to the Pi and out of its `eth0` — and deployed to
-the same way, by `deploy-eyeson.sh`. The eyeball is built on `riverrain`, so `eyeson` needs
-neither a toolchain nor the internet. The annotated feed is watched through the same hop:
-`ssh -L 8080:10.0.1.2:8080 claw-pi`, then `http://localhost:8080/`. Over 4G, every second of
-it is paid for out of the data bundle; on site, a laptop on the hub or the access point goes
-through the same tunnel for free.
+**Network.** The camera's PoE injector plugs straight into the Pi's `eth0`, `10.0.1.0/24`:
+the Pi at `10.0.1.1`, the camera at `10.0.1.90`. The Ethernet hub goes between them only when
+a laptop needs the wire too.
 
 **Camera.** Mounted so the path runs across the picture, square on: the yard entry at the
 right edge, the trigger line towards the left, the whole walk between them, and the pavement
@@ -383,53 +372,37 @@ in the picture, so it is only as linear in the yard as the camera is square to t
 halfway along reads well off 0.5, the camera is angled — turn it rather than add a mark;
 nothing in the show needs it exact.
 
-**The annotated feed.** `http://10.0.1.2:8080/` is the camera's picture with the eyeball's
-reading drawn on it: every box, each person's ground point, the two benchmark columns, the
-distance it is about to send, and the frame rate it is managing. It is how the camera is
-aimed and the benchmarks are set, and on the night it is how the operator sees what the
-rig sees; it is the operator's view, not part of what the yard sees.
+**The annotated feed.** `http://10.8.0.3:8080/`, from the Mac over WireGuard, is the
+camera's picture with the eyeball's reading drawn on it: every box, each person's ground
+point, the two benchmark columns, the distance it is handing the show, and the frame rate it
+is managing. It is how the camera is aimed and the benchmarks are set, and on the night it is
+how the operator sees what the rig sees; it is the operator's view, not part of what the yard
+sees. Over 4G it is paid for out of the data bundle for as long as it is open.
 
 It costs detector time: drawing on a frame is nothing, but compressing the result to JPEG
-again is around 5 ms at 640×480 on `eyeson`, a tenth of the detector's budget at 10 frames/s.
-So the feed is encoded on its own thread from the latest annotated frame, and **only while a
-browser is connected** — with nobody watching it costs nothing at all, and with someone
-watching `eyeball/fps` says what it costs.
+again is not, on a Pi. So the feed is encoded on its own thread from the latest annotated
+frame, and **only while a browser is connected** — with nobody watching it costs nothing at
+all, and with someone watching `eyeball/fps` says what it costs.
 
-**What it sends**, over OSC to the brain, once per camera frame it has processed and never
-otherwise — a value is sent when there is a new one, and the brain holds the last:
+**What it hands the show**, once per camera frame it has processed and never otherwise: the
+distance from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the
+line — or `+∞`, the tombstone, with the time it was seen. The show holds the last.
 
-| address | arguments | |
-|---|---|---|
-| `/eyeball` | `,f` distance | from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the line — or `+∞`, the tombstone |
+**How often that is.** The detector sets the pace, not the camera, and on the Pi it shares
+four cores with the DMX loop: the model runs at normal priority on at most three of them,
+below the brain's real-time threads, so a slow model costs frames of the eyeball's and never
+a frame of the rig's. How many it manages is measured before the model is settled; about five
+a second is what the show wants, and two frames are what `SCARE_CONFIRM_SECS` is meant to
+cover. The camera is asked for 640×480 MJPEG at a rate a little above it — a stream the
+detector cannot keep up with would queue frames and the distance would lag reality by the
+queue, so the eyeball always takes the newest frame and drops what has piled up behind it,
+and publishes `eyeball/fps` so the queue shows up as a rate below the camera's rather than as
+a show that reacts late.
 
-**How often that is.** The detector sets the pace, not the camera. `eyeson` is a 2015
-MacBook Air: a dual-core Broadwell i5 at 1.6 GHz, no usable GPU for this, so the model runs
-on two CPU cores through ONNX Runtime. Rough expectations at 416 px input, decode and
-resize included — to be measured, which is why the model is a decision and not a fact:
-
-| model | per frame | rate |
-|---|---|---|
-| YOLOX-Nano | 50–100 ms | 10–20 frames/s |
-| YOLOX-Tiny | 120–250 ms | 4–8 frames/s |
-| YOLOv8n at 640 px | 200–400 ms | 2–5 frames/s |
-
-Ten frames a second is the target: a walking person moves a step every few frames, well
-inside what the heart's glide and the two-frame scare confirmation expect, and it leaves the
-Mac cool. The camera is asked for 640×480 MJPEG at that rate — a stream the detector cannot
-keep up with would queue frames and the distance would lag reality by the queue, so the
-eyeball always takes the newest frame and drops what has piled up behind it, and publishes
-`eyeball/fps` so the queue shows up as a rate below the camera's rather than as a show that
-reacts late.
-
-**On MQTT**: `health/eyeball`, `eyeball/fps` (frames processed per second), `eyeball/people`
-(boxes between the benchmarks, telemetry only — the show never sees a count),
-`eyeball/camera` (`ok`, or why not). Health goes to the broker on the Pi; a dead `eyeson` is
-`gone`.
-
-**Service.** `eyeball/org.kjkoster.eyeball.plist` installs as a launch daemon in
-`/Library/LaunchDaemons`, so it runs from boot without a login and is restarted when it dies.
-`eyeson` sleeps with the lid closed unless told not to: `sudo pmset -a sleep 0 disablesleep 1`
-is in the one-time setup in [`README.md`](README.md), along with Remote Login for the deploy.
+**On MQTT**, through the brain's connection: `eyeball/distance` (what it saw, each frame, in
+paths, or `tombstone` — beside `brain/presence`, which is what the show made of it),
+`eyeball/fps` (frames processed per second), `eyeball/people` (boxes between the benchmarks,
+telemetry only — the show never sees a count), `eyeball/camera` (`ok`, or why not).
 
 ## 15. Show times
 
@@ -460,8 +433,8 @@ In this order, because each step needs the one before it.
    than stretching the darkness.
 5. **Levels**: the thunderclap first, then listen to the heartbeat from the street.
 6. **The show by button**: test mode on, fire the scare with the right button, from `idle`,
-   from `respite`, and once mid-scare. For the heart's pace, send `/eyeball` from a laptop
-   with `oscsend` and listen to it quicken. Nothing here needs the eyeball.
+   from `respite`, and once mid-scare. Nothing here needs the eyeball.
 7. **The camera**: with the annotated feed open, aim it square at the path until the trigger
    mark sits on the rose and the entry mark on the path's entry; walk the path and watch the
-   feed and `brain/presence`. Then the show by walking it.
+   feed, `eyeball/distance` and `brain/presence`, and listen to the heart quicken. Then the
+   show by walking it.

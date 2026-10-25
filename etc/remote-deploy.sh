@@ -56,10 +56,11 @@ python_daemon() {
 # rig is a long way from the person who would otherwise have to walk to it. A deploy that dies
 # at the build should still have installed the way back in.
 #
-# The script carries its own configuration — the interface, the hub and port whose power gets
-# cut, the tunnel address — and the hub and port were established by cutting them and watching
-# the dongle's LED go dark. That makes this copy the source of truth for those values: anything
-# retuned on the Pi and not carried back here is overwritten by the next deploy.
+# The script carries its own configuration — the modem's USB vendor, the ping targets, the
+# tunnel address and the thresholds — and finds the modem itself on every run, so nothing in it
+# names a port, a hub or an interface. That makes this copy the source of truth for those
+# values: anything retuned on the Pi and not carried back here is overwritten by the next
+# deploy.
 #
 # Only the timer is enabled. The service is `oneshot` and deliberately has no `[Install]`
 # section — something has to decide when the check runs, and that is the timer's whole job.

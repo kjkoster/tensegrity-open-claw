@@ -19,8 +19,9 @@ RestartSec=5
 # No real-time scheduling either, and a positive Nice on top: everything this daemon reads is
 # slow-moving, and none of it is worth a single late DMX frame.
 Nice=10
-# Every core but one. Core 3 is brain's, and a health daemon waking every thirty
-# seconds has no business on it.
+# Every core but one, so core 3 is always free of a health daemon waking every thirty seconds.
+# The brain pins nothing itself (see brain.service), so this keeps a core quieter for its
+# real-time threads rather than reserving one for them.
 CPUAffinity=0 1 2
 
 [Install]
