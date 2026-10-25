@@ -5,11 +5,12 @@
 //! end of that, and the reason it cannot be delegated to Stem: only the process itself can
 //! hand the broker a will, and only a will distinguishes "stopped" from "died".
 //!
-//! One process may hold several clients. The face lives inside the brain but is a fixture of
-//! its own, and it gets its own client, its own health topic and its own will, so the tree
-//! reads the way the rig is built rather than the way it is compiled.
+//! One process holds one client. A part that lives inside the brain — the face, the mouth —
+//! lives and dies with it, so a will of its own would only repeat `health/brain`. It publishes
+//! its own subtree, `face/…`, through the brain's connection, with a [`Publisher::part`], so
+//! the tree still reads the way the rig is built rather than the way it is compiled.
 //!
-//! The packets and the health words are `rig_mqtt`'s, shared with any firmware. The brain
+//! The packets and the health words are the `stem` crate's, shared with any firmware. The brain
 //! publishes, never subscribes, always at QoS 0.
 //!
 //! Nothing here may touch frame timing. The publish queue is bounded and drops on overflow, a
@@ -46,10 +47,17 @@ struct Message {
 
 /// Which root a message's topic hangs under.
 enum Scope {
-    /// The client's own subtree: `brain/state/rig`.
+    /// The client's own subtree: `brain/rig`.
     Service,
-    /// What the client runs on, under `sys/`: `sys/brain/board`.
-    Sys,
+    /// A part's subtree, on the client's connection: `face/estop`.
+    Part(&'static str),
+    /// A rig-wide root with the owner beneath it — the part, or the client when there is none:
+    /// `sys/brain/board`, `dmx/face/address`. One subscription to the root then covers every
+    /// owner on the rig.
+    Rooted {
+        root: &'static str,
+        owner: Option<&'static str>,
+    },
 }
 
 /// What the telemetry thread can be asked to do. Both arrive on one channel so the goodbye
@@ -67,22 +75,53 @@ enum Command {
 #[derive(Clone)]
 pub struct Publisher {
     outgoing: Option<SyncSender<Command>>,
+    /// The part this publisher speaks for, whose name prefixes its topics in place of the
+    /// client's; `None` for the client itself.
+    part: Option<&'static str>,
 }
 
 impl Publisher {
     /// A publisher that goes nowhere, for a rig built without telemetry.
     pub fn disabled() -> Self {
-        Self { outgoing: None }
+        Self {
+            outgoing: None,
+            part: None,
+        }
     }
 
-    /// Queues one message under this client's own prefix. Never blocks, never fails loudly.
+    /// A publisher for a part inside this process, on this client's connection: its topics go
+    /// under `<part>/` instead of the client's name.
+    pub fn part(&self, part: &'static str) -> Publisher {
+        Publisher {
+            outgoing: self.outgoing.clone(),
+            part: Some(part),
+        }
+    }
+
+    /// Queues one message under this publisher's prefix — the client's name, or its part's.
+    /// Never blocks, never fails loudly.
     pub fn publish(&self, topic: impl Into<String>, payload: impl Into<String>, retain: bool) {
-        self.send(Scope::Service, topic.into(), payload.into(), retain);
+        let scope = self.part.map_or(Scope::Service, Scope::Part);
+        self.send(scope, topic.into(), payload.into(), retain);
     }
 
-    /// Queues one fact about what this client runs on, retained, under `sys/<service>/`.
+    /// Queues one fact about what this client runs on, retained, under `sys/<owner>/`.
     pub fn publish_sys(&self, leaf: impl Into<String>, payload: impl Into<String>) {
-        self.send(Scope::Sys, leaf.into(), payload.into(), true);
+        self.send_rooted("sys", leaf.into(), payload.into());
+    }
+
+    /// Queues one fact about where this client or part sits on the universe, retained, under
+    /// `dmx/<owner>/`.
+    pub fn publish_dmx(&self, leaf: impl Into<String>, payload: impl Into<String>) {
+        self.send_rooted("dmx", leaf.into(), payload.into());
+    }
+
+    fn send_rooted(&self, root: &'static str, leaf: String, payload: String) {
+        let scope = Scope::Rooted {
+            root,
+            owner: self.part,
+        };
+        self.send(scope, leaf, payload, true);
     }
 
     fn send(&self, scope: Scope, topic: String, payload: String, retain: bool) {
@@ -187,6 +226,7 @@ pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
         handle,
         Publisher {
             outgoing: Some(outgoing.clone()),
+            part: None,
         },
         Farewell { outgoing, said },
     )
@@ -201,36 +241,39 @@ fn session(
     retained: &mut BTreeMap<String, String>,
     backoff_s: &mut u64,
 ) -> std::io::Result<()> {
-    let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, rig_mqtt::PORT);
+    let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, stem::PORT);
     let mut stream = TcpStream::connect(address)?;
     // Nagle would hold a small publish back waiting for company that never comes; these are
     // one-datagram-sized messages seconds apart.
     stream.set_nodelay(true)?;
 
-    stream.write_all(&rig_mqtt::connect(service))?;
+    stream.write_all(&stem::connect(service))?;
     read_connack(&mut stream)?;
     eprintln!("telemetry: {service}: connected to {address}");
     // Only once the broker has accepted us: a broker that keeps refusing must keep backing off,
     // and one that was simply restarted must not be waited on as if it had.
     *backoff_s = 1;
 
-    let health = rig_mqtt::health_topic(service);
-    stream.write_all(&rig_mqtt::publish(&health, rig_mqtt::CONNECTED, true))?;
+    let health = stem::health_topic(service);
+    stream.write_all(&stem::publish(&health, stem::CONNECTED, true))?;
     for (topic, payload) in retained.iter() {
-        stream.write_all(&rig_mqtt::publish(topic, payload, true))?;
+        stream.write_all(&stem::publish(topic, payload, true))?;
     }
 
     // Half the keepalive: the broker drops a client at 1.5× the interval it was given, so
     // pinging twice per interval means one lost ping is not a disconnection.
-    let tick = Duration::from_secs(u64::from(rig_mqtt::KEEPALIVE_S) / 2);
+    let tick = Duration::from_secs(u64::from(stem::KEEPALIVE_S) / 2);
     loop {
         match incoming.recv_timeout(tick) {
             Ok(Command::Publish(message)) => {
                 let topic = match message.scope {
                     Scope::Service => format!("{service}/{}", message.topic),
-                    Scope::Sys => rig_mqtt::sys_topic(service, &message.topic),
+                    Scope::Part(part) => format!("{part}/{}", message.topic),
+                    Scope::Rooted { root, owner } => {
+                        stem::rooted_topic(root, owner.unwrap_or(service), &message.topic)
+                    }
                 };
-                let packet = rig_mqtt::publish(&topic, &message.payload, message.retain);
+                let packet = stem::publish(&topic, &message.payload, message.retain);
                 // Recorded before the write, so a value whose write is what failed is the one
                 // the next connect replays.
                 if message.retain {
@@ -243,8 +286,8 @@ fn session(
                 // a second connection would be overwritten moments later by the will firing
                 // on this one — the broker publishes it whenever a connection drops without a
                 // DISCONNECT, and an exiting process drops all of them.
-                stream.write_all(&rig_mqtt::publish(&health, rig_mqtt::DISCONNECTED, true))?;
-                stream.write_all(&rig_mqtt::DISCONNECT)?;
+                stream.write_all(&stem::publish(&health, stem::DISCONNECTED, true))?;
+                stream.write_all(&stem::DISCONNECT)?;
                 stream.flush()?;
                 said.store(true, Ordering::Release);
                 return Ok(());
@@ -253,7 +296,7 @@ fn session(
             // client that is simply quiet. Draining only here, after the one packet that is
             // ever answered, keeps the drain's wait off every publish.
             Err(RecvTimeoutError::Timeout) => {
-                stream.write_all(&rig_mqtt::PINGREQ)?;
+                stream.write_all(&stem::PINGREQ)?;
                 drain(&mut stream)?;
             }
             // Every sender is gone, so nothing will be said any more, the goodbye included.
@@ -292,14 +335,14 @@ fn read_connack(stream: &mut TcpStream) -> std::io::Result<()> {
     // The connection is unusable until it arrives, which is why this one read waits far longer
     // than the drain does.
     stream.set_read_timeout(Some(Duration::from_secs(cfg::MQTT_CONNACK_TIMEOUT_S)))?;
-    let mut packet = [0u8; rig_mqtt::CONNACK_LEN];
+    let mut packet = [0u8; stem::CONNACK_LEN];
     stream.read_exact(&mut packet)?;
-    rig_mqtt::read_connack(&packet).map_err(|refused| match refused {
-        rig_mqtt::Refused::NotConnack(header) => std::io::Error::new(
+    stem::read_connack(&packet).map_err(|refused| match refused {
+        stem::Refused::NotConnack(header) => std::io::Error::new(
             ErrorKind::InvalidData,
             format!("expected CONNACK, got 0x{header:02x}"),
         ),
-        rig_mqtt::Refused::Code(code) => std::io::Error::new(
+        stem::Refused::Code(code) => std::io::Error::new(
             ErrorKind::PermissionDenied,
             format!("broker refused the connection, code {code}"),
         ),

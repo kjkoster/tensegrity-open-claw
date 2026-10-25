@@ -275,7 +275,7 @@ frame rate sits under.
 | `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
 | `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
-| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, `no_std` for the firmware, and, behind its `std` feature, the brain's client. It shares its directory with Stem's daemon and broker configuration |
+| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
 `main.rs` includes the generated patch and calendar, wires in the components it uses, and
@@ -328,7 +328,7 @@ The brain runs **two state machines, layered**, and keeps their states apart by 
 
 - The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes
   out. Its machine is in `cortex`'s frame loop, after the arbitration, and it is published on
-  `brain/state/rig`.
+  `brain/rig`.
 - The **show state** says what the show asks for. Its machine is the rig crate's Director,
   and [`SHOW.md`](SHOW.md) describes it.
 
@@ -387,8 +387,8 @@ publishes its own subtree through the brain's connection (§1.6).
 
 **The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
 program sees Stem, the process it reports to. It carries the health contract and the packets,
-`no_std` so the firmware can use them, and the std client a Rust daemon uses.
-`stem/rig_mqtt.py` is the Python half.
+purely `no_std` so the firmware can use them; each program brings its own transport, the
+brain's being `cortex::telemetry`. `stem/rig_mqtt.py` is the Python half.
 
 ### 3.2 The 4G watchdog
 

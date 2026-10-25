@@ -41,7 +41,7 @@ Each is a choice, written down so it can be changed on purpose.
 | How the mouth hears a trigger | A counter per sound in the cue, and mute as a level. The mouth reads the latest cue every period, four or five times a frame, and only a counter that has moved reads once — the face's presses work the same way. | A list of triggers per frame: replayed on every period the frame is still the latest. |
 | How a recording becomes samples | The build writes each WAV's raw PCM to `OUT_DIR`; the generated source wraps `include_bytes!` of it in a 2-byte-aligned static and views it as `&'static [i16]` with `slice::from_raw_parts`, in a `const`. The Pi and WAV are both little-endian. | A `const fn` turning the bytes into an `[i16; N]`: hundreds of thousands of compile-time iterations for a thunderclap, which runs into rustc's `long_running_const_eval` lint. A literal array: megabytes of generated source. |
 | Telemetry clients inside the brain | One connection, the brain's. The face, the mouth and the eyeball publish their subtrees, `face/…`, `mouth/…` and `eyeball/…`, through it, and have no `health/` topic of their own. A client and a will are for a process that can die on its own: the brain, the ball, Stem. | A client each, as the face and the ear had: none can die without the brain, so their wills only repeat `health/brain`, at the cost of a connection, a thread and a farewell apiece. |
-| `rig-mqtt` is renamed `stem` | The crate is the Rust programs' view of Stem, the process they report to, so it is named for it and moves into `stem/` beside the daemon, the broker configuration and `rig_mqtt.py`, its Python half. `cortex::telemetry`'s client moves into it, behind a `std` feature, so Stem's Rust side is one crate. | A directory of its own: Stem split across two places. |
+| `rig-mqtt` is renamed `stem` | The crate is the Rust programs' view of Stem, the process they report to, so it is named for it and lives in `stem/` beside the daemon, the broker configuration and `rig_mqtt.py`, its Python half. It stays purely `no_std`, for firmware; the brain's client, which needs sockets and threads, stays in `cortex` as `cortex::telemetry`. | A directory of its own: Stem split across two places. The client inside the crate behind a `std` feature: std in a crate kept `no_std` for firmware. |
 | Which heads strobe | Heads 2 and 3, the inner pair; 1 and 4 steady. | Any pair. A constant. |
 | Wash mode | 3-channel RGB. | 5-channel: strobe and macros the show does not use and the e-stop must mask. |
 | Where the camera connects | Its PoE injector's data port straight into the Pi's `eth0`, the camera re-addressed to `10.0.1.90`. The Ethernet hub goes in only when a laptop needs the wire as well. | The camera on the Pi's WiFi: every video frame over 2.4 GHz. |
@@ -81,22 +81,15 @@ Each needs a choice before the step that uses it.
 
 ## 1. Clear the decks
 
-A brain that runs with nothing on it: Stem's Rust side in one crate, and one broker
-connection. The old show is already replaced by a placeholder that keeps the rig in
-`blackout` with test mode on the door, the ear is gone (on the `last-version-with-ear` tag,
-whose capture thread is the mouth's starting point in chunk 2), and the workspace already
-patches this show's fixtures, with no scenes yet. The previous show is the
-`2026-10-23-ADE-Amsterdam` tag.
+A brain that runs with nothing on it. Done: a placeholder show that keeps the rig in
+`blackout` with test mode on the door; the ear gone (on the `last-version-with-ear` tag, whose
+capture thread is the mouth's starting point in chunk 2); the `stem` crate holding Stem's Rust
+half; one broker connection, with the face publishing through it; and the workspace patching
+this show's fixtures, with no scenes yet. The previous show is the `2026-10-23-ADE-Amsterdam`
+tag.
 
-- [ ] **`rig-mqtt` becomes `stem`, with the std client**: the crate moves into `stem/`
-      (`Cargo.toml`, `src/`) and is renamed, in the workspace members, the brain and
-      `cortex`, and in `deploy.sh`'s list; `cortex::telemetry`'s client moves into it behind a
-      `std` feature, with the broker's address a parameter, and the brain follows. The crate
-      stays `no_std` without that feature, and does without `alloc` wherever it can, for the
-      firmware to come.
-- [ ] The face: `FaceState`'s `right_held` becomes `right_presses`, a counter that moves on
-      the press, like the chords; the chord rule stays in the face. Its e-stop path is
-      unchanged. Its own client goes: its topics go out through the brain's.
+- [ ] The `stem` crate does without `alloc` wherever it can, for the firmware to come: the
+      packets written into a caller's buffer rather than returned as a `Vec`.
 
 **Landed when** `./deploy.sh` deploys clean, the e-stop holds and releases, the chord lights
 the lamps, `face/…` and `brain/…` report under one connection, and `ps -T` on the brain shows
@@ -183,7 +176,7 @@ with the camera on the table plugged into the Pi; nothing here needs a show.
 - [ ] **The Pi's power, first.** `get_throttled` reports under-voltage and throttling since
       boot (`0x50000`) with the Pi nearly idle; three cores of detector will draw more. A
       supply that holds 5.1 V at the Pi under load — an official 2.5 A one, on a short, thick
-      lead — before the timing below means anything, and `stem/stats/throttling/` watched
+      lead — before the timing below means anything, and `stem/throttling/` watched
       after.
 - [ ] **What the Pi manages.** The Pi is a 3B+ on 64-bit Trixie, so `ort`'s prebuilt
       ONNX Runtime fits; 905 MB of RAM and 1.8 GB free on the root partition. Download
@@ -196,13 +189,11 @@ with the camera on the table plugged into the Pi; nothing here needs a show.
 - [ ] **Core pinning**: sit down with which thread runs where — the frame loop, the
       detector and ONNX Runtime's pool, the mouth, Stem (pinned to cores 0–2 today) — and
       decide what pins where, from the code (`sched_setaffinity` per thread) or the units.
-      Today the brain has nine threads, every one `SCHED_FIFO` 50 and free to run on any
+      Today the brain has five threads, every one `SCHED_FIFO` 50 and free to run on any
       core: the main thread (the Embassy executor: the frame loop and the face), two unnamed
-      ones (most likely `embassy-time`'s timer driver, which wakes the frame loop, and
-      `signal-hook`'s signal thread), `sacn-in`, `ear`, `libusb_event` (from `rusb`), and one
-      telemetry thread per client, `telemetry-brain`, `telemetry-face`, `telemetry-ear`.
-      After this show's changes the ear and two of the telemetry threads are gone, and the
-      mouth and the eyeball's threads are new. Only the frame loop, its timer driver and the
+      ones (most likely `embassy-time`'s timer driver, which wakes the frame loop, and the
+      signal thread `cortex::run` spawns), `sacn-in` and `telemetry-brain`. The mouth and the
+      eyeball's threads are still to come. Only the frame loop, its timer driver and the
       mouth need real-time scheduling; the rest could drop to `SCHED_OTHER` as the eyeball's
       do. No core is isolated in `cmdline.txt`, and `/etc/systemd/system.conf` changes
       nothing, so there is nothing on the Pi to pull in yet. Whatever the session adds to
@@ -395,7 +386,7 @@ chunk 5.
   | `thunderclap` | dimmer full, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, others open; each head hops every `THUNDER_HOP_SECS` to a fresh uniform point inside `THUNDER_RADIUS_DEG` of its "Thunderclap" pose, motor speed fastest | off | thunderclap |
   | `respite` | dark, on "Thunderclap" | `DOOR_AMBER` | silent |
 
-- [ ] `brain/state/show` and `brain/state/testmode` retained; the `show: a → b — why` log
+- [ ] `brain/show` and `brain/testmode` retained; the `show: a → b — why` log
       lines.
 
 **Landed when**, at the bench, the scare runs from the cabinet door in test mode from every

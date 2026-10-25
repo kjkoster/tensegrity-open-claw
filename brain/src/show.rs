@@ -6,7 +6,7 @@
 //! fifteen minutes without a chord, because a rig left in it would ignore the calendar
 //! unattended.
 //!
-//! The show state is the brain's own: `brain/state/show` and `brain/state/testmode`, retained,
+//! The show state is the brain's own: `brain/show` and `brain/testmode`, retained,
 //! published on every change, and logged alongside.
 
 use crate::face::FaceState;
@@ -28,9 +28,9 @@ pub struct Show {
 impl Show {
     pub fn new(telemetry: Publisher) -> Self {
         eprintln!("show: blackout");
-        telemetry.publish("state/show", "blackout", true);
+        telemetry.publish("show", "blackout", true);
         eprintln!("show: test mode off");
-        telemetry.publish("state/testmode", rig_mqtt::boolean(false), true);
+        telemetry.publish("testmode", stem::boolean(false), true);
         Self {
             telemetry,
             seen_chords: 0,
@@ -63,6 +63,6 @@ impl Show {
         self.testing_since = on.then(Instant::now);
         eprintln!("show: test mode {}", if on { "on" } else { "off" });
         self.telemetry
-            .publish("state/testmode", rig_mqtt::boolean(on), true);
+            .publish("testmode", stem::boolean(on), true);
     }
 }

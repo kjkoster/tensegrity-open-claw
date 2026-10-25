@@ -49,14 +49,14 @@ would need a debounce of its own and would say nothing the distance does not.
 
 `cut` → `buildup` → `thunderclap` → `respite` is one sequence, the scare; it is three states
 rather than one because every consumer matches them exhaustively, test mode can watch each,
-and `brain/state/show` says which is running. From `respite` the show returns to `idle`.
+and `brain/show` says which is running. From `respite` the show returns to `idle`.
 
 The state is published retained on every change:
 
 | topic | values |
 |---|---|
-| `brain/state/show` | `blackout`, `idle`, `cut`, `buildup`, `thunderclap` or `respite` |
-| `brain/state/testmode` | whether test mode is on |
+| `brain/show` | `blackout`, `idle`, `cut`, `buildup`, `thunderclap` or `respite` |
+| `brain/testmode` | whether test mode is on |
 | `brain/presence` | the distance the show decided on this frame, in paths, or `tombstone` — see [§6](#6-presence-one-distance) |
 
 The log has a `show: …` line for each change of the show state, with what caused it.

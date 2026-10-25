@@ -10,13 +10,13 @@ never uptime.
 Two subtrees, both retained, because both answer questions asked after the interesting moment:
 
     sys/stem/…     the hardware: board, cores, CPU frequency and installed RAM — written once
-    stem/stats/…   how it is doing — temperature, throttling, memory, load, uplink
+    stem/…         how it is doing — temperature, throttling, memory, load, uplink
 
-One field per topic: `stem/stats/temperature_c`, `stem/stats/throttling/since_boot/under_voltage`.
-Nested readings become nested topics, so a subscriber can take a single number without knowing
+One field per topic: `stem/temperature_c`, `stem/throttling/since_boot/under_voltage`. Nested
+readings become nested topics, so a subscriber can take a single number without knowing
 anything about the shape it arrived in.
 
-The throttle word is the reason `stats` exists at all. A Pi that browns out under a PoE
+The throttle word is the reason Stem reports how the Pi is doing at all. A Pi that browns out under a PoE
 injector or cooks in a sealed cabinet reports both as flags that latch until reboot, and
 finding them by SSH after a bad show is finding them too late.
 
@@ -297,11 +297,12 @@ def main():
 
     while True:
         reading = stats()
-        telemetry.publish("stats", reading, retain=True)
+        for name, value in reading.items():
+            telemetry.publish(name, value, retain=True)
 
         present = set(reading["wifi"]["stations"] or {})
         for gone in stations - present:
-            telemetry.publish(f"stats/wifi/stations/{gone}/signal_dbm", None, retain=True)
+            telemetry.publish(f"wifi/stations/{gone}/signal_dbm", None, retain=True)
         stations = present
 
         latched = reading["throttling"]["since_boot"] if reading["throttling"] else {}

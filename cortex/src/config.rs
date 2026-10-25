@@ -45,7 +45,7 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 // Stem owns the broker; every daemon holds its own client and announces itself under
 // `health/`. Loopback, because the broker is on this Pi — what reaches the tunnel and the AP
 // is the broker's own listener, which is Stem's configuration to make, not this process's to
-// decide. The port and the keepalive are the rig's, in `rig_mqtt`.
+// decide. The port and the keepalive are the rig's, in the `stem` crate.
 pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
 // How long to wait for the CONNACK before treating the broker as unusable. Generous: it is a

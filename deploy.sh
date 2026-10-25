@@ -27,7 +27,8 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 #   the crates       the members of the cargo workspace
 #   claw.qxw         the claw's patch (what is where) and its presets
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
-#   stem/           the broker configuration, and whatever else Stem grows
+#   stem/           Stem's daemon and broker configuration, and the `stem` crate, the Rust
+#                    programs' half of its conventions
 #   etc/            what the deploy installs onto the Pi that belongs to no daemon: the
 #                    access point's configuration, the uplink watchdog (its script, its
 #                    unit and its timer), the boot configuration, and remote-deploy.sh,
@@ -39,7 +40,7 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build rig-mqtt brain fixtures stem etc)
+DIRECTORIES=(cortex cortex-build brain fixtures stem etc)
 FILES=(Cargo.toml claw.qxw)
 
 step "rsync sources to $PI:$PI_DIR"

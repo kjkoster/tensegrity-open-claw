@@ -368,12 +368,20 @@ show:   2026-10-21 13:00 CEST (+02:00, summer time) → 2026-10-21 22:00 CEST (+
 show:     dark 19:08 → 22:00
 ```
 
-The brain publishes its state under `brain/state/`, retained, on every change:
+The brain publishes its state, retained, on every change:
 
 | topic | values |
 |---|---|
-| `brain/state/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
-| `brain/state/show` | the show state; the show's own states are in [`SHOW.md`](SHOW.md) |
+| `brain/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
+| `brain/show` | the show state; the show's own states are in [`SHOW.md`](SHOW.md) |
+| `brain/testmode` | whether test mode is on |
+
+Rig-wide facts go under a root with their owner beneath it, retained: what each process runs
+on under `sys/<owner>/` (`sys/brain/board`, `sys/stem/ram_kb`), and where each sits on the
+universe under `dmx/<owner>/` (`dmx/brain/universe`, `dmx/brain/frame_rate_hz`,
+`dmx/face/address`). `sys/#`, `dmx/#` and `health/#` each read the whole rig in one
+subscription. A part inside the brain, such as the face, publishes its own subtree (`face/…`)
+on the brain's connection and has no `health/` topic of its own.
 
 The log has a `rig: …` line for each change of the rig state, and a `show: …` line for each
 change of the show state.
@@ -413,8 +421,8 @@ plus strobe, programs, resets and rotation, which Blackout leaves running.
   guess.
 - **The sound stops too.** The mouth is muted while the e-stop is pressed, at boot as well.
   A console takeover does not mute it: sound is not part of the universe.
-- **The show does not know.** It runs on underneath the stop, so `brain/state/show` keeps
-  reporting the show state it is in. The rig state is `brain/state/rig`; the button itself
+- **The show does not know.** It runs on underneath the stop, so `brain/show` keeps
+  reporting the show state it is in. The rig state is `brain/rig`; the button itself
   is `face/estop`.
 - **The overrides are compiled from the fixture definitions.** A shutter, Effect or
   Maintenance channel whose `.qxf` does not mark the band the stop needs fails the build,

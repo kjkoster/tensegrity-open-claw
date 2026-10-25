@@ -22,15 +22,14 @@ include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 include!(concat!(env!("OUT_DIR"), "/shows.rs"));
 
 fn main() {
-    // First, so the lamps are dark and the inputs pulled up while everything else starts. Its
-    // client comes up beside it, as a fixture of its own rather than a topic of the brain's.
-    // It reads its lamps out of the frames the brain sends, and the show reads its state.
-    let (_face_telemetry, face_publisher, face_farewell) = telemetry::spawn("face");
-    let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
-    let (face, face_state) = face::claim(face_publisher, sent_frames);
-    let estop_state = face_state.clone();
+    // The face first, so the lamps are dark and the inputs pulled up while everything else
+    // starts. It publishes its own `face/…` subtree on the brain's connection, reads its lamps
+    // out of the frames the brain sends, and the show reads its state.
     let (_brain_telemetry, brain_publisher, brain_farewell) =
         telemetry::spawn(cortex::TELEMETRY_SERVICE);
+    let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
+    let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
+    let estop_state = face_state.clone();
     let mut show = Show::new(brain_publisher.clone());
 
     cortex::run(Rig {
@@ -51,6 +50,6 @@ fn main() {
         }),
         frames,
         telemetry: brain_publisher,
-        farewells: vec![face_farewell, brain_farewell],
+        farewells: vec![brain_farewell],
     })
 }

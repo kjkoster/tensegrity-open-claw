@@ -6,12 +6,12 @@
 //! from the frame that actually goes out. So a console that takes the rig over drives them,
 //! and the e-stop darkens them with everything else.
 //!
-//! Holding both buttons for two seconds is a chord. A left press is counted on release, not on
-//! press, because only the release tells a button pressed alone from one that became half of
-//! a chord, and neither of the presses that made a chord counts on its own. Presses and chords
-//! are counters rather than flags, so a show that reads the state once per frame cannot miss
-//! one that came and went between two frames. The right button is read as held instead, for
-//! as long as it is down on its own.
+//! Holding both buttons for two seconds is a chord. A right press is counted the moment the
+//! button goes down, so it acts at once; the price is that a chord begun with the right button
+//! counts a press too, so a chord is best begun with the left one. Presses and chords are
+//! counters rather than flags, so a show that reads the state once per frame cannot miss one
+//! that came and went between two frames. The left button has no job of its own: it is half
+//! of the chord.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
@@ -20,8 +20,9 @@
 //! The lamps dim through the Pi's two hardware PWM channels, not a software PWM: that is a
 //! busy-waiting real-time thread per pin, competing with audio and the DMX timing.
 //!
-//! The face is a fixture of its own on the broker, with its own client beside the brain's:
-//! `health/face`, and `face/left_button`, `face/right_button` and `face/estop`, retained.
+//! The face is a part of its own on the broker, publishing through the brain's connection:
+//! `face/left_button`, `face/right_button` and `face/estop`, retained. It has no `health/`
+//! topic: it polls on the frame loop's own executor, so it lives and dies with the brain.
 
 use crate::patch;
 use cortex::dmx::Frame;
@@ -60,21 +61,14 @@ pub struct FaceState {
     /// Chords so far. Like the presses below, a count whose differences are what mean
     /// anything.
     pub chords: u32,
-    /// Left presses so far, each pressed and released on its own.
-    pub left_presses: u32,
-    /// Whether the right button is down on its own, not as half of a chord.
-    pub right_held: bool,
+    /// Right presses so far, each counted as the button settles down.
+    pub right_presses: u32,
 }
 
-/// Tracks the chord across polls.
+/// Tracks the chord across polls: consecutive polls with both buttons down.
 #[derive(Default)]
 struct Chord {
-    /// Consecutive polls with both buttons down.
     held: u16,
-    /// Whether each button has been half of a chord since it was last pressed, which takes
-    /// the left one's release out of the count and stops the right one counting as held.
-    left_in_chord: bool,
-    right_in_chord: bool,
 }
 
 /// The face's pins, claimed and configured, waiting for [`spawn`] to hand them to their
@@ -168,14 +162,13 @@ pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<F
     // Where the lamps sit on the wire, under the same topics any fixture uses, read off the patch
     // so they follow the workspace. The face has no address field: its first channel is its
     // start address.
-    telemetry.publish("dmx/universe", patch::SACN.universe.to_string(), true);
-    telemetry.publish("dmx/address", (patch::FACE.all()[0].slot() + 1).to_string(), true);
+    telemetry.publish_dmx("universe", patch::SACN.universe.to_string());
+    telemetry.publish_dmx("address", (patch::FACE.all()[0].slot() + 1).to_string());
 
     let state = FaceState {
         estop: contacts.decide(&telemetry),
         chords: 0,
-        left_presses: 0,
-        right_held: false,
+        right_presses: 0,
     };
     let (states, state_reader) = latest(state);
     let face = Face {
@@ -231,13 +224,14 @@ async fn input_task(mut face: Face) -> ! {
             estop_quiet = 0;
         }
 
-        let left_changed = face.left_button.poll(&face.telemetry);
-        face.right_button.poll(&face.telemetry);
+        face.left_button.poll(&face.telemetry);
+        if face.right_button.poll(&face.telemetry) && face.right_button.pressed() {
+            face.state.right_presses = face.state.right_presses.wrapping_add(1);
+        }
         chord.observe(
             &mut face.state,
             face.left_button.pressed(),
             face.right_button.pressed(),
-            left_changed,
         );
         face.states.publish(face.state);
 
@@ -248,12 +242,10 @@ async fn input_task(mut face: Face) -> ! {
 }
 
 impl Chord {
-    /// Counts the gestures one poll completes and notes whether the right button is held on
-    /// its own, from the buttons' settled levels and whether the left one just changed.
-    fn observe(&mut self, state: &mut FaceState, left: bool, right: bool, left_changed: bool) {
+    /// Counts a chord when both buttons, at their settled levels, have been down for the
+    /// chord's length.
+    fn observe(&mut self, state: &mut FaceState, left: bool, right: bool) {
         if left && right {
-            self.left_in_chord = true;
-            self.right_in_chord = true;
             self.held = self.held.saturating_add(1);
             // Equality rather than at-least, so a chord held on counts once.
             if self.held == CHORD_SAMPLES {
@@ -262,18 +254,6 @@ impl Chord {
         } else {
             self.held = 0;
         }
-        if left_changed && !left {
-            if !self.left_in_chord {
-                state.left_presses = state.left_presses.wrapping_add(1);
-            }
-            self.left_in_chord = false;
-        }
-        if !right {
-            self.right_in_chord = false;
-        }
-        // A press that turns into a chord counts as held until the left button joins it, a
-        // poll or a few at most.
-        state.right_held = right && !self.right_in_chord;
     }
 }
 
@@ -335,8 +315,8 @@ impl EstopContacts {
         let estop = self.read();
         // Pressed or not, like the buttons, unless the wiring says it cannot tell.
         let (state, word) = match estop {
-            Estop::Released => ("RELEASED", rig_mqtt::boolean(false)),
-            Estop::Pressed => ("PRESSED", rig_mqtt::boolean(true)),
+            Estop::Released => ("RELEASED", stem::boolean(false)),
+            Estop::Pressed => ("PRESSED", stem::boolean(true)),
             Estop::CableFault => ("CABLE FAULT (treated as pressed)", "cable_fault"),
             Estop::ContactFault => ("CONTACT FAULT (treated as pressed)", "contact_fault"),
         };
@@ -383,7 +363,7 @@ impl Input {
 
     fn publish(&self, telemetry: &Publisher) {
         if let Some(topic) = self.button {
-            telemetry.publish(topic, rig_mqtt::boolean(self.pressed()), true);
+            telemetry.publish(topic, stem::boolean(self.pressed()), true);
         }
     }
 

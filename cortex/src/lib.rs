@@ -184,11 +184,11 @@ pub fn run(mut rig: Rig) -> ! {
         eprintln!("{name}:   {preset}");
     }
 
-    // What the brain was built as and against goes under `brain/`, retained, so a subscriber
-    // arriving later still gets it.
+    // Where the brain sits on the universe, under `dmx/brain/`, and what it runs on, under
+    // `sys/brain/`, retained, so a subscriber arriving later still gets them.
     let publisher = &rig.telemetry;
-    publisher.publish("dmx/universe", sacn.universe.to_string(), true);
-    publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
+    publisher.publish_dmx("universe", sacn.universe.to_string());
+    publisher.publish_dmx("frame_rate_hz", FRAME_RATE_HZ.to_string());
     publish_system(publisher);
 
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with

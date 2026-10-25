@@ -26,21 +26,22 @@ subscribes *after* the interesting moment, and an unretained tree is empty exact
 No leading slash: `health/stem`, not `/health/stem`. A leading slash is legal MQTT but
 creates an anonymous empty first level, and `health/#` then matches nothing.
 
-## sys/<service>
+## sys/<owner> and dmx/<owner>
 
-What a process runs on — board, cores, memory — retained, under `sys/` rather than under its
-own name, so `sys/#` is the hardware of the whole rig in one subscription, the way `health/#`
-is its liveness.
+Facts the whole rig is read by go under a rig-wide root with the owner beneath it, retained:
+what a process runs on — board, cores, memory — under `sys/`, and where it sits on the
+universe under `dmx/`. `sys/#` and `dmx/#` then read the whole rig in one subscription each,
+the way `health/#` reads its liveness.
 
 ## Everything else
 
-Telemetry publishes under the service's own name — `stem/stats`, `brain/state/show` — so the
+Telemetry publishes under the service's own name — `stem/temperature_c`, `brain/show` — so the
 tree says which process asserted a thing, and a dead process's topics stop moving instead of
 being quietly taken over.
 
 One field per topic, never a JSON document. A payload that has to be parsed before it can be
 read is a payload no browser, `mosquitto_sub` or dashboard can chart, and the structure it
-carries is structure MQTT already has: `stem/stats/temperature_c` is the whole path and the
+carries is structure MQTT already has: `stem/temperature_c` is the whole path and the
 whole value. Nested values expand into nested topics, so a dict becomes a subtree and nothing
 downstream has to know it was ever a dict.
 """
@@ -51,7 +52,7 @@ import sys
 
 HOST = os.environ.get("RIG_MQTT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RIG_MQTT_PORT", "1883"))
-# The same value as `rig_mqtt::KEEPALIVE_S` on the Rust clients.
+# The same value as `stem::KEEPALIVE_S` on the Rust clients.
 KEEPALIVE_S = 10
 # The longest wait between reconnect attempts, matching the brain's. paho's own default is two
 # minutes, which is two minutes of a broker being back and Stem still reading as gone.

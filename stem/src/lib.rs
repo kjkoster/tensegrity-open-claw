@@ -1,5 +1,6 @@
-//! The rig's MQTT conventions, for the clients written in Rust: the health contract, and the
-//! handful of MQTT 3.1.1 packets a publish-only client needs to keep it.
+//! Stem as the Rust programs see it: the rig's MQTT conventions — the health contract, and the
+//! handful of MQTT 3.1.1 packets a publish-only client needs to keep it. The transport is each
+//! program's own: the brain's client is `cortex::telemetry`, a firmware's is its own task.
 //!
 //! The Rust half of `stem/rig_mqtt.py`, and it exists for the same reason that file does: a
 //! liveness convention that two processes implement slightly differently is worse than none,
@@ -17,11 +18,13 @@
 //! DISCONNECT. That is what makes `disconnected` (a stop, a restart, a deep sleep) and `gone` (a
 //! crash, a lost link, a lost supply) a real distinction.
 //!
-//! ## sys/<service>
+//! ## sys/<owner> and dmx/<owner>
 //!
-//! What a client runs on — its board, cores, memory, build — retained, under `sys/` rather than
-//! under its own name, so `sys/#` is the hardware of the whole rig in one subscription, the way
-//! `health/#` is its liveness.
+//! Facts the whole rig is read by are published under a rig-wide root, with the owner beneath
+//! it, rather than under the owner's own name: what a client runs on — board, cores, memory,
+//! build — under `sys/`, and where a client or a part sits on the universe — universe,
+//! address, frame rate — under `dmx/`. Both retained. `sys/#` is then the hardware of the whole
+//! rig in one subscription, and `dmx/#` its patch, the way `health/#` is its liveness.
 //!
 //! Every other topic a client publishes sits under its own service name, one scalar per topic.
 //!
@@ -84,9 +87,9 @@ pub fn health_topic(service: &str) -> String {
     format!("health/{service}")
 }
 
-/// Where one fact about what `service` runs on is published: `sys/brain/board`.
-pub fn sys_topic(service: &str, leaf: &str) -> String {
-    format!("sys/{service}/{leaf}")
+/// Where one rig-wide fact about `owner` is published: `sys/brain/board`, `dmx/face/address`.
+pub fn rooted_topic(root: &str, owner: &str, leaf: &str) -> String {
+    format!("{root}/{owner}/{leaf}")
 }
 
 /// A boolean as a payload. Spelled out rather than `{}`-formatted so every client on the rig

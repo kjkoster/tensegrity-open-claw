@@ -27,7 +27,7 @@
 //! fixtures are doing, and silence leaves them where they were, by their own signal-loss
 //! behaviour. Neither boot hold nor shutdown can be returned to.
 //!
-//! The rig state is published on `brain/state/rig`, retained, on every change.
+//! The rig state is published on `brain/rig`, retained, on every change.
 
 use crate::Rig;
 use crate::clock;
@@ -59,7 +59,7 @@ enum RigState {
 }
 
 impl RigState {
-    /// The rig state as it is published on `brain/state/rig`.
+    /// The rig state as it is published on `brain/rig`.
     fn word(&self) -> &'static str {
         match self {
             RigState::BootHold => "boot_hold",
@@ -115,7 +115,7 @@ pub async fn frame_task(
     let dt = 1.0 / cfg::FRAME_RATE_HZ as f64;
     let mut overridden = false;
     let mut state = RigState::BootHold;
-    rig.telemetry.publish("state/rig", state.word(), true);
+    rig.telemetry.publish("rig", state.word(), true);
 
     loop {
         ticker.next().await;
@@ -168,7 +168,7 @@ pub async fn frame_task(
                     cfg::SACN_RELEASE_FRAMES
                 ),
             }
-            rig.telemetry.publish("state/rig", next.word(), true);
+            rig.telemetry.publish("rig", next.word(), true);
             state = next;
         }
 
