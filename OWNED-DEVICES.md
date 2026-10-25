@@ -31,9 +31,10 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | Device | Details |
 |---|---|
 | Door (the face) | Three buttons: an emergency stop (a twist-to-unlock smash button) and two green momentary pushbuttons, the left and right button, each with a green LED lamp. On the Pi's GPIO: e-stop on 23/24, buttons on 27/25, lamps on 13/12. |
-| Raspberry Pi (`claw-pi`) | Raspberry Pi 3B+, 1 GB RAM, on a DINner Plate Pi DIN rail holder, local user `kjkoster`. Named `claw-pi` for historical reasons. |
+| Raspberry Pi (`claw-pi`) | Raspberry Pi 3 Model B Plus Rev 1.3, 1 GB RAM (905 MB usable), on a DINner Plate Pi DIN rail holder, local user `kjkoster`. 64-bit Debian 13 (Trixie). A 6.9 GB root partition. Named `claw-pi` for historical reasons. |
 | DMX HAT | Zihatec RS422/485 HAT Rev D on the Pi's header: the wired DMX-512 output. |
 | USB hub | 12 V powered, which turned out to be needed so as not to overload the Pi's USB ports. The modem and the audio interface plug into it. |
+| External SSD | USB-C, with a DIN rail clip. For recording the rig's MQTT telemetry on the Pi. |
 | PoE injector | Powers the camera; its data port goes to the Pi's `eth0`. |
 | Ethernet hub | On its own power supply. For when a laptop needs the Pi's wired segment beside the camera. |
 
@@ -78,7 +79,8 @@ in:
 
 ## Not yet confirmed
 
-- The Pi's model: this file says 3B+, `DESIGN.md` says 3B. `cat /proc/device-tree/model` on
-  the Pi settles it.
+- The Pi's power supply: the Pi reports under-voltage and throttling since boot
+  (`get_throttled` = `0x50000`) while nearly idle, so the supply, or its lead, sags.
 - The makes and models of the Ethernet hub and its supply, the USB Ethernet adapter and the
   speakers, and where the adapter is.
+- The external SSD's make, model and size.

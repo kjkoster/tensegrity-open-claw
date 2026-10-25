@@ -363,8 +363,10 @@ annotated feed, which draws both marks, and move the camera until the trigger ma
 the rose and the entry mark sits on the path's entry. Panning slides the picture along the
 path; how far back the camera is mounted sets how much path lies between the marks, so the
 mount's distance from the path is the other thing to move. The marks themselves are the last
-resort, for a mount that cannot move. A person's feet are the bottom of their box; their
-distance is where that point falls between the two marks, 1 at the entry and 0 at the line.
+resort, for a mount that cannot move. A person is the trigger-side bottom corner of their
+box — the leading foot, not the middle of the box, because the detector sometimes draws one
+box over a bunch of children, and the one in front is the one who matters. Their distance is
+where that point falls between the two marks, 1 at the entry and 0 at the line.
 Left of the trigger mark is negative; right of the entry mark is the street, and does not
 count. The furthest person is the smallest distance; nobody between the marks is the
 tombstone. Walk the path and watch the feed's number fall from 1 to 0. The number is linear
@@ -373,8 +375,8 @@ halfway along reads well off 0.5, the camera is angled — turn it rather than a
 nothing in the show needs it exact.
 
 **The annotated feed.** `http://10.8.0.3:8080/`, from the Mac over WireGuard, is the
-camera's picture with the eyeball's reading drawn on it: every box, each person's ground
-point, the two benchmark columns, the distance it is handing the show, and the frame rate it
+camera's picture with the eyeball's reading drawn on it: every box, each box's leading foot,
+the two benchmark columns, the distance it is handing the show, and the frame rate it
 is managing. It is how the camera is aimed and the benchmarks are set, and on the night it is
 how the operator sees what the rig sees; it is the operator's view, not part of what the yard
 sees. Over 4G it is paid for out of the data bundle for as long as it is open.
@@ -388,12 +390,19 @@ all, and with someone watching `eyeball/fps` says what it costs.
 distance from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the
 line — or `+∞`, the tombstone, with the time it was seen. The show holds the last.
 
+**The detector.** YOLOX-Nano, Megvii's own ONNX export, reading only *person*. At this
+picture — people three to six metres off, boxes over a hundred pixels tall — the accuracy
+between small detectors is noise next to their run time, and Nano is the one that fits on the
+Pi. It counts a box from a confidence of 0.3 and merges overlapping boxes only above an
+overlap of 0.6, both looser than usual: a phantom can only land between the marks and the
+show debounces it, while a missed child costs the scare, and children seen side-on overlap.
+
 **How often that is.** The detector sets the pace, not the camera, and on the Pi it shares
 four cores with the DMX loop: the model runs at normal priority on at most three of them,
 below the brain's real-time threads, so a slow model costs frames of the eyeball's and never
-a frame of the rig's. How many it manages is measured before the model is settled; about five
-a second is what the show wants, and two frames are what `SCARE_CONFIRM_SECS` is meant to
-cover. The camera is asked for 640×480 MJPEG at a rate a little above it — a stream the
+a frame of the rig's. Nano is expected at 150–300 ms a frame on the Pi 3B+ and 60–120 ms on a
+Pi 4, measured before anything else is built; about five a second is what the show wants, and
+two frames are what `SCARE_CONFIRM_SECS` is meant to cover. Below that, the Pi 4 goes in. The camera is asked for 640×480 MJPEG at a rate a little above it — a stream the
 detector cannot keep up with would queue frames and the distance would lag reality by the
 queue, so the eyeball always takes the newest frame and drops what has piled up behind it,
 and publishes `eyeball/fps` so the queue shows up as a rate below the camera's rather than as

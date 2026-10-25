@@ -37,7 +37,7 @@ macOS.
 
   | Interface | Address | Purpose |
   |---|---|---|
-  | `eth0` | `10.0.1.1/24` | the closed wired segment: a network camera, and SSH / deploy from a laptop |
+  | `eth0` | `10.0.1.1/24`, static — not yet configured: today NetworkManager's default DHCP profile, down | the closed wired segment: a network camera, and SSH / deploy from a laptop |
   | `wlan0` | `10.0.10.1/24` | the WiFi AP |
   | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
   | `wwan0` | DHCP | 4G uplink |

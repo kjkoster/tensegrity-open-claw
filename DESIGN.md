@@ -345,7 +345,7 @@ returned to, and neither needs a special case anywhere else.
 
 ### 2.6 The Pi controller
 
-The deployed unit is a **Raspberry Pi 3B** running standard Debian / Raspberry Pi OS. A Pi 4
+The deployed unit is a **Raspberry Pi 3B+** running standard 64-bit Debian / Raspberry Pi OS. A Pi 4
 has more headroom and runs the same software unchanged, if thermals or CPU ever justify it —
 a neural model in the brain is the first thing likely to.
 
@@ -566,8 +566,9 @@ walks every time, and the show can be driven with nobody in the space.
 
 #### In the brain: one distance
 
-A person detector, not a pose model: boxes are enough, and a person's feet are the bottom
-of their box. A YOLOX model (Apache-2.0, published as ONNX) runs on the CPU through ONNX
+A person detector, not a pose model: boxes are enough, and a person is the bottom corner of
+their box on the near side of the space — the leading foot, which a box merged over a bunch
+still puts on the one in front. A YOLOX model (Apache-2.0, published as ONNX) runs on the CPU through ONNX
 Runtime, or through `tract`, pure Rust, if it is fast enough; the model is compiled into the
 binary (§2.3).
 
