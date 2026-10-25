@@ -147,10 +147,25 @@ explainable from its inputs alone.
 
 ### 1.4 Inputs are state, handed in
 
-A part that senses the world publishes a snapshot of what it senses, and the state machines
-take that snapshot as an argument each frame. Neither machine reaches into a part for
-anything else, so every input each depends on is visible in its signature. Remote sensing,
-when it comes, is another producer of the same kind of state — most likely over OSC.
+A part that senses the world publishes a snapshot of what it senses, each on its own
+latest-value seam, and the state machines take those snapshots as arguments each frame.
+Neither machine reaches into a part for anything else, so every input each depends on is
+visible in its signature. There is no common input type: one would only be unpacked again
+into the snapshots it was made from, and the frame loop would have to learn the shape of every
+sensor a rig has.
+
+A snapshot that can miss an event between two frames counts instead of flagging: a button
+press is a counter that moves, so a reader at frame rate sees it however short it was.
+
+**A sensor on another machine arrives over OSC.** A receiver thread decodes each message into
+that sensor's snapshot and the time it arrived. UDP, because a late reading is worth nothing
+and the newest one wins; OSC, because it is the smallest typed message there is, and anything
+on the network — a laptop with `oscsend` — can stand in for the sensor. Not MQTT (§1.3): the
+show reads no topic, and a broker in the path would make the broker part of the show. The
+sender sends when it has a new reading and never repeats one, so a sensor that has gone quiet
+is a snapshot that has gone stale, and what stale means is the show's decision, not the
+receiver's. The receiver binds the one address the sensors' network reaches, like the sACN
+receiver, because a wildcard would also answer the 4G uplink's public address.
 
 ### 1.5 Time is resolved at build time
 
@@ -170,10 +185,17 @@ decision corrects itself when NTP steps the clock.
 
 ### 1.6 What may fail runs in its own process
 
-Anything the show must survive losing runs outside the brain: Stem, and before it the
-eyeball. A daemon that crashes, stalls or is restarted mid-tune then costs what it provides
-and never a frame, and a process aiming moving heads at people does not share an address
-space with anything that can take it down.
+Anything the show must survive losing runs outside the brain: Stem, and the eyeball. A daemon
+that crashes, stalls or is restarted mid-tune then costs what it provides and never a frame,
+and a process aiming moving heads at people does not share an address space with anything
+that can take it down.
+
+The exception is a part the frame has to stay in step with to the millisecond: the face, the
+ear, the mouth. A process boundary there is latency the audience sees — a cut that lands a
+hop after the light, a lamp a hop behind the frame. Those run inside the brain, and are
+written so a dead device costs what it provides: they report, retry with backoff, and never
+block the frame loop. Living and dying with the brain, they hold no broker connection of their
+own and publish their subtrees through the brain's (§3.1).
 
 ---
 
@@ -198,9 +220,11 @@ WireGuard tunnel — which is how both deployment and console traffic get there.
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
     │  (builds brain; reads the rig's sensors)        │
+    │  OSC receiver ◄────────────── remote sensors    │
     │  Generative engine                              │
     │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
-    │  └── sACN sender ──────────── network           │
+    │  ├── sACN sender ──────────── network           │
+    │  └── USB audio ────────────── speakers          │
     └─────────────────────────────────────────────────┘
                                   │
                         one universe of fixtures
@@ -231,17 +255,37 @@ frame rate sits under.
 
 | | |
 |---|---|
-| `cortex/` | everything under the show: capture, features, noise, both transports, the frame loop, the show calendar |
-| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
-| `brain/` | the rig crate: the rig's patch, its show times, and its show |
-| `rig-mqtt/` | the MQTT conventions the brain and the ball share |
+| `cortex/` | what every rig shares under its show: both transports, the OSC receiver, the frame loop, the show calendar |
+| `cortex-build/` | the QLC+ ingest, the calendar's resolution and the recordings' compilation, a build-dependency of the rig crate |
+| `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
+| `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
+| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, `no_std` for the firmware, and, behind its `std` feature, the client the daemons share. It shares its directory with Stem's daemon and broker configuration |
 | `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, read by the ball firmware |
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
-`main.rs` includes the generated patch and calendar and writes the show.
+`main.rs` includes the generated patch and calendar, wires in the components it uses, and
+writes the show.
 
-The ball firmware, `ball/`, is not a member of this workspace: it is built on the Mac for its
-own target.
+**`cortex` holds only what every rig shares.** A component a rig may or may not have — a
+sound output, a sensor — is its own crate with its own configuration, and the rig crate that
+uses it depends on it and wires it in. `cortex::run` and the `Rig` it takes then never grow a
+field for a part one rig has.
+
+The ball firmware, `ball/`, and the eyeball, `eyeball/`, are not members of this workspace:
+each is built on the development Mac for its own target and shipped as a binary, and neither
+can build `cortex`, which links the HAT. What they share with the brain is the `stem` crate,
+by path. Only `brain` is built on the machine it runs on, because it links ALSA.
+
+**One deploy script per machine**, each rsyncing to its machine and running a remote script
+there, and one that runs them all. A machine can then be deployed alone, and the scripts
+never have to know which machines a rig has.
+
+**Recordings are compiled in.** The rig crate names its recordings and their gains;
+`cortex-build` checks each WAV's format and turns it into a typed constant — the samples as
+`&'static [i16]`, and whatever the build derives from them, such as a loudness envelope at
+the frame rate. The binary on the Pi is then the whole show: no file to be missing at
+startup, no parser in the running program, and a recording in the wrong format is a build
+error naming it.
 
 Beside the crates, a daemon's systemd unit lives in that daemon's directory
 (`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
@@ -257,10 +301,11 @@ Standard Rust on Trixie Raspbian Linux, `std`.
   costs less than working around them.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
-- **ALSA** for audio capture.
+- **ALSA** for audio, in and out.
+- **`rosc`** for OSC.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
-  producers — sensors, and the sACN receiver — on their own OS threads feeding it
-  through a lock-free latest-value seam. A blocking `recv` on the executor's thread would
+  producers — sensors, the OSC and sACN receivers, audio — on their own OS threads feeding
+  it, or fed by it, through a lock-free latest-value seam. A blocking `recv` on the executor's thread would
   stall the frame loop, so anything that blocks stays off it.
 
 ### 2.5 The rig state machine
@@ -291,9 +336,9 @@ The deployed unit is a **Raspberry Pi 3B** running standard Debian / Raspberry P
 has more headroom and runs the same software unchanged, if thermals or CPU ever justify it.
 
 The Pi runs in **AP mode** (hostapd + dnsmasq) so fixtures and laptops join its own network
-rather than depending on whatever WiFi exists at the site, exposes its **Ethernet port** to a
-directly-connected laptop for SSH, and runs `brain` as a systemd service for unattended
-operation.
+rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
+closed wired segment — a laptop for SSH, and the machines of any remote sensors — and runs
+`brain` as a systemd service for unattended operation.
 
 Settings — SSID, serial console, DIP switches, `config.txt` — are in
 [`README.md`](README.md).
@@ -320,10 +365,15 @@ connect instead.
 how it is holding up, publishes it, and does nothing else. Keeping duties out of it means its
 death costs telemetry and never uptime.
 
-Every client holds its own connection to the broker, announces itself on `health/<service>`,
-and leaves a will that says `gone`: `brain`, the daemon, the `face` and the `ear` (each its own
-client, inside the brain process) and the `ball` (over the AP, to the DHCP gateway). The Rust
-clients share their packets and the health words through the `rig-mqtt` crate;
+Every process holds its own connection to the broker, announces itself on `health/<service>`,
+and leaves a will that says `gone`: `brain`, the daemon, the `ball` (over the AP, to the DHCP
+gateway) and the `eyeball` (from its own machine). A part inside the brain — the face, the
+mouth — lives and dies with it, so a will of its own would only repeat `health/brain`; it
+publishes its own subtree through the brain's connection (§1.6).
+
+**The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
+program sees Stem, the process it reports to. It carries the health contract and the packets,
+`no_std` so the firmware can use them, and the std client the daemons share.
 `stem/rig_mqtt.py` is the Python half.
 
 ### 3.2 The 4G watchdog
@@ -351,24 +401,42 @@ workspace patches them like the ball. The show writes them into the frame; the f
 the pins from the frame that actually went out, after arbitration. So a console that takes the
 rig over drives the lamps too, and the e-stop darkens them with everything else, with
 no special case in either. They dim through the Pi's two hardware PWM channels, because the
-software alternative is a busy-waiting real-time thread per pin, competing with the ear and
+software alternative is a busy-waiting real-time thread per pin, competing with audio and
 the DMX timing.
 
-**Its inputs are a `FaceState`.** The face polls and debounces, and publishes the e-stop,
-chord and press counts, and the right button held, once per poll. The show state machine
-reads only the buttons; the e-stop goes to the rig state machine (§2.5).
+**Its inputs are a `FaceState`.** The face polls and debounces, and publishes the e-stop and
+counts of each gesture — chords, presses — once per poll, on its own latest-value seam.
+Counts rather than flags, so a show that reads at frame rate misses none (§1.4). The show
+state machine reads only the buttons; the e-stop goes to the rig state machine (§2.5), read
+once when the pins are claimed so the first frame already knows it.
+
+**It cannot fall silent on its own.** The face polls as a task on the frame loop's own
+executor, so it stops only when the frame loop does: a panic in either ends the process. That
+is why there is no rule for a face that has stopped reporting, and why it has no broker
+connection of its own — its `face/…` topics go out through the brain's (§3.1).
 
 ### 3.4 The ear
 
-The rig's microphone input is the ear: capture, feature extraction, and the `AudioFeatures`
-it hands the show. It has no DMX channels and no place in the workspace, but it is a part of
-the rig the way the face is — its own thread, its own state handed to the show, and its own
-client on the broker, so a dead or missing interface shows up as `ear/…` rather than as a
-show that has gone quiet for no visible reason.
+The rig's microphone input: capture, feature extraction, and the `AudioFeatures` it handed
+the show — onsets, and how much of what it heard was music — which drove the washes'
+sparkle and the heads' dance. It drove the claw at ADE, and was removed after it; the code is
+on the `2026-10-23-ADE-Amsterdam` tag (`cortex/src/ear/`, and `cortex/src/sparkle.rs` for
+the mapping).
 
-The interface itself is incidental — today an Alesis io|2, because it was the cheapest used
-one to be had — so the code names it by role. Swapping it is its ALSA card name and USB
-identity in `cortex`'s config, nothing more.
+It had no DMX channels and no place in the workspace, but it was a part of the rig the way
+the face is — its own thread, its own state handed to the show, and its own topics on the
+broker, so a dead or missing interface showed up as `ear/…` rather than as a show that had
+gone quiet for no visible reason.
+
+**Fast and lean.** Every feature was computed on every block, so the snapshot carried only
+what a show read, plus the diagnostics it reported; a feature nobody read was work done for
+nothing on a 1.2 GHz Pi. Its capture thread — open, negotiated parameters, xrun recovery in
+place, reopen with backoff, and a USB probe published on every reopen — is the mouth's
+(§3.8) turned round.
+
+The interface itself is incidental — an Alesis io|2, because it was the cheapest used one to
+be had — so the code named it by role. Swapping it was its ALSA card name and USB identity in
+the config, nothing more.
 
 ### 3.5 The ball
 
@@ -432,34 +500,81 @@ no rule of its own.
 
 ### 3.6 The eyeball
 
-A vision sidecar: an Axis M3105-LVE network camera in, arm angles out, and an annotated
-preview for humans. It drove the mage rig, and was removed with it; the code is on the
-`last-version-with-mage` tag (`eyeball/` and `cortex/src/eyeball.rs`).
+A vision sidecar: an Axis M3105-LVE network camera in, one small reading of the scene out to
+the brain, and an annotated feed for humans. It has had two lives. On the Pi it read a
+person's arms for the mage rig, and was removed with it; that code is on the
+`last-version-with-mage` tag (`eyeball/` and `cortex/src/eyeball.rs`). On `eyeson`, a 2015
+MacBook Air beside the cabinet, it is a Rust daemon that tells the brain how far into a
+space the furthest person has come.
 
-It ran as its own Python process (§1.6), on OpenCV and numpy, with a MoveNet pose model on
-TFLite or ONNX. The model got three of the Pi's cores, leaving one for the DMX loop.
+**It runs outside the brain (§1.6)**, and since the Pi could barely follow one person, on a
+machine of its own: the Pi's spare cores are not enough for a detector and the DMX loop
+together. It reaches the brain over the Pi's closed wired segment.
 
-**Three outputs, three audiences.** Landmarks went to `brain` over UDP on the loopback,
-because a late pose frame is worthless and dropping it beats delivering it in order; silence
-and a wedged sender are then the same observation, which is what the brain's staleness window
-was for. The annotated preview went to a browser over HTTP, because that is what a human uses
-to aim a camera and calibrate a crop — and it was shown to the audience, so the drawn skeleton
-was a deliverable, not a debug view. Health went to MQTT.
+**Three outputs, three audiences.** The reading goes to the brain as OSC messages over UDP
+(§1.4) — a standard format any OSC tool can send and read, not a stream of our own — because
+a late frame is worthless and dropping it beats delivering it in order. The first life sent
+datagrams of its own on the loopback; OSC replaced them. It is sent once per processed frame and never
+repeated, so silence and a wedged sender are the same observation, and the brain's staleness
+window is what turns either into the safe default. The annotated feed goes to a browser over
+HTTP, because that is what a human uses to aim a camera. Health goes to MQTT.
 
-**The brain read arms, not joints.** The daemon reduced the landmarks to arm angles and kept
-the landmarks on its own side, where the preview drew them. The estimator was expected to be
-replaced — contour extremities under infrared, say — and a schema naming the seventeen joints
-of one model would have had to change with it.
+**The brain reads the least it needs.** The daemon reduces what the model sees to the one
+quantity the show uses and keeps the rest on its own side, where the feed draws it. In the
+first life that was arm angles, not the seventeen joints of one pose model; in the second it
+is one distance, not boxes or a count. The estimator is expected to be replaced, and a schema
+naming its internals would have to change with it.
 
-**The camera was configured by the daemon, not by hand.** The host, user and password were
-the only camera settings in its configuration; which stream, at what size and rate, and the
-sensor's settings were the daemon's to decide. It set the camera's parameters over VAPIX on
-every start, read them back, and published any disagreement, because a setting made by hand
-in the camera's web UI is lost on a factory reset or a replacement camera. Infrared beat
-visible light by a wide margin, so it ran the IR-cut filter off under the camera's own
-illuminator, with exposure capped at 10 ms so a moving wrist was a landmark and not a streak.
-MJPEG has no inter-frame state or jitter buffer, which made it the first thing to try against
-H.264 when the preview ran late.
+**The camera is configured by the daemon, not by hand.** The host, user and password are the
+only camera settings in its configuration; which stream, at what size and rate, the image
+rotation, and the sensor's settings are the daemon's to decide. It sets the camera's
+parameters over VAPIX on every start, reads them back, and publishes any disagreement,
+because a setting made by hand in the camera's web UI is lost on a factory reset or a
+replacement camera. Infrared beats visible light by a wide margin, so it runs the IR-cut
+filter off under the camera's own illuminator, with exposure capped at 10 ms so a moving limb
+is a shape and not a streak. MJPEG over HTTP, because it has no inter-frame state or jitter
+buffer and needs only a JPEG decoder, where H.264 would need a video decoder in the build.
+
+**The newest frame, always.** The detector sets the pace, not the camera. A reader that kept
+every frame would queue them behind a slow model, and the reading would lag the world by the
+queue; so the reader keeps only the newest and drops what has piled up, and a slow model
+shows as a lower frame rate on the broker rather than as a show that reacts late.
+
+**The feed costs nothing unwatched.** Drawing on a frame is cheap; compressing it to JPEG
+again is a tenth of the detector's budget on a two-core machine. So the feed is encoded on
+its own thread, from the latest annotated frame, and only while a browser is connected.
+
+#### On `eyeson`: one distance
+
+A person detector, not a pose model: boxes are enough, and a person's feet are the bottom
+of their box. A YOLOX model (Apache-2.0, published as ONNX) runs on the CPU through ONNX
+Runtime.
+
+**No calibration, only aiming.** The space has two benchmarks, and they are two columns
+fixed in the camera's picture: the camera, square on to the path, is aimed so the benchmarks
+in the yard land on the columns, watching the feed, which draws them. A distance is where a
+person's feet fall between the two columns, linear in the picture, so in the yard only as
+linear as the camera is square — which the feed shows at a glance, and which nothing in a
+show that compares distances needs to be exact. The alternative, a ground-plane homography
+from four measured marks, is right at any angle and is four points to measure and a matrix to
+get wrong.
+
+**The unit is the space, not the metre.** The distance is 1 at one benchmark and 0 at the
+other, so nothing is ever measured with a tape, and an empty space is `+∞`: infinitely far,
+so every comparison a show makes falls the safe way with no magic number. Debouncing and
+hysteresis are the show's policy, not the daemon's: it reports what it saw in each frame,
+and tracks nobody.
+
+**Built on the development Mac.** The crate sits outside the cargo workspace, like the
+ball's, built on the Mac for `x86_64-apple-darwin` and shipped as a binary, sharing only the
+`stem` crate with the brain. So `eyeson` needs no toolchain and no internet, and sits on the
+closed wired segment alone, reached through the Pi.
+
+#### On the Pi: arm angles
+
+It ran as its own Python process, on OpenCV and numpy, with a MoveNet pose model on TFLite
+or ONNX. The model got three of the Pi's cores, leaving one for the DMX loop. The preview was
+shown to the audience, so the drawn skeleton was a deliverable, not a debug view.
 
 **A person is several landmarks.** The model now and then puts a confident landmark on a
 bush, so a person was reported only once five landmarks cleared the confidence threshold.
@@ -480,3 +595,42 @@ re-asserted the whole state on every change, on a heartbeat and on every reconne
 
 Its sACN decoder did source arbitration in the fixture itself, so a console could take it over
 even with `brain` hung.
+
+### 3.8 The mouth
+
+The rig's sound: recordings played through a USB audio interface into powered speakers. Its
+own crate, `mouth/`, which a rig crate depends on when its show has sound; `cortex` knows
+nothing of it (§2.3).
+
+**A thread in the brain, not a process.** A show that cuts light and sound together needs
+them together: a sound a process hop late is a cut the audience hears arrive after it sees
+it. So the mouth is a playback thread inside the brain (§1.6), on blocking ALSA writes, and a
+dead or missing interface costs the sound and never a frame: it reopens with backoff and
+reports why it is mute.
+
+**Small buffers, because the cut is the point.** A period of 256 frames and two of them in the
+buffer put the next sound about 11 ms behind the frame that asked for it. A mute zeroes the
+next buffer and kills every voice, so silence lands within a period of the frame.
+
+**The show hands it a cue every frame, over a latest-value seam**: a trigger counter per
+sound, and mute as a level. The mouth reads the latest cue every period, several times a
+frame, and a counter that has moved is the only kind of trigger that reads exactly once (§1.4).
+It mixes its voices into each period, each at the gain the rig's sound table gives it, under
+one master gain.
+
+**The recordings are compiled in** (§2.3), so the mixer reads samples and levels straight out
+of the binary, and there is no file to be missing on the night.
+
+**The e-stop silences it; a takeover does not.** The e-stop is a show-stop, so it stops the
+sound with the light: the rig crate mutes the cue while the face reports the e-stop, at boot
+as well. A console takes over the universe, and sound is not part of the universe, so the
+show's sound runs on under it.
+
+**It reports through the brain's connection**, living and dying with the brain (§3.1): what
+the stream was actually opened at, which is not always what was asked for, xruns, why it is
+mute, and the interface as the USB bus sees it — identity, bus address, speed and port path,
+republished on every reopen, so a re-enumeration under a running brain shows as the flaky hub
+port it usually is.
+
+The interface itself is incidental — an Alesis io|2, the one the ear used — and swapping it is
+its ALSA card name and USB identity in the mouth's config.

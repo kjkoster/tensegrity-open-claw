@@ -1,164 +1,260 @@
-# Tensegrity Open Claw — The Show
+# Tensegrity Open Claw — The Show: Front Yard, Halloween 2026
 
 **What this file is for.** This show: what the audience sees and why each look is the way it
 is, and how its rig is set up — the fixtures chosen, how each is configured, and the operation
 that comes with them. Anything that would change with a different show belongs here. Where
 the code behind it lives, and why, is [`DESIGN.md`](DESIGN.md); the Pi, the cabinet, the
 network and the general build-and-deploy workflow, which stay the same from show to show, are
-[`README.md`](README.md). What we own, and which owned fixtures stand in for rented ones while
-testing, is [`OWNED-DEVICES.md`](OWNED-DEVICES.md).
+[`README.md`](README.md). What we own is [`OWNED-DEVICES.md`](OWNED-DEVICES.md); this is a
+private project, so it is also what the show is built from. The steps to get from the
+previous show to this one are [`TODO.md`](TODO.md).
 
 ---
 
 # What the audience sees
 
-## 1. Show times and show states
+## 1. The premise
 
-The rig runs to a fixed list of shows in local time, in one show state at a time, chosen each
-frame by the show state machine — the brain's Director: test mode first, then the incident
-schedule, then the calendar. The base states are blackout, daylight and dusk; the incidents
-are searchlights and ball lighting.
+A front yard, a path from the street to the front door, a balcony above it with four moving
+heads in a line. The street hears a slow heartbeat. On the path near the house, one head
+projects a rose that pulses with it; now and then an owl calls somewhere far off. Someone
+who walks up the path quickens the heart. Someone who gets too close to the rose is cut off
+in darkness and silence, hears the heads turn above them in the dark, and is caught in white
+light and a thunderclap. Then the heads go out, the front door glows amber until they leave,
+and the rose and the heartbeat return for the next group.
+
+## 2. Show times and show states
+
+The rig runs to a fixed list of shows in local time (`brain/shows.rs`), in one show state at
+a time, chosen each frame by the show state machine — the brain's Director: test mode first,
+then the calendar, then, inside a show, presence and the timers. Outside a show the state is
+`blackout`: dark and silent.
+Inside one it is one of the five below.
 
 The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
-and runs on unchanged underneath a stop.
+and runs on unchanged underneath a stop. This show does not use the calendar's dark stretches:
+pick a start time after civil dusk.
 
-**Civil dusk, not sunset,** because the light reads only once it is actually dark.
+| state | what the audience sees | leaves when |
+|---|---|---|
+| `idle` | the rose on the path, pulsing with a heartbeat that quickens as someone comes up the path; owls | someone reaches the trigger line |
+| `cut` | nothing: blackout and silence, hard | `CUT_SECS` have passed |
+| `buildup` | still nothing, but the heads are heard turning | `BUILDUP_SECS` have passed |
+| `thunderclap` | the heads white, two strobing, two steady; the thunderclap | the recording ends |
+| `respite` | the heads dark; the front door amber | the yard is empty |
+
+There is no state for "someone is in the yard": the heart's pace is a function of the
+distance, and an empty yard is simply the distance at which it rests. A state boundary there
+would need a debounce of its own and would say nothing the distance does not.
+
+`cut` → `buildup` → `thunderclap` → `respite` is one sequence, the scare; it is three states
+rather than one because every consumer matches them exhaustively, test mode can watch each,
+and `brain/state/show` says which is running. From `respite` the show returns to `idle`.
 
 The state is published retained on every change:
 
 | topic | values |
 |---|---|
-| `brain/state/show` | `blackout`, `daylight`, `dusk`, `searchlights` or `ball_lighting` |
+| `brain/state/show` | `blackout`, `idle`, `cut`, `buildup`, `thunderclap` or `respite` |
 | `brain/state/testmode` | whether test mode is on |
+| `brain/presence` | the distance the show decided on this frame, in paths, or `tombstone` — see [§6](#6-presence-one-distance) |
 
-The log has a `show: …` or `show: test mode …` line for each change of the show state.
-
-## 2. The base looks
-
-Outside a show the show state is blackout: black but for the ball's status LED, which keeps
-breathing so a ball that hears the rig can be told apart from one that does not.
-
-Inside one, the ball's motor runs for one second every two minutes, the first run as the show
-opens. Until civil dusk the show state is daylight, and after it dusk, the ball's power LEDs
-pulsing until civil dawn.
-
-The music changes no show state; it reaches the rig through the washes. In the base states
-each wash holds its own colour — red, green or blue — with white beside it, and one sparkle
-modulation drives all three, so the rig breathes in silence and flashes on the music's onsets
-in step rather than three ways at once.
-
-The heads park dark on "Look at heaven" in blackout and daylight. At dusk they turn to "Look at
-ball" and light it, each in its leg's colour, against the modulation: at most 35% when the
-washes are at their darkest, dipping as they flash, and breathing opposite them in silence. So
-when the rig goes dark the ball lights up instead. `DUSK_BALL_LEVEL` in
-`brain/src/head_show.rs` sets that 35%.
-
-## 3. The dots dance rather than jump
-
-At dusk each head's dot wanders over the ball on a smooth path of its own, so the three never
-move in step. In silence it drifts slowly within half its range; as the music comes in it
-speeds up and widens to all of it, and each beat surges it along the path. The range is
-`DANCE_RADIUS_DEG` in `brain/src/head_show.rs` (6°, about 25 cm on the ball at 2–2.5 m), and
-the dots may now and then slip past the edge. The `DANCE_*` constants beside it set the pace
-and the surge.
-
-A head needs a tenth of a second or more to reach a new point, so a dot sent to a new place on
-every beat would always land after it; a continuous path the beats push along never shows that
-lag. The path is worked out as angles around the ball's centre and turned into pan and tilt for
-the sideways mounting: tilt moves the dot one for one, while pan, turning the beam around an
-axis the ball sits only a little way off, moves it by the sine of that angle and is scaled up
-to match. That angle is read from each head's preset, with the middle of the tilt range taken
-as the axis.
-
-## 4. Incidents
-
-After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes to an
-**incident** — Searchlights or Ball Lighting — and then return.
-
-| incident | heads | washes | ball |
-|---|---|---|---|
-| Searchlights | white, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
-| Ball Lighting | on "Look at ball"; white, then each leg's colour, then back, every ten seconds | the same fade | white LED to blue LED and back |
-
-**Incidents are show states with a schedule.** An incident takes the place of dusk for its few
-minutes. Making them show states rather than a modulation inside dusk means every consumer
-matches them exhaustively, test mode reaches them by stepping, and `brain/state/show` says
-which is running; an incident that runs the base show underneath it (Searchlights' washes and
-ball) reads the base state the calendar chose, which the cue carries beside the state.
-
-The schedule runs per dark stretch and is drawn, not stored: every draw is a pure function of
-a seed, the stretch's start and the incident's number, so the director recomputes the night
-each frame and a restart lands back in it. The draws are uniform rather than taken from the
-noise fields, whose values cluster. Times are drawn before the pick, so adding or removing an
-incident changes which run but not when. An incident starts only if it ends a margin before
-the dark stretch does — 20 minutes before dawn or the show's stop — which covers both with one
-rule. The pick is from every incident there is.
-
-**Confirming it landed.** At the start of each dark stretch, and at startup inside one, the
-log prints the stretch's whole schedule:
+The log has a `show: …` line for each change of the show state, with what caused it.
 
 ```
-show: dark 19:08 → 22:00, 2 incidents
-show:   #0 at +37m12s: ball_lighting for 3m05s
-show:   #1 at +81m40s: searchlights for 2m31s
+show: idle → cut — the furthest at -0.02, past the trigger line
+show: cut → buildup
+show: buildup → thunderclap
+show: thunderclap → respite — the recording ended
+show: respite → idle — the yard has been empty for 3.0 s
 ```
 
-The offsets count from the start of the dark stretch on the line above: dusk, or the show's
-start if it opens after dusk. A restart prints the same schedule again: it is drawn from the
-dark stretch and nothing else.
+## 3. Idle: the rose and the heart
 
-## 5. Only the heads fade
+One head, `ROSE_HEAD`, projects the rose gobo on the path near the house, on the "Rose"
+preset. The other three are dark on the same preset, parked tilted into the balcony — not at
+their thunderclap positions, so that all four are heard turning when the time comes, and not
+pointing anywhere a stray flash would matter.
 
-Washes and ball switch looks in one frame at both ends of an incident. The heads light over a
-second at its start and glide, lit, to its preset at the slowest smooth rate: a beam on the
-move invites curiosity, so the move is part of the look rather than something to hide. Over
-the incident's last five seconds their light falls away, and dusk lights them again over a
-second as they return to the ball. A snap is left to the head's own motors and stays lit.
-Searchlights waits until every head has landed its glide to heaven before its first snap, so
-the glide is seen whole.
+The heart is one oscillator the light and the sound both follow, so the rose and the lub-dub
+never drift apart. Each beat triggers the heartbeat recording once, and the rose's dimmer
+follows **the recording's own loudness**: the build runs an analyser over the heartbeat file
+and emits its envelope as one value per DMX frame, so at 40 Hz the rose simply plays that
+table from the beat, scaled between `ROSE_FLOOR` and full — the lub and the dub land where
+the recording puts them, and a different recording brings its own pulse with it. Nothing
+about the recording's shape is written into the show.
 
-Ball Lighting's fade is drawn by the brain, per frame, rather than by the ball. At five
-seconds a crossfade, the bunching of multicast over WiFi steps it about a percent at a time,
-which reads as smooth; a fast waveform would not.
+**The pace is the distance.** The target rate is `REST_BPM` at `HEART_RANGE` and beyond,
+`SCARE_BPM` at the trigger line, linear between; the tombstone — nobody in the yard — is the
+one exception, and rests. The actual rate glides toward the target with time constant
+`RATE_TAU`: detection jitter must not make the heart stutter, and a heart changes pace
+gradually anyway. Someone walking up the path quickens it; someone leaving lets it settle; a
+detector that loses someone for a frame moves the target for a frame, which the glide
+swallows. The rate is set once per beat, at the beat, so a lub-dub is never cut short by a
+change of pace; between beats the show only decides what the next period will be.
 
-## 6. Test mode is on the door, not on a console
+The owl calls at random, a gap drawn uniformly between `OWL_MIN_SECS` and `OWL_MAX_SECS`
+after the last call, in `idle` only. A scare interrupts one, and the next is drawn afresh
+from the return to `idle`.
 
-Testing a show state should not wait for dusk, for silence, or for a laptop on the network, so
-the face's two buttons can take the show over:
+## 4. The scare
+
+When the distance reaches zero — the furthest person at or past the trigger line — and stays
+there for `SCARE_CONFIRM_SECS`, two of the eyeball's frames rather than one bad box, the scare
+starts.
+
+**`cut`, `CUT_SECS`.** Every head's dimmer to zero, the door wash off, the
+mouth muted, all in one frame. There is no fade anywhere: the point is the cut. The audio
+mute is a hard zero in the next buffer the mouth fills, within a few milliseconds of the frame;
+how the mouth keeps that latency low is in [`DESIGN.md`](DESIGN.md).
+
+**`buildup`, `BUILDUP_SECS`.** Still dark and silent. The heads move to "Thunderclap", their
+gobo wheels to open and their colour wheels to white, at full movement speed. There is no
+feedback from a head, so the state is a timer: `BUILDUP_SECS` is measured on the rig, the longest
+move from "Rose" to "Thunderclap" plus a margin, and the two presets are aimed so that move is
+one a cheap head completes in it. Which is why the parked heads in "Rose" tilt into the
+balcony rather than away from it.
+
+**`thunderclap`, the length of the recording.** The heads light white: `STROBE_HEADS` strobe
+at `STROBE_RATE` through their shutter channel, the other two are steady, all at full. The
+thunderclap plays from its first sample. The state lasts exactly as long as the recording,
+which the show knows from the file at build time, so a different recording changes nothing
+else.
+
+The heads do not hold still while they are lit. Each one hops, at full speed, between random
+points inside a circle of `THUNDER_RADIUS_DEG` around its own "Thunderclap" pose, picking a
+fresh point every `THUNDER_HOP_SECS`, each head on its own draws so the four never move in
+step. The preset is the centre and comes from the workspace like any other; the circle's
+size and the pace of the hops are the show's choice. The points are drawn uniformly over the
+circle, not around its edge, so the beams sweep across the people rather than orbit them, and
+a hop is a snap left to the head's own motors, lit — beams lurching in the lightning are the
+look, and nothing here is smoothed. A head needs a tenth of a second or more to land a hop,
+so `THUNDER_HOP_SECS` stays well above that, or the heads never arrive anywhere and only
+shudder.
+
+## 5. Respite: the door
+
+The heads go dark where they stand; the door wash lights the
+front door in `DOOR_AMBER`. Both switch in one frame. The state holds while anyone is in the
+yard, and ends when the distance has been the tombstone for `LEAVE_SECS`, so a detector that
+loses the group for a frame does not reset the show on them.
+
+**The reset.** The door goes dark at once. The heads move dark to "Rose", and after
+`BUILDUP_SECS` the rose lights and the heart starts, at rest. A show opens the same way.
+
+## 6. Presence: one distance
+
+The show has one input besides the clock: **the distance from the person who has come
+furthest into the yard to the trigger line** — positive on the street side of the line, zero
+on it, negative past it — or the **tombstone** when nobody is in the yard. The yard has two
+benchmarks and nothing else: the yard entry, where the street ends, and the trigger line, in
+front of the rose. **The unit is the path**: the entry is at 1, the trigger line at 0, and
+nothing is ever measured in metres. The camera looks at the path from the side, so both
+benchmarks are simply two places in its fixed picture, and a distance is where a person's feet
+fall between them. Someone beyond the entry is on the street and is not in the yard; someone
+between the two is, at their distance; someone past the line is at a negative one.
+
+The tombstone is `+∞`: infinitely far is what an empty yard means, every comparison in the
+show then falls the safe way without a special case, and there is no magic number to
+remember.
+
+The distance comes from one place: **the eyeball**, on `eyeson`, watching the camera. It
+sends the distance of the furthest person it sees between the benchmarks, or the tombstone,
+once per camera frame it has processed — about ten a second on `eyeson`, so a value stands
+for two or three of the rig's frames, and the heart's glide is what turns those steps into a
+pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: a dead eyeball idles the show on
+the rose, which is the safe default, and `health/eyeball` says why. Anything else on the
+network can send the same message to stand in for it — a laptop with `oscsend` is how the
+heart is heard quickening before the eyeball exists.
+
+The distance arrives over OSC; the face's buttons are handed over by the face inside the
+brain. Each reaches the show as its own snapshot — the OSC transport is in
+[`README.md`](README.md); what the eyeball sends is in [§14](#14-the-eyeball-on-eyeson).
+
+## 7. The lamps
+
+The two green lamps in the door's buttons are patched as the `Face` fixture and follow the
+frame like any other, so a takeover and the e-stop reach them with no special case.
+
+| | both lamps |
+|---|---|
+| normally | dark |
+| test mode | lit |
+
+Outside test mode the door is dark and its buttons do nothing but enter it: a lit lamp means
+the rig is not on the calendar, and nothing else.
+
+## 8. Test mode is on the door, not on a console
+
+Testing a show state should not wait for the show's hours or for a visitor, so the face's two
+buttons can take the show over:
 
 | | |
 |---|---|
-| hold both buttons for 2 s | test mode on, starting from the current show state; both lamps light |
-| left button | the next show state: blackout → daylight → dusk → searchlights → ball lighting → blackout |
-| right button | the motor, for as long as it is held |
+| hold both buttons for 2 s | test mode on, in the current show state; both lamps light |
+| right button, on press | the scare, from wherever the show is: `cut` → `buildup` → `thunderclap` → `respite` |
 | hold both buttons for 2 s again | test mode off; the calendar has the show again |
 
-It ignores the calendar, the sun and the incident schedule, so every incident can be tried by
-day, and under it an incident's base show is dusk, so a test by day shows the night look. An
-incident in test mode runs until you step on, with no fade at the end. A step is counted on
-release, which is what tells a lone press from half of a chord. The motor runs only while the
-right button is held, never on its beat, so stepping show states cannot start it by surprise,
-and the ball's firmware still stops any run at 2 s. The e-stop still wins, as it wins over
-everything. The buttons are published as `face/left_button` and `face/right_button`.
+The right button fires the scare the moment it goes down, whatever state the show is in —
+mid-scare included, which restarts it from `cut`. Nothing else changes in test mode: the
+states end the way they always do, `respite` on an empty yard, `idle` on the trigger line,
+and the heart follows presence, so with nobody in the yard it runs at rest. The left button
+has no job of its own; it is half of the chord. The e-stop still wins, as it wins over
+everything.
+
+One consequence of firing on press: leaving test mode is a chord, and if the right button
+goes down first the scare fires before the chord is recognised. Press the left button first,
+or accept one last scare on the way out.
 
 Test mode ends itself after fifteen minutes without a press, because a rig left in it would
 ignore the calendar unattended.
 
-## 7. The presets
+## 9. The presets
 
-The show is written against four pointing presets, aimed on the rig in QLC+:
+The show is written against two pointing presets, aimed on the rig in QLC+:
 
 | preset | used for |
 |---|---|
-| "Look at heaven" | where the heads park dark, and where Searchlights starts |
-| "Look at ball" | dusk, and Ball Lighting |
-| "Sky corner A", "Sky corner B" | the two corners Searchlights snaps between |
+| "Rose" | `ROSE_HEAD` on the path near the house; the other three dark, tilted into the balcony |
+| "Thunderclap" | the centre of each head's circle in the thunderclap: all four at the people on the path, at the trigger line, beam at head height |
+
+Each holds Pan, Pan Fine, Tilt and Tilt Fine for every head and nothing else, as the build
+requires. The rose head's gobo and colour are not in the preset: the show asks the fixture
+definition for the band of the rose gobo and of white, by name, and sets them itself.
+
+## 10. The numbers
+
+Everything above that is a choice lives in `brain/src/show.rs`, with the reason beside each;
+the sound table is `brain/sounds.rs`. The starting values:
+
+| constant | value | |
+|---|---|---|
+| `REST_BPM`, `SCARE_BPM` | 55, 130 | resting heart; the heart at the trigger line |
+| `HEART_RANGE` | 1.0 | the distance, in paths, over which the heart goes from rest to the scare rate: the whole walk from the entry; less to leave the first steps at rest |
+| `RATE_TAU` | 1.5 s | how fast the heart changes pace: the time constant of the glide, so the rate closes 63 % of the gap to its target in 1.5 s and 95 % in 4.5 s |
+| `ROSE_FLOOR` | 25 % | the rose at the quietest point of the envelope; full at its loudest |
+| `OWL_MIN_SECS`, `OWL_MAX_SECS` | 45 s, 120 s | the gap between owls |
+| `SCARE_CONFIRM_SECS`, `LEAVE_SECS` | 0.2 s, 3 s | the two debounces on presence: into the scare, out of respite |
+| `CUT_SECS`, `BUILDUP_SECS` | 1 s, 1 s | the two dark seconds; `BUILDUP_SECS` is measured, see [§16](#16-commissioning) |
+| `STROBE_HEADS`, `STROBE_RATE` | heads 2 and 3, fast | which heads strobe in the thunderclap |
+| `THUNDER_RADIUS_DEG`, `THUNDER_HOP_SECS` | 15°, 0.4 s | the circle each head hops around in the thunderclap, and how often it hops |
+| `DOOR_AMBER` | (255, 110, 0) | the door, as R, G, B on the wash |
+| `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone — twenty of its frames |
+
+The sound table names each recording and its gain; everything else about a recording the
+build reads from the file:
+
+| sound | file | gain | |
+|---|---|---|---|
+| heartbeat | `sounds/heartbeat.wav` | −6 dB | one lub-dub; must be shorter than the fastest beat, which the build checks; its envelope is the rose's pulse |
+| owl | `sounds/owl.wav` | −18 dB | far off |
+| thunderclap | `sounds/thunderclap.wav` | 0 dB | its length is the length of the state |
 
 ---
 
 # Setting up the rig
 
-## 8. Fixtures
+## 11. Fixtures
 
 **Addresses and modes are deliberately not listed here.** `claw.qxw` is the source of truth
 and it changes; read them out of QLC+ and set each fixture to match. What this table records
@@ -166,92 +262,206 @@ is *how* you set them on each model, which does not change.
 
 | Device | Interface | Notes |
 |---|---|---|
-| 3× CLF Yara LED par (the washes) | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
-| 3× CLF Poseidon Laser Beam XS moving head (the heads) | DMX off the HAT, 5-pin XLR | Address from the LCD menu (*DMX Address*). There is only one mode, 21 channels, so nothing else to match. See [Front-panel settings on the heads](#9-front-panel-settings-on-the-heads). |
-| The balls (ESP32-C3) | WiFi; USB serial/JTAG for flashing | See [The ball](#10-the-ball). |
+| 4× U\`King ZQ02015 moving head (the heads) | DMX off the HAT, 3-pin | Named `Head 1` to `Head 4`, left to right as seen from the street. Address (`Addr`) and mode (`CHnd`) from the display menu; `12CH`, the mode that carries Pan Fine and Tilt Fine, which the presets require. See [§12](#12-front-panel-settings-on-the-heads). |
+| 1× HQ Power VDPLPS36B2 LED par (the door wash) | DMX off the HAT, 3-pin | Named `Wash door`. HQ Power sells it as a pinspot; it is a wash. Mode and address are DIP switches: set the binary pattern from the datasheet. 3-channel RGB mode — the 5-channel mode adds a strobe and macros the show does not use and the e-stop would have to mask. |
+| The face | GPIO | Unchanged in the cabinet. Its buttons enter the brain through the same door as the OSC inputs — [`README.md`](README.md). |
+| The mouth (the Alesis io\|2 and two powered speakers) | USB on the hub; TRS to the speakers | See [§13](#13-sound). |
+| The eyeball (the Axis camera and `eyeson`) | Ethernet | See [§14](#14-the-eyeball-on-eyeson). |
 
-The washes and heads are rented. For testing, the owned stand-ins in
-[`OWNED-DEVICES.md`](OWNED-DEVICES.md) take their place.
+Not in this show: the ball, the laser, and anything rented. The deploy builds no wireless
+firmware when the workspace patches no wireless fixture.
 
-`CLF-Yara.qxf` and `CLF-Poseidon-Laser-Beam-XS.qxf` are ours, written from the manuals, and
-the QLC+ library has neither — **worth submitting upstream** to `mcallegari/qlcplus` once each
-has been confirmed against the hardware. Open each in QLC+'s Fixture Editor and re-save first,
-so the file matches what their tooling emits.
+Both definitions are in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf` is ours,
+from the datasheet. `UKing-ZQ02015.qxf` came from QLC+'s library and is partly measured: the
+strobe channel's open band, the motor speed's polarity, the no-function bands of
+`Automatic Mode` and `Reset`, and colour bands that match the manual. Still to measure: a band
+per gobo on the one undivided "Fixed Gobo" band, the rose among them; the strobe band; the
+`Light Strips` channel's off band; and the real travel — the definition says 540° pan and
+180° tilt, and the manual gives no figures. The show asks the definition for all of these; a
+guess in the file is a guess on the night.
 
-## 9. Front-panel settings on the heads
+The heads have LED strips on their bodies, on the `Light Strips` channel. The show keeps them
+off.
 
-State that lives in each head rather than in this repo, and survives nothing: a head swapped,
-reset or borrowed comes back with its own idea of these. Recorded here because a wrong one
-does not look like a wrong setting — it looks like broken software.
+## 12. Front-panel settings on the heads
 
-| Menu | Setting | Why |
+State that lives in each head and survives nothing: a head swapped or reset comes back with
+its own idea of these. Recorded because a wrong one looks like broken software.
+
+| Setting | Value | Why |
 |---|---|---|
-| *DMX Address → DMX Signal mode* | `Wire` | The rig drives the heads over the cable, not wireless DMX. |
-| *Personal → P/T invert → Pan invert* | `OFF` | Axis not reversed. |
-| *Personal → P/T invert → Tilt invert* | `OFF` | Axis not reversed. |
-| *Manual control → Program → Run on power on* | `NO` | A head powered up before the rig is sending stays still instead of playing its own program. |
+| DMX address, DMX mode | from `claw.qxw` | Nothing in software can detect a wrong mode; check each against the patch. |
+| `bLnd` | `bLAc` | Signal loss blacks a head out instead of starting its own program. The e-stop and a cable fault then look alike. |
+| `rPAN`, `rTiL` | `no` on every head | A head with one axis reversed tracks DMX perfectly and lands nowhere near the others, which reads as broken aiming code. |
+| `Soud` | `oFF` | A head powered up before the rig sends stays still. |
 
-Pan and tilt invert may be either way round, but **every head must agree**. A head with one
-axis reversed tracks DMX perfectly and lands nowhere near where the others do — which reads
-as broken aiming code, not as a menu.
+## 13. Sound
 
-## 10. The ball
+The brain plays through the Alesis io|2 — the same interface the ear captured through — into
+two powered speakers. Nothing captures any more.
 
-An ESP32-C3 that joins the Pi's WiFi AP and listens for the sACN universe. The firmware is
-the `ball/` crate: `no_std` Rust on Embassy, built on the Mac for
-`riscv32imc-unknown-none-elf` with the stable toolchain. It is not a member of the cargo
-workspace the Pi builds; build it from inside its own directory:
+- **Wiring.** The io|2's main outs (TRS) to the speakers. Turn its direct-monitor mix knob
+  fully to the computer side, so the unused mic inputs cannot bleed into the speakers, and
+  set the output level with the speakers' own knobs; the brain plays at the gains in the sound
+  table and `MOUTH_GAIN` in `mouth/src/config.rs`.
+- **Placement.** The heartbeat is for the street and the thunderclap for the person on the
+  path, from the same speakers: low, by the path, under the balcony, out of sight. Set the
+  level by the thunderclap — it is the loud one — and let the heartbeat sit where the gains
+  put it.
+- **Recordings** are in `sounds/`, 48 kHz 16-bit mono WAV, and are **compiled into the
+  brain as typed constants**: each is a `&[i16]` of samples with its length beside it, and the
+  heartbeat also carries its envelope, one byte per DMX frame. Nothing is read from disk at
+  startup or during a show, there is no WAV parser in the running program, and the binary on
+  the Pi is the whole show. The build checks each file's format, and that the heartbeat is
+  shorter than the fastest beat; a recording that fails is a build error, naming the file and
+  what it should be.
+- **On MQTT**, through the brain's client — the mouth is a thread in the brain, so it lives
+  and dies with it and `health/brain` covers it:
+
+  | topic | |
+  |---|---|
+  | `mouth/state`, `mouth/error` | as the ear had them: `error` says why it is mute, present only while it is |
+  | `mouth/xruns` | buffer underruns since the brain started: the show is stuttering, make the buffer bigger or the Pi quieter |
+  | `mouth/usb/vid_pid`, `mouth/usb/bus`, `mouth/usb/address`, `mouth/usb/speed` | the interface as the kernel sees it: identity, where on the bus, and `full`/`high` — a full-speed enumeration on a high-speed device is a bad cable or a bad hub port |
+  | `mouth/usb/sysfs` | its `/sys/bus/usb/devices/…` path, so `lsusb -t` and the journal can be read against it |
+  | `mouth/usb/serial`, `mouth/usb/product` | from `/sys`, blank where the device has none |
+  | `mouth/alsa/card`, `mouth/alsa/rate_hz`, `mouth/alsa/period`, `mouth/alsa/buffer` | what the stream was actually opened at — the rate and sizes asked for are not always the ones granted |
+
+  A missing or dead interface costs the sound and never a frame: the show runs on silent, and
+  `mouth/state` says so. Re-enumeration shows as the `usb/` topics changing under a running
+  brain, which is the signature of a flaky hub port rather than a software fault.
+
+The e-stop silences the mouth along with the frame. A console takeover does not: sound is not
+part of the universe, so the show's sound runs on underneath a takeover.
+
+## 14. The eyeball on `eyeson`
+
+The Axis M3105-LVE watches the yard; `eyeson`, the 2015 MacBook Air, runs the eyeball, a Rust
+daemon that finds people in the picture, places their feet on the path, and tells the brain
+how far the furthest of them is from the trigger line. The Pi could barely follow one person;
+the Mac follows a group. The daemon's design is [`DESIGN.md`](DESIGN.md) §3.6.
+
+**Network.** The Ethernet hub in the cabinet, on its own power supply, joins the Pi's `eth0`, the camera's PoE
+injector and `eyeson` on one wire, `10.0.1.0/24`: the Pi at `10.0.1.1`, `eyeson` at
+`10.0.1.2` through a USB Ethernet adapter, the camera at `10.0.1.90`. On that wire `eyeson`
+reaches the Pi for OSC and MQTT and the camera for video.
+
+That wire is the only network `eyeson` is on. It is reached through the Pi —
+`ssh -J claw-pi 10.0.1.2`, over WireGuard to the Pi and out of its `eth0` — and deployed to
+the same way, by `deploy-eyeson.sh`. The eyeball is built on `riverrain`, so `eyeson` needs
+neither a toolchain nor the internet. The annotated feed is watched through the same hop:
+`ssh -L 8080:10.0.1.2:8080 claw-pi`, then `http://localhost:8080/`. Over 4G, every second of
+it is paid for out of the data bundle; on site, a laptop on the hub or the access point goes
+through the same tunnel for free.
+
+**Camera.** Mounted so the path runs across the picture, square on: the yard entry at the
+right edge, the trigger line towards the left, the whole walk between them, and the pavement
+out of the picture altogether — the marks only bound the picture left to right, so anyone the
+camera can see walking past behind the entry would count as in the yard. Framing is what
+keeps them out. It runs under its
+own infrared illuminator with the IR-cut filter off, which the eyeball sets over VAPIX on every
+start, as the old one did and for the same reasons: infrared beats visible light by a wide
+margin at night, the rose and the amber door barely register in it, and an exposure capped at
+10 ms keeps a walking leg a shape rather than a streak. The thunderclap saturates the picture
+for a few seconds; nothing is detected during it and nothing needs to be. The camera's
+password is the eyeball's configuration and nowhere else.
+
+**The two benchmarks.** There is no calibration, only aiming. The two benchmarks are two
+marks fixed in the camera's picture — the trigger column towards the left, the entry column
+towards the right, at `TRIGGER_COLUMN` and `ENTRY_COLUMN` in `eyeball/src/config.rs` as
+fractions of the frame width — and the camera is aimed so the yard lands on them: open the
+annotated feed, which draws both marks, and move the camera until the trigger mark sits on
+the rose and the entry mark sits on the path's entry. Panning slides the picture along the
+path; how far back the camera is mounted sets how much path lies between the marks, so the
+mount's distance from the path is the other thing to move. The marks themselves are the last
+resort, for a mount that cannot move. A person's feet are the bottom of their box; their
+distance is where that point falls between the two marks, 1 at the entry and 0 at the line.
+Left of the trigger mark is negative; right of the entry mark is the street, and does not
+count. The furthest person is the smallest distance; nobody between the marks is the
+tombstone. Walk the path and watch the feed's number fall from 1 to 0. The number is linear
+in the picture, so it is only as linear in the yard as the camera is square to the path; if
+halfway along reads well off 0.5, the camera is angled — turn it rather than add a mark;
+nothing in the show needs it exact.
+
+**The annotated feed.** `http://10.0.1.2:8080/` is the camera's picture with the eyeball's
+reading drawn on it: every box, each person's ground point, the two benchmark columns, the
+distance it is about to send, and the frame rate it is managing. It is how the camera is
+aimed and the benchmarks are set, and on the night it is how the operator sees what the
+rig sees; it is the operator's view, not part of what the yard sees.
+
+It costs detector time: drawing on a frame is nothing, but compressing the result to JPEG
+again is around 5 ms at 640×480 on `eyeson`, a tenth of the detector's budget at 10 frames/s.
+So the feed is encoded on its own thread from the latest annotated frame, and **only while a
+browser is connected** — with nobody watching it costs nothing at all, and with someone
+watching `eyeball/fps` says what it costs.
+
+**What it sends**, over OSC to the brain, once per camera frame it has processed and never
+otherwise — a value is sent when there is a new one, and the brain holds the last:
+
+| address | arguments | |
+|---|---|---|
+| `/eyeball` | `,f` distance | from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the line — or `+∞`, the tombstone |
+
+**How often that is.** The detector sets the pace, not the camera. `eyeson` is a 2015
+MacBook Air: a dual-core Broadwell i5 at 1.6 GHz, no usable GPU for this, so the model runs
+on two CPU cores through ONNX Runtime. Rough expectations at 416 px input, decode and
+resize included — to be measured, which is why the model is a decision and not a fact:
+
+| model | per frame | rate |
+|---|---|---|
+| YOLOX-Nano | 50–100 ms | 10–20 frames/s |
+| YOLOX-Tiny | 120–250 ms | 4–8 frames/s |
+| YOLOv8n at 640 px | 200–400 ms | 2–5 frames/s |
+
+Ten frames a second is the target: a walking person moves a step every few frames, well
+inside what the heart's glide and the two-frame scare confirmation expect, and it leaves the
+Mac cool. The camera is asked for 640×480 MJPEG at that rate — a stream the detector cannot
+keep up with would queue frames and the distance would lag reality by the queue, so the
+eyeball always takes the newest frame and drops what has piled up behind it, and publishes
+`eyeball/fps` so the queue shows up as a rate below the camera's rather than as a show that
+reacts late.
+
+**On MQTT**: `health/eyeball`, `eyeball/fps` (frames processed per second), `eyeball/people`
+(boxes between the benchmarks, telemetry only — the show never sees a count),
+`eyeball/camera` (`ok`, or why not). Health goes to the broker on the Pi; a dead `eyeson` is
+`gone`.
+
+**Service.** `eyeball/org.kjkoster.eyeball.plist` installs as a launch daemon in
+`/Library/LaunchDaemons`, so it runs from boot without a login and is restarted when it dies.
+`eyeson` sleeps with the lid closed unless told not to: `sudo pmset -a sleep 0 disablesleep 1`
+is in the one-time setup in [`README.md`](README.md), along with Remote Login for the deploy.
+
+## 15. Show times
+
+`brain/shows.rs` lists the shows; for Halloween, one:
 
 ```
-cd ball && cargo build --release
+CITY = "Amsterdam, Netherlands"      // your city
+("2026-10-31 18:00", "2026-10-31 21:00")
 ```
 
-Every board gets the same binary and identifies itself at boot by its WiFi station MAC.
-`deploy.sh` builds and flashes it as part of every deploy.
+The clocks changed on October 25th, so this is CET; civil dusk on the 31st is around 17:50,
+and the start sits after it. The startup log lists the show and says which clock it believes,
+as [`README.md`](README.md) describes.
 
-### Provisioning a new board
+## 16. Commissioning
 
-A board has to be known in two places, under two different MACs:
+In this order, because each step needs the one before it.
 
-1. Plug it into the Pi and run `./deploy.sh`. It stops at the flash step with
-   `unknown device usb-Espressif_…` — add that name to `DEVICE_MAP` in `remote-deploy.sh`,
-   mapped to `ball`, and deploy again.
-2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
-   `Board` row to paste, then panics and restarts, printing it again every boot. Add the row
-   to `BOARDS` in `ball/src/config.rs`, name the fixture it is in `claw.qxw` — `Ball` there is
-   `patch::BALL` here — and deploy once more. The address, the universe and the port come with
-   the fixture.
-
-### Watching a board
-
-```
-./attach.sh            # the only board attached
-./attach.sh 0          # by index in `probe-rs list`
-./attach.sh AC:A7      # by any unique part of the probe's serial
-```
-
-Runs from the Mac and attaches `probe-rs` on the Pi, which is where the boards are plugged in.
-
-### Sleep
-
-Outside shows the brain asks the balls to sleep, on the ball's Sleep channel: from the end of
-one show until ten minutes before the next, and never in test mode or while the e-stop is
-pressed. A ball sleeps in five-minute stretches of deep sleep, and every wake is a boot.
-
-A boot listens for five seconds once its network is up, following the universe meanwhile and
-sending its telemetry. It then sleeps again if the universe asks it to, or if no universe was
-heard at all — the rig is off. It also sleeps again if it cannot join the access point within
-about a minute, which is what a switched-off Pi looks like. Otherwise it stays awake, and from
-then on only the Sleep channel puts it back to sleep. Going to sleep stops the motor first,
-then says goodbye on MQTT and leaves the access point cleanly.
-
-On MQTT a sleeping ball looks like this:
-
-| topic | while it sleeps |
-|---|---|
-| `health/ball` | `disconnected`, then `connected` for a few seconds every five minutes |
-| `ball/pack_v` | refreshed on every wake |
-| `ball/wakes` | wakes from deep sleep in a row; back to 0 after any other reset |
-
-A `health/ball` that says `gone` rather than `disconnected` is a ball that did not go to
-sleep on purpose.
+1. **Addresses and modes** on every fixture, read from QLC+. The startup log's slot spans are
+   what the brain believes; check them.
+2. **The e-stop**, before anything is aimed at anyone: press it with the rig running and read
+   `rig: e-stop pressed` and the override count.
+3. **Aim "Rose"**, then **"Thunderclap"**, in the Scene Editor as [`README.md`](README.md)
+   describes, on the rig after dark. Save, deploy, read the presets back from the log.
+4. **Measure `BUILDUP_SECS`**: take the rig over in QLC+, put every head on "Rose", switch to
+   "Thunderclap" and time the slowest to settle. Set `BUILDUP_SECS` to that plus a margin. If it is
+   much more than a second, aim the parked heads closer to their thunderclap positions rather
+   than stretching the darkness.
+5. **Levels**: the thunderclap first, then listen to the heartbeat from the street.
+6. **The show by button**: test mode on, fire the scare with the right button, from `idle`,
+   from `respite`, and once mid-scare. For the heart's pace, send `/eyeball` from a laptop
+   with `oscsend` and listen to it quicken. Nothing here needs the eyeball.
+7. **The camera**: with the annotated feed open, aim it square at the path until the trigger
+   mark sits on the rose and the entry mark on the path's entry; walk the path and watch the
+   feed and `brain/presence`. Then the show by walking it.
