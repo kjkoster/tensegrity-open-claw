@@ -1,21 +1,25 @@
 # Tensegrity Open Claw
 
-Code and hardware configuration for the Tensegrity Open Claw sculpture. **This is the single
-setup reference** — everything you must configure on the Pi and the fixtures lives here.
+Code and hardware configuration for the Tensegrity Open Claw sculpture. **This is the setup
+reference for the system**: the Pi, the cabinet, its wiring, the network, and building and
+deploying — whatever show it runs. Nothing here depends on which fixtures a show chose; that,
+and the configuration and operation that come with them, belongs in [`SHOW.md`](SHOW.md).
 
 The system is three parts:
 
-- **Pi controller (`claw-pi`)** — a Raspberry Pi running the `brain` daemon. Captures audio,
-  runs the show, and emits one DMX universe **two ways** at 40 Hz: out the wired RS-485 HAT
-  as raw DMX-512, and over the network as E1.31 sACN. The wire drives the wired fixtures; the
-  sACN copy drives the ball, and is what a monitor or QLC+ works against.
-- **Wired DMX** — the sculpture's fixtures on the HAT: a wash and a moving head per leg.
-  What is patched where lives in `claw.qxw`, not in this file.
-- **The ball** — an ESP32-C3 on the Pi's WiFi, following the sACN universe.
+- **Pi controller (`claw-pi`)** — a Raspberry Pi in the cabinet running the `brain` daemon.
+  Reads its sensors, runs the show, and emits one DMX universe **two ways** at 40 Hz: out the
+  wired RS-485 HAT as raw DMX-512, and over the network as E1.31 sACN. The wire drives the
+  wired fixtures; the sACN copy drives the wireless ones, and is what a monitor or QLC+ works
+  against.
+- **Wired fixtures** — on the HAT's DMX line.
+- **Wireless fixtures** — on the Pi's WiFi, following the sACN universe.
 
-[`DESIGN.md`](DESIGN.md) holds the system's architectural decisions and what is not built
-yet. It does not describe what the code does today — that is what this file and the code
-itself are for.
+[`SHOW.md`](SHOW.md) holds the show: what the audience sees and why, and the fixtures it uses
+and how each is set up. [`DESIGN.md`](DESIGN.md) holds where code goes and why: the
+principles, the structure, a section per component. Neither describes what the code does
+today — that is what this file and the code itself are for. [`OWNED-DEVICES.md`](OWNED-DEVICES.md)
+is the inventory of the hardware we own, this setup's machines and cabinet among it.
 
 ---
 
@@ -48,14 +52,15 @@ macOS.
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
   `10.0.10.1`, leased from `10.0.10.10+`. `etc/hostapd.conf` is the only source of truth
   for the access point: every deploy installs it over the Pi's copy and restarts `hostapd`,
-  which drops every WiFi client for a few seconds. The balls have the access point's BSSID,
-  SSID, channel and passphrase compiled in, read from that same file when the firmware is
-  built, so changing any of them takes a deploy with every ball plugged in to be re-flashed.
+  which drops every WiFi client for a few seconds. Wireless fixtures have the access point's
+  BSSID, SSID, channel and passphrase compiled in, read from that same file when the firmware
+  is built, so changing any of them takes a deploy with every one of them plugged in to be
+  re-flashed.
   The BSSID is the Pi's own wlan0 MAC (`cat /sys/class/net/wlan0/address`): moving to a
   different Pi means updating it there first.
 - **A silent station is dropped after 6 s** (`ap_max_inactivity`, with `skip_inactivity_poll`),
-  so a ball that lost power without a goodbye can rejoin quickly; a connected ball pings the
-  broker every 5 s to stay well clear of it. A laptop left idle that long is dropped too and
+  so a wireless fixture that lost power without a goodbye can rejoin quickly; a connected one
+  pings the broker every 5 s to stay well clear of it. A laptop left idle that long is dropped too and
   rejoins by itself.
 - The **Ethernet port** is exposed to a dev laptop for SSH.
 
@@ -82,10 +87,8 @@ The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs 
 The timer runs the check every minute and is the only one of the two enabled — the service is
 `oneshot` and exists to be fired.
 
-**It finds the modem itself, every run**, because the cabinet is rewired for every show: the
-Huawei device on the USB bus (vendor `12d1`), then its network interface and its control port
-under that USB device in sysfs, then the ModemManager modem whose physical device it is. Nothing in
-the script names a port, a hub or an interface.
+It finds the modem by its USB vendor on every run, so no port, hub or interface needs
+configuring; why, and why it never reboots or cuts power, is in [`DESIGN.md`](DESIGN.md) §3.2.
 
 On a consecutive run of failed pings through the modem's interface it escalates, touching the
 modem alone so the show is never disturbed: at minute 3 NetworkManager reconnects it, at minute 5
@@ -93,10 +96,6 @@ ModemManager resets it, and from minute 8 it is dropped off the USB bus and re-e
 replug without cutting power — again every 5 minutes for as long as the outage lasts. The first
 two fire once, and the gap to the next rung is what gives each time to work: a modem needs
 30–60 s to register after a reset.
-
-There is no reboot and no power cut. A reboot breaks the show for a link the show does not need.
-A per-port power cut can only be trusted on a hub that really switches its ports individually,
-which a hub's own claim does not prove, and on a ganged hub it would also cut the audio interface.
 
 Separately, when the internet is up but the WireGuard tunnel is not, `wg-quick` is restarted.
 
@@ -113,17 +112,13 @@ edited on the Pi is overwritten by the next deploy.
 
 ## Attached hardware
 
-**Addresses and modes are deliberately not listed here.** `claw.qxw` is the source of
-truth and it changes; read them out of QLC+ and set each fixture to match. What this table
-records is *how* you set them on each model, which does not change.
+What the cabinet holds whatever the show. The show's own fixtures, and how to set each one up,
+are in [`SHOW.md`](SHOW.md).
 
 | Device | Interface | Notes |
 |---|---|---|
 | The ear (a USB audio interface) | USB (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `arecord -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `cortex/src/config.rs`. Reports as `health/ear`, with `ear/state`, `ear/xruns`, `ear/clipping` (blocks at full scale since the brain started — turn the gain down), `ear/error` (why it is deaf, present only while it is), and `ear/usb/address`, `ear/usb/device` and `ear/usb/rate_hz`. |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
-| 3× CLF Yara LED par | DMX off the HAT | Address and mode from the front-panel LCD menu. Nothing in software can detect a wrong mode, so check each one against the patch. |
-| 3× CLF Poseidon Laser Beam XS moving head | DMX off the HAT, 5-pin XLR | Address from the LCD menu (*DMX Address*). There is only one mode, 21 channels, so nothing else to match. See [Front-panel settings on the moving heads](#front-panel-settings-on-the-moving-heads). |
-| ESP32-C3 MCUs (the balls) | USB serial/JTAG | Flashed by `deploy.sh` while plugged into the Pi; see [Ball fixtures](#ball-fixtures-esp32-c3). Not needed for `brain` itself. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. |
 
 ## OS configuration (once)
@@ -227,9 +222,7 @@ DMX **OUT** of the last device on the bus.
 - The WiFi bring-up units belong here too once documented; the 4G watchdog's are above.
 
 `remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf` and
-the 4G watchdog's unit and timer (above). Folding the 4G watchdog's job into Stem, so there is
-one health daemon rather than two overlapping ones, is an open item in
-[`DESIGN.md`](DESIGN.md).
+the 4G watchdog's unit and timer (above).
 
 ## Build & deploy
 
@@ -243,30 +236,15 @@ Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `etc/remote-deploy.sh` ther
 `brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
 restarts the daemon.
 
-Before any of that, `deploy.sh` builds the `ball` firmware on the Mac. Only the binary goes to
-the Pi, as `tensegrity-open-claw/binaries/ball`, and the last thing `remote-deploy.sh` does is
-flash it onto every board it finds under `/dev/serial/by-id`. The boards are left in their
+Before any of that, `deploy.sh` builds the wireless fixture firmware on the Mac — today
+`ball`. Only the binary goes to the Pi, as `tensegrity-open-claw/binaries/ball`, and the last
+thing `remote-deploy.sh` does is flash it onto every board it finds under
+`/dev/serial/by-id`. The boards are left in their
 bootloader until all are flashed; then the access point is told to drop its stations (every
 WiFi client, briefly), and only then are the boards reset — so each rejoins on its first
 attempt instead of waiting for the access point to forget it.
 
-The cargo workspace is five crates:
-
-| | |
-|---|---|
-| `cortex/` | everything under the show: capture, features, noise, both transports, the frame loop, the show calendar |
-| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
-| `brain/` | the claw: `claw.qxw`'s patch, its show times, and the show |
-| `rig-mqtt/` | the MQTT conventions the brain and the ball share |
-| `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, read by the ball firmware |
-
-The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
-`main.rs` includes the generated patch and calendar and writes the show.
-
-Beside the crates, a daemon's systemd unit lives in that daemon's directory
-(`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
-belonging to a daemon lives in `etc/`: the access point's configuration, the 4G watchdog and
-`remote-deploy.sh` itself.
+The cargo workspace is five crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
 
 The deploy ships **only what the Pi builds from and installs** — the five crates,
 `claw.qxw`, `fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh`
@@ -310,9 +288,9 @@ is a pose. Note `<Address>` in the file is **0-based**: DMX address 1 on the wir
 `<Address>0</Address>`.
 
 **The presets are a prescribed set.** `brain/presets.rs` lists the names the show is written
-against — "Look at ball", "Look at heaven", "Sky corner A" and "Sky corner B" — and the
-workspace's scenes must be exactly that set. A name becomes its
-constant the way a fixture name does: "Look at ball" → `LOOK_AT_BALL`.
+against — this show's are in [`SHOW.md`](SHOW.md) — and the workspace's scenes must be exactly
+that set. A name becomes its constant the way a fixture name does: "Look at ball" →
+`LOOK_AT_BALL`.
 
 **Why channels are named, not numbered.** Because they become *named fields* rather than
 offsets, drift is caught by the compiler in every direction:
@@ -326,13 +304,13 @@ offsets, drift is caught by the compiler in every direction:
 | overlap two fixtures' slots | fails, naming both fixtures and their spans |
 | name two fixtures so they yield the same Rust constant | fails — the daemon could not tell them apart |
 | patch a fixture outside the first universe | fails — the daemon sends exactly one universe |
-| change the E1.31 output's universe or port | the brain listens and sends there, and so does every ball once re-flashed |
+| change the E1.31 output's universe or port | the brain listens and sends there, and so does every wireless fixture once re-flashed |
 | change the E1.31 output's unicast address | the brain's receiver binds that address instead |
-| change the ball's channels or bands in `ball.qxf` | the brain and the ball firmware both follow, once re-flashed |
-| patch two balls in different modes | fails — every board runs the same firmware, so they must share one |
+| change a wireless fixture's channels or bands in its `.qxf` | the brain and the fixture's firmware both follow, once re-flashed |
+| patch two of one wireless fixture in different modes | fails — every board runs the same firmware, so they must share one |
 | switch the E1.31 output to multicast | fails — the brain only receives a console by unicast |
 | remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
-| delete or rename a ball a board is provisioned as | the ball firmware stops compiling at that board's row |
+| delete or rename a wireless fixture a board is provisioned as | its firmware stops compiling at that board's row |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
 | patch a fixture whose shutter, Effect or Maintenance channel marks no off band | fails, naming the band the e-stop needs marked |
 | add a scene that is not in `brain/presets.rs` | fails, naming it — and the preset it is most likely a typo of |
@@ -371,22 +349,8 @@ running binary actually believes.
 ### Show times
 
 The rig plays only during the shows listed in `brain/shows.rs`: a `CITY`, and local
-`(start, stop)` pairs in that city's time, in order. Edit it and deploy. Outside a show the
-rig is black except for the ball's status LED.
-
-During a show the ball's motor runs for one second every two minutes, the first run as the
-show opens. From civil dusk to civil dawn its power LEDs pulse.
-
-The heads park dark on "Look at heaven" in blackout and daylight. At dusk they turn to "Look at
-ball" and light it, each in its leg's colour, against the music: at most 35% when the washes
-are at their darkest, dipping as they flash, and breathing opposite them in silence.
-`DUSK_BALL_LEVEL` in `brain/src/head_show.rs` sets that 35%.
-
-Once on the ball, each head's dot dances over its surface on a smooth path of its own, so the
-three never move in step. In silence it drifts slowly within half its range; as the music comes
-in it speeds up and widens to all of it, and each beat surges it along the path. The range is
-`DANCE_RADIUS_DEG` (6°, about 25 cm on the ball at 2–2.5 m); the dots may now and then slip
-past the edge. The `DANCE_*` constants beside it set the pace and the surge.
+`(start, stop)` pairs in that city's time, in order. Edit it and deploy. What the rig shows
+during and outside a show is in [`SHOW.md`](SHOW.md).
 
 The build looks the city up, finds its zone, and works out every show's instants and dark
 stretches, all offline. It fails on:
@@ -416,61 +380,10 @@ The brain publishes its state under `brain/state/`, retained, on every change:
 | topic | values |
 |---|---|
 | `brain/state/rig` | `boot_hold`, `running`, `estop` or `shutdown` — see [E-stop](#e-stop) |
-| `brain/state/show` | `blackout`, `daylight`, `dusk`, `searchlights` or `ball_lighting` |
-| `brain/state/testmode` | whether test mode is on |
+| `brain/state/show` | the show state; the show's own states are in [`SHOW.md`](SHOW.md) |
 
-The log has a `rig: …` line for each change of the rig state, and a `show: …` or
-`show: test mode …` line for each change of the show state.
-
-### Incidents
-
-After dusk, every 30 to 45 minutes, the rig can switch for two to four minutes to an
-**incident** — Searchlights or Ball Lighting — and then return. None ends later than 20
-minutes before dawn or the show's stop. Each is picked at random from both.
-
-At an incident's start the heads light up and glide, lit, to its preset; over its last five
-seconds their light falls away, and they return to the dusk look on the ball. Washes and ball switch
-at the start and the end. Searchlights starts snapping a few seconds after all three heads
-have reached "Look at heaven".
-
-| incident | heads | washes | ball |
-|---|---|---|---|
-| Searchlights | white, from "Look at heaven"; one at a time snaps to a random point between "Sky corner A" and "Sky corner B" | the base show | the base show |
-| Ball Lighting | on "Look at ball"; white, then each leg's colour, then back, every ten seconds | the same fade | white LED to blue LED and back |
-
-**Confirming it landed.** At the start of each dark stretch, and at startup inside one, the
-log prints the stretch's whole schedule:
-
-```
-show: dark 19:08 → 22:00, 2 incidents
-show:   #0 at +37m12s: ball_lighting for 3m05s
-show:   #1 at +81m40s: searchlights for 2m31s
-```
-
-The offsets count from the start of the dark stretch on the line above: dusk, or the show's
-start if it opens after dusk.
-
-A restart prints the same schedule again: it is drawn from the dark stretch and nothing else.
-
-### Test mode
-
-To try each show state without a console or waiting for dusk, use the cabinet door:
-
-| | |
-|---|---|
-| hold both buttons for 2 s | test mode on, starting from the current show state; both lamps light |
-| left button | the next show state: blackout → daylight → dusk → searchlights → ball lighting → blackout |
-| right button | the motor, for as long as it is held |
-| hold both buttons for 2 s again | test mode off; the calendar has the show again |
-
-The calendar, the sun and the incident schedule are ignored while it is on, so every incident
-can be tried by day; the washes and ball under Searchlights show their night look, dusk. An
-incident in test mode runs until you step on, with no fade at the end. The motor runs only while the right button is held, never on its beat,
-and the ball's firmware still stops any run at 2 s. The e-stop still wins, as it wins over
-everything. The buttons are published as
-`face/left_button` and `face/right_button`. Test mode turns itself off after 15
-minutes without a press, so a rig left in it cannot ignore the calendar for the rest of the
-event.
+The log has a `rig: …` line for each change of the rig state, and a `show: …` line for each
+change of the show state.
 
 ### E-stop
 
@@ -527,86 +440,6 @@ like the stop rather than like a homing command.
 
 ---
 
-# Ball fixtures (ESP32-C3)
-
-An ESP32-C3 that joins the Pi's WiFi AP and listens for the sACN universe. The firmware is
-the `ball/` crate: `no_std` Rust on Embassy, built on the Mac for
-`riscv32imc-unknown-none-elf` with the stable toolchain. It is not a member of the cargo
-workspace the Pi builds; build it from inside its own directory:
-
-```
-cd ball && cargo build --release
-```
-
-Every board gets the same binary and identifies itself at boot by its WiFi station MAC.
-
-## Provisioning a new board
-
-A board has to be known in two places, under two different MACs:
-
-1. Plug it into the Pi and run `./deploy.sh`. It stops at the flash step with
-   `unknown device usb-Espressif_…` — add that name to `DEVICE_MAP` in `remote-deploy.sh`,
-   mapped to `ball`, and deploy again.
-2. `./attach.sh` and read the log. An unprovisioned board prints its station MAC and the
-   `Board` row to paste, then panics and restarts, printing it again every boot. Add the row to `BOARDS` in `ball/src/config.rs`, name
-   the fixture it is in `claw.qxw` — `Ball` there is `patch::BALL` here — and deploy
-   once more. The address, the universe and the port come with the fixture.
-
-## Watching a board
-
-```
-./attach.sh            # the only board attached
-./attach.sh 0          # by index in `probe-rs list`
-./attach.sh AC:A7      # by any unique part of the probe's serial
-```
-
-Runs from the Mac and attaches `probe-rs` on the Pi, which is where the boards are plugged in.
-
-## Sleep
-
-Outside shows the brain asks the balls to sleep, on the ball's Sleep channel: from the end of
-one show until ten minutes before the next, and never in test mode or while the e-stop is
-pressed. A ball sleeps in five-minute stretches of deep sleep, and every wake is a boot.
-
-A boot listens for five seconds once its network is up, following the universe meanwhile and
-sending its telemetry. It then sleeps again if the universe asks it to, or if no universe was
-heard at all — the rig is off. It also sleeps again if it cannot join the access point within
-about a minute, which is what a switched-off Pi looks like. Otherwise it stays awake, and from
-then on only the Sleep channel puts it back to sleep. Going to sleep stops the motor first,
-then says goodbye on MQTT and leaves the access point cleanly.
-
-On MQTT a sleeping ball looks like this:
-
-| topic | while it sleeps |
-|---|---|
-| `health/ball` | `disconnected`, then `connected` for a few seconds every five minutes |
-| `ball/pack_v` | refreshed on every wake |
-| `ball/wakes` | wakes from deep sleep in a row; back to 0 after any other reset |
-
-A `health/ball` that says `gone` rather than `disconnected` is a ball that did not go to
-sleep on purpose.
-
----
-
-# Front-panel settings on the moving heads
-
-State that lives in each head rather than in this repo, and survives nothing: a head swapped,
-reset or borrowed comes back with its own idea of these. Recorded here because a wrong one
-does not look like a wrong setting — it looks like broken software.
-
-| Menu | Setting | Why |
-|---|---|---|
-| *DMX Address → DMX Signal mode* | `Wire` | The rig drives the heads over the cable, not wireless DMX. |
-| *Personal → P/T invert → Pan invert* | `OFF` | Axis not reversed. |
-| *Personal → P/T invert → Tilt invert* | `OFF` | Axis not reversed. |
-| *Manual control → Program → Run on power on* | `NO` | A head powered up before the rig is sending stays still instead of playing its own program. |
-
-Pan and tilt invert may be either way round, but **every head must agree**. A head with one
-axis reversed tracks DMX perfectly and lands nowhere near where the others do — which reads
-as broken aiming code, not as a menu.
-
----
-
 # QLC+ on the Mac
 
 QLC+ does two jobs here and nothing else: taking the rig over by hand, and aiming the heads'
@@ -626,17 +459,12 @@ cp fixtures/*.qxf ~/Library/Application\ Support/QLC+/Fixtures/
 
 Then **quit and relaunch QLC+** — it builds its definition cache at startup.
 
-Check *Fixture Manager → Add fixture…* lists `CLF → Yara`, `CLF → Poseidon Laser Beam XS` and `Tensegrity → Ball`. QLC+ 5 skips definitions that fail to parse
-**silently**, so absence is the error signal.
+Check *Fixture Manager → Add fixture…* lists every manufacturer and model in `fixtures/`.
+QLC+ 5 skips definitions that fail to parse **silently**, so absence is the error signal.
 
 Do not put them inside `/Applications/QLC+.app`. That library is indexed by a manifest
 (`FixturesMap.xml`) and ignores anything not listed in it, editing the bundle breaks its
 signature, and an update wipes it.
-
-`CLF-Yara.qxf` and `CLF-Poseidon-Laser-Beam-XS.qxf` are ours, written from the manuals, and
-the QLC+ library has neither — **worth submitting upstream** to `mcallegari/qlcplus` once each has been confirmed against
-the hardware. Open each in QLC+'s Fixture Editor and re-save first, so the file matches what their
-tooling emits.
 
 Every fixture the workspace patches needs its `.qxf` committed to `fixtures/` as well — the
 Pi builds the daemon and has no QLC+ library to borrow from, so a missing one fails the
@@ -679,8 +507,8 @@ with a live universe cannot seize the rig by accident.
 
 ## Aiming a preset
 
-The workspace holds exactly the four presets `brain/presets.rs` names, and no other scenes.
-Each holds **only Pan, Pan Fine, Tilt and Tilt Fine, for all three heads** — the build fails on
+The workspace holds exactly the presets `brain/presets.rs` names, and no other scenes.
+Each holds **only Pan, Pan Fine, Tilt and Tilt Fine, for every head** — the build fails on
 anything else, so the dimmer you raised to see the beam must not be saved into it. The
 placeholders in the workspace are rough; aim every one on the rig.
 
@@ -689,7 +517,7 @@ placeholders in the workspace are rough; aim every one on the rig.
 3. Enable its **live-output toggle**. In Simple Desk, raise each head's dimmer so you can see
    where it points — that dimmer is not part of the scene, and stays out of it.
 4. Move the heads in the Scene Editor. It updates the Function in place.
-5. **File → Save**, then deploy. The startup log lists the four presets with every head's pan
+5. **File → Save**, then deploy. The startup log lists the presets with every head's pan
    and tilt; check the one you re-aimed has moved.
 
 Re-aim in the Scene Editor rather than dumping from Simple Desk. A **DMX dump always creates
