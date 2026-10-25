@@ -30,7 +30,6 @@
 //! The rig state is published on `brain/state/rig`, retained, on every change.
 
 use crate::Rig;
-use crate::ear::AudioFeatures;
 use crate::clock;
 use crate::config as cfg;
 use crate::dmx::{self, Frame};
@@ -99,7 +98,6 @@ impl RigState {
 pub async fn frame_task(
     socket: UdpSocket,
     cid: [u8; 16],
-    features: LatestRx<AudioFeatures>,
     takeover: LatestRx<Takeover>,
     shutdown: Arc<AtomicBool>,
     mut rig: Rig,
@@ -126,12 +124,11 @@ pub async fn frame_task(
         // Slots outside a patched fixture's block stay zero, and so do the ones the rig's
         // show says nothing about.
         let mut slots = dmx::BLACKOUT;
-        (rig.show)(&features.snapshot(), dt, &mut slots);
+        (rig.show)(dt, &mut slots);
 
-        // The show above runs every frame whether or not it is driving. Its noise fields,
-        // breath phase and slews stay continuous, so handback resumes mid-stride instead of
-        // springing out of a frozen frame — and the audio pipeline never stops feeding it
-        // either way.
+        // The show above runs every frame whether or not it is driving. Its phases and slews
+        // stay continuous, so handback resumes mid-stride instead of springing out of a frozen
+        // frame.
         //
         // One decision, one buffer: everything below ships whatever `slots` holds, to both
         // the wire and the network, so the two can never follow different sources. Takeover

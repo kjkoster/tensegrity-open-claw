@@ -52,8 +52,8 @@ Each is a choice, written down so it can be changed on purpose.
 | How the eyeball measures | Two marks fixed in the camera's own picture, and the camera aimed so the rose and the path's entry land on them, watching the annotated feed; distance is linear between the marks. No calibration, only aiming. Needs the camera square to the path, which the feed shows at a glance. | A ground-plane homography from four marks: right at any angle, four points to measure and a matrix to get wrong. |
 | Which point of a box is the person | Its trigger-side bottom corner: the leading foot. | The bottom centre: on a box the detector has merged over three children, the centre is the child in the middle of the bunch, not the one in front. |
 | How sure the detector must be | `CONFIDENCE` 0.3, and non-maximum suppression at an IoU of 0.6. Low and loose on purpose: a false box can only land between the two marks and the show debounces everything, so a missed child costs more than a phantom; and children overlap in a side view, where the usual 0.45 would merge them into one. | The usual 0.5 and 0.45: tuned for photographs, not a bunch of children seen from the side. |
-| The ball | Stays in the repo as a component; not patched in this show. The deploy skips wireless firmware when the workspace patches none. | Deleting it: the next Tensegrity project wants it back. |
-| The ear | Deleted, as asked. Its last version is on the `2026-10-23-ADE-Amsterdam` tag, which already marks the previous show; no new tags. | `last-version-with-claw-show` and `last-version-with-ear`: two more names for the commit that tag names. |
+| The ball | Removed from the code and the deploy, on the `last-version-with-ball` tag; its section stays in `DESIGN.md` and its definition in `fixtures/`, for when it comes back. `cortex-build`'s `addressing()` and the `stem` crate's `no_std` stay for the firmware to come. | Keeping it in the tree: a firmware build and a flashing step on every deploy, for a fixture this show does not patch. |
+| The ear | Deleted, as asked. Its last version is on the `last-version-with-ear` tag; its capture thread is the mouth's starting point. | Keeping it running unread: a thread and an ALSA stream on the interface the mouth needs. |
 | Fixture names | By position, `Head 1`–`Head 4` left to right from the street, `Wash door`. Roles (which head carries the rose) are the show's choice and change; positions do not. | By role. |
 | Dark, on a head | Dimmer zero, with the strobe channel in its open band. The head's definition has no closed band, and the manual gives the strobe channel as a bare 0–255. | Shutter closed: there is nothing to close it to unless measuring finds a band. |
 | The heads' light strips | The `Light Strips` channel joins the Effect group in the definition, with its `Off` band marked `NoFunction`. The show parks it, and the e-stop's mask sends it to `Off` with no new rule. | Leaving it in the Colour group: the e-stop holds Colour where it was, so strips a console lit would stay lit under the stop. |
@@ -81,35 +81,22 @@ Each needs a choice before the step that uses it.
 
 ## 1. Clear the decks
 
-A brain that runs with nothing on it: the old show and the ear gone, Stem's Rust side in one
-crate, one broker connection, and a placeholder show. The previous show is the
-`2026-10-23-ADE-Amsterdam` tag, on the last commit that touched code; nothing needs tagging.
-The workspace is left as it is until chunk 4: its fixtures and scenes still build, and the
-placeholder drives none of them.
+A brain that runs with nothing on it: Stem's Rust side in one crate, and one broker
+connection. The old show is already replaced by a placeholder that keeps the rig in
+`blackout` with test mode on the door, the ear is gone (on the `last-version-with-ear` tag,
+whose capture thread is the mouth's starting point in chunk 2), and the workspace already
+patches this show's fixtures, with no scenes yet. The previous show is the
+`2026-10-23-ADE-Amsterdam` tag.
 
-- [ ] Delete the ear: `cortex/src/ear/` whole, and `cortex/src/sparkle.rs`, which only maps
-      its features; the Ear, Mapping and Sparkle sections of `cortex/src/config.rs`; its
-      thread, its client and its seam in `cortex::run`. `Rig::show` loses its
-      `&AudioFeatures`. The ALSA and `rusb` dependencies leave `cortex` for the mouth's crate,
-      and the capture thread's open, reopen and USB probe go with them as its starting point
-      (chunk 2). `cortex/src/envelope.rs` has no user now and stays: it is the heart's glide.
-      The calendar's dark-stretch resolution stays too; this show does not read it.
-- [ ] Delete the old show in `brain/src/`: `head_show.rs`, `legs.rs`, `wash_show.rs`,
-      `ball_show.rs`, `ball_lighting.rs`, `schedule.rs`, and `show_state.rs` and
-      `test_mode.rs`, which chunk 4 writes anew. `face.rs` and `face_show.rs` stay.
-- [ ] **A placeholder show**: always `blackout`, with test mode on the chord and the lamps lit
-      in it, `brain/state/show` and `brain/state/testmode` published. It writes the face's
-      lamps and nothing else, so the old patch's fixtures sit unused.
 - [ ] **`rig-mqtt` becomes `stem`, with the std client**: the crate moves into `stem/`
-      (`Cargo.toml`, `src/`) and is renamed, in the workspace members, the brain, `cortex`
-      and `ball/`, and in `deploy.sh`'s list; `cortex::telemetry`'s client moves into it
-      behind a `std` feature, with the broker's address a parameter, and the brain follows.
+      (`Cargo.toml`, `src/`) and is renamed, in the workspace members, the brain and
+      `cortex`, and in `deploy.sh`'s list; `cortex::telemetry`'s client moves into it behind a
+      `std` feature, with the broker's address a parameter, and the brain follows. The crate
+      stays `no_std` without that feature, and does without `alloc` wherever it can, for the
+      firmware to come.
 - [ ] The face: `FaceState`'s `right_held` becomes `right_presses`, a counter that moves on
       the press, like the chords; the chord rule stays in the face. Its e-stop path is
       unchanged. Its own client goes: its topics go out through the brain's.
-- [ ] `deploy.sh` / `etc/remote-deploy.sh`: build and flash wireless firmware only when the
-      workspace patches a wireless fixture; otherwise log `no wireless fixtures patched` and
-      skip the step — which chunk 4 needs, when the ball leaves the patch.
 
 **Landed when** `./deploy.sh` deploys clean, the e-stop holds and releases, the chord lights
 the lamps, `face/…` and `brain/…` report under one connection, and `ps -T` on the brain shows
@@ -250,7 +237,7 @@ with the camera on the table plugged into the Pi; nothing here needs a show.
       every start, set the camera over VAPIX: 640×480, IR-cut filter off, exposure ≤ 10 ms,
       and the image rotation for the new mount; read it back and publish any disagreement.
       The parameter names, the sequence and the read-back are in the old eyeball on the
-      `last-version-with-mage` tag (`eyeball/eyeball.py`), in Python; port them, they are the
+      `last-version-with-eyeball` tag (`eyeball/eyeball.py`), in Python; port them, they are the
       part that took finding out.
 - [ ] `eyeball/src/detect.rs`: the thread drops to `SCHED_OTHER` first, then builds the
       session from the model compiled in with `include_bytes!` (`commit_from_memory`),
@@ -336,30 +323,12 @@ Do this in QLC+, not in a text editor: the build ingests whatever QLC+ writes, a
 hand-edited file is a second author. Keep `claw.qxw` open in a text editor beside it to check
 each save, because QLC+ does not show you everything it stores.
 
-#### Fixtures
-
-In *Fixture Manager*:
-
-- [ ] Delete `Head red leg`, `Head green leg`, `Head blue leg`, `Wash red leg`,
-      `Wash green leg`, `Wash blue leg` and `Ball`. Leave `Face` (address 1, 2 channels).
-- [ ] Add four **UKing ZQ02015** in the `12 Channel` mode, the one with Pan Fine and Tilt
-      Fine, named exactly `Head 1`, `Head 2`, `Head 3`, `Head 4`, at addresses
-      **11, 23, 35, 47**, so they sit at 11–22, 23–34, 35–46, 47–58. Gaps are fine, overlaps
-      fail the build.
-- [ ] Add one **HQ Power VDPLPS36B2 LED Pinspot PAR36** (the door wash), `3 Channel` mode,
-      named `Wash door`, at address **64** — a single DIP switch on the fixture.
-- [ ] Save. In the file, each `<Fixture>` should read `<Address>` **one less** than QLC+
-      showed you (`<Address>10</Address>` for `Head 1`, `63` for `Wash door`): the file is
-      0-based. Universe `0` on every one.
-
-The names become `patch::HEAD_1` … `patch::HEAD_4`, `patch::WASH_DOOR` and `patch::FACE`.
-
-#### Scenes
+The patch is in, named by role: `patch::ROSE_HEAD`, `patch::LEFT_STROBE_HEAD`,
+`patch::RIGHT_STROBE_HEAD`, `patch::MIDDLE_WASH_HEAD`, `patch::DOOR_WASH` and `patch::FACE`.
+The build fails on any scene `brain/presets.rs` does not list.
 
 In *Function Manager*:
 
-- [ ] Delete the four scenes `Look at ball`, `Look at heaven`, `Sky corner A`, `Sky corner B`.
-      The build fails on any scene `brain/presets.rs` does not list.
 - [ ] Create a Scene named exactly **`Rose`**. In the *Scene Editor* add the four heads and
       set **only** Pan, Pan Fine, Tilt and Tilt Fine for each — placeholders for now, aimed
       in the yard on the day: the rose head pointing down, the other three tilted up. Untick
@@ -385,7 +354,6 @@ chunk 5.
 ### 4.3 Tables
 
 - [ ] `brain/presets.rs`: `"Rose"`, `"Thunderclap"`.
-- [ ] `brain/shows.rs`: the city, and `("2026-10-31 18:00", "2026-10-31 21:00")`.
 - [ ] `eyeball/` joins `deploy.sh`'s list.
 
 ### 4.4 The show's code

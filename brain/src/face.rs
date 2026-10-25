@@ -18,7 +18,7 @@
 //! consecutive samples.
 //!
 //! The lamps dim through the Pi's two hardware PWM channels, not a software PWM: that is a
-//! busy-waiting real-time thread per pin, competing with audio capture and the DMX timing.
+//! busy-waiting real-time thread per pin, competing with audio and the DMX timing.
 //!
 //! The face is a fixture of its own on the broker, with its own client beside the brain's:
 //! `health/face`, and `face/left_button`, `face/right_button` and `face/estop`, retained.
@@ -165,7 +165,7 @@ pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<F
         input.trace();
         input.publish(&telemetry);
     }
-    // Where the lamps sit on the wire, under the same topics the ball uses, read off the patch
+    // Where the lamps sit on the wire, under the same topics any fixture uses, read off the patch
     // so they follow the workspace. The face has no address field: its first channel is its
     // start address.
     telemetry.publish("dmx/universe", patch::SACN.universe.to_string(), true);

@@ -4,6 +4,7 @@ name         = "rig-mqtt"
 rust-version = "1.99"
 version      = "0.1.0"
 
-# The rig's MQTT conventions and the packets they travel in, shared by the brain and the ball.
-# No dependencies, and no std: the ball builds it for an ESP32-C3 with only `alloc`.
+# The rig's MQTT conventions and the packets they travel in, shared by the brain and any
+# fixture firmware. No dependencies, and no std: firmware builds it for its microcontroller with
+# only `alloc`.
 [dependencies]

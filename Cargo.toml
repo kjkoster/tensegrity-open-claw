@@ -1,5 +1,3 @@
 [workspace]
-members  = ["ball-dmx", "brain", "cortex", "cortex-build", "rig-mqtt"]
+members  = ["brain", "cortex", "cortex-build", "rig-mqtt"]
 resolver = "3"
-# MCU firmware: its own target and its own lockfile, built on the Mac and never on the Pi.
-exclude  = ["ball"]

@@ -1,6 +1,6 @@
 //! The generic latest-value seam between threads and stages: a single-writer, lock-free
-//! `ArcSwap` slot, parameterised by payload. Audio features, the takeover candidate, the
-//! frames as sent and the face's state all cross the same seam, so it is named for the
+//! `ArcSwap` slot, parameterised by payload. The takeover candidate, the frames as sent and
+//! the face's state all cross the same seam, so it is named for the
 //! mechanism, not the payload. The producer never waits; consumers never block.
 
 use arc_swap::ArcSwap;

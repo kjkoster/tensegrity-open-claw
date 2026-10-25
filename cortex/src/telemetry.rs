@@ -9,7 +9,7 @@
 //! its own, and it gets its own client, its own health topic and its own will, so the tree
 //! reads the way the rig is built rather than the way it is compiled.
 //!
-//! The packets and the health words are `rig_mqtt`'s, shared with the ball. The brain
+//! The packets and the health words are `rig_mqtt`'s, shared with any firmware. The brain
 //! publishes, never subscribes, always at QoS 0.
 //!
 //! Nothing here may touch frame timing. The publish queue is bounded and drops on overflow, a
@@ -38,9 +38,18 @@ const DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// One retained-or-not message on its way to the broker.
 struct Message {
+    scope: Scope,
     topic: String,
     payload: String,
     retain: bool,
+}
+
+/// Which root a message's topic hangs under.
+enum Scope {
+    /// The client's own subtree: `brain/state/rig`.
+    Service,
+    /// What the client runs on, under `sys/`: `sys/brain/board`.
+    Sys,
 }
 
 /// What the telemetry thread can be asked to do. Both arrive on one channel so the goodbye
@@ -68,12 +77,22 @@ impl Publisher {
 
     /// Queues one message under this client's own prefix. Never blocks, never fails loudly.
     pub fn publish(&self, topic: impl Into<String>, payload: impl Into<String>, retain: bool) {
+        self.send(Scope::Service, topic.into(), payload.into(), retain);
+    }
+
+    /// Queues one fact about what this client runs on, retained, under `sys/<service>/`.
+    pub fn publish_sys(&self, leaf: impl Into<String>, payload: impl Into<String>) {
+        self.send(Scope::Sys, leaf.into(), payload.into(), true);
+    }
+
+    fn send(&self, scope: Scope, topic: String, payload: String, retain: bool) {
         let Some(outgoing) = &self.outgoing else {
             return;
         };
         let message = Command::Publish(Message {
-            topic: topic.into(),
-            payload: payload.into(),
+            scope,
+            topic,
+            payload,
             retain,
         });
         // A dropped reading is logged nowhere on purpose: the condition that fills this queue
@@ -207,7 +226,10 @@ fn session(
     loop {
         match incoming.recv_timeout(tick) {
             Ok(Command::Publish(message)) => {
-                let topic = format!("{service}/{}", message.topic);
+                let topic = match message.scope {
+                    Scope::Service => format!("{service}/{}", message.topic),
+                    Scope::Sys => rig_mqtt::sys_topic(service, &message.topic),
+                };
                 let packet = rig_mqtt::publish(&topic, &message.payload, message.retain);
                 // Recorded before the write, so a value whose write is what failed is the one
                 // the next connect replays.

@@ -9,7 +9,7 @@ never uptime.
 
 Two subtrees, both retained, because both answer questions asked after the interesting moment:
 
-    stem/sys/…     the hardware: board, cores, CPU frequency and installed RAM — written once
+    sys/stem/…     the hardware: board, cores, CPU frequency and installed RAM — written once
     stem/stats/…   how it is doing — temperature, throttling, memory, load, uplink
 
 One field per topic: `stem/stats/temperature_c`, `stem/stats/throttling/since_boot/under_voltage`.
@@ -193,8 +193,8 @@ def addresses():
 def wifi_stations():
     """Station MAC → how strongly the access point hears it, in dBm.
 
-    The ball's own `ball/wifi/rssi_dbm` is the same link heard from the other end; the two
-    disagreeing by a lot points at an antenna rather than at distance.
+    A wireless fixture that reports its own signal hears the same link from the other end; the
+    two disagreeing by a lot points at an antenna rather than at distance.
     """
     output = run(["iw", "dev", AP_INTERFACE, "station", "dump"])
     if output is None:
@@ -284,7 +284,7 @@ def main():
     telemetry = rig_mqtt.Telemetry.connect(SERVICE)
 
     hardware = system()
-    telemetry.publish("sys", hardware, retain=True)
+    telemetry.publish_sys(hardware)
     log(f"{hardware['board']}, {hardware['cores']} cores, {hardware['ram_kb']} KB RAM")
 
     # Latched flags are worth a line in the journal the first time they are seen, because a

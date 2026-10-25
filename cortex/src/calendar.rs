@@ -104,8 +104,9 @@ impl Show {
     }
 }
 
-/// The wall clock, in Unix seconds. Fractional, because the ball's motor runs for a second at
-/// a time and a whole-second clock would make that anywhere from none to two frames' worth.
+/// The wall clock, in Unix seconds. Fractional, because a show times things in fractions of a
+/// second, and a whole-second clock would put a one-second event anywhere from none to two
+/// frames' worth.
 pub fn now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

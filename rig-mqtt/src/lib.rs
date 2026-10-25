@@ -4,8 +4,9 @@
 //! The Rust half of `stem/rig_mqtt.py`, and it exists for the same reason that file does: a
 //! liveness convention that two processes implement slightly differently is worse than none,
 //! because the disagreement only shows up in the telemetry you went looking at during a failure.
-//! The brain and the ball hold their connections very differently — a std thread on one, an
-//! Embassy task on the other — so what is shared is everything that is not the transport.
+//! The brain and a fixture's firmware hold their connections very differently — a std thread on
+//! one, an Embassy task on the other — so what is shared is everything that is not the
+//! transport, and it is `no_std` so firmware can build it.
 //!
 //! ## health/<service>
 //!
@@ -15,6 +16,12 @@
 //! the announcement over in advance, and the broker makes it when the connection dies without a
 //! DISCONNECT. That is what makes `disconnected` (a stop, a restart, a deep sleep) and `gone` (a
 //! crash, a lost link, a lost supply) a real distinction.
+//!
+//! ## sys/<service>
+//!
+//! What a client runs on — its board, cores, memory, build — retained, under `sys/` rather than
+//! under its own name, so `sys/#` is the hardware of the whole rig in one subscription, the way
+//! `health/#` is its liveness.
 //!
 //! Every other topic a client publishes sits under its own service name, one scalar per topic.
 //!
@@ -44,9 +51,9 @@ pub const PORT: u16 = 1883;
 /// client is declared gone inside 15 seconds. The same value as `rig_mqtt.KEEPALIVE_S`, and
 /// every client pings at half of it, so one lost ping is not a disconnection.
 ///
-/// Short for the ball's sake: a ball only receives the universe, which as multicast it never
-/// acknowledges, so its ping every five seconds is what shows the access point it is alive,
-/// inside the access point's `ap_max_inactivity`.
+/// Short for a wireless fixture's sake: it only receives the universe, which as multicast it
+/// never acknowledges, so its ping every five seconds is what shows the access point it is
+/// alive, inside the access point's `ap_max_inactivity`.
 pub const KEEPALIVE_S: u16 = 10;
 
 /// The packets that are nothing but a fixed header. A PINGRESP is the only thing a broker
@@ -71,10 +78,15 @@ const CONNECT_FLAGS: u8 = 0x02 | 0x04 | 0x20;
 const PROTOCOL_NAME: &str = "MQTT";
 const PROTOCOL_LEVEL: u8 = 0x04;
 
-/// No leading slash: `health/ball`, not `/health/ball`. A leading slash is legal MQTT but makes
+/// No leading slash: `health/brain`, not `/health/brain`. A leading slash is legal MQTT but makes
 /// an anonymous empty first level, and `health/#` then matches nothing.
 pub fn health_topic(service: &str) -> String {
     format!("health/{service}")
+}
+
+/// Where one fact about what `service` runs on is published: `sys/brain/board`.
+pub fn sys_topic(service: &str, leaf: &str) -> String {
+    format!("sys/{service}/{leaf}")
 }
 
 /// A boolean as a payload. Spelled out rather than `{}`-formatted so every client on the rig

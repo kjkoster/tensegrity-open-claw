@@ -26,6 +26,12 @@ subscribes *after* the interesting moment, and an unretained tree is empty exact
 No leading slash: `health/stem`, not `/health/stem`. A leading slash is legal MQTT but
 creates an anonymous empty first level, and `health/#` then matches nothing.
 
+## sys/<service>
+
+What a process runs on — board, cores, memory — retained, under `sys/` rather than under its
+own name, so `sys/#` is the hardware of the whole rig in one subscription, the way `health/#`
+is its liveness.
+
 ## Everything else
 
 Telemetry publishes under the service's own name — `stem/stats`, `brain/state/show` — so the
@@ -58,6 +64,11 @@ GONE = "gone"
 
 def health_topic(service):
     return f"health/{service}"
+
+
+def sys_topic(service):
+    """Where what `service` runs on is published: `sys/stem/board`."""
+    return f"sys/{service}"
 
 
 def flatten(topic, value):
@@ -182,9 +193,16 @@ class Telemetry:
 
     def publish(self, topic, value, retain=False):
         """Publishes under the service's own prefix, one topic per scalar field."""
+        self._publish(f"{self.service}/{topic}", value, retain)
+
+    def publish_sys(self, value):
+        """Publishes what this process runs on, retained, under `sys/<service>/`."""
+        self._publish(sys_topic(self.service), value, retain=True)
+
+    def _publish(self, prefix, value, retain):
         if self.client is None:
             return
-        for full, payload in flatten(f"{self.service}/{topic}", value):
+        for full, payload in flatten(prefix, value):
             if retain:
                 self.retained[full] = payload
             self.client.publish(full, payload, retain=retain)

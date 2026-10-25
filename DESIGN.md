@@ -276,7 +276,6 @@ frame rate sits under.
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
 | `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, `no_std` for the firmware, and, behind its `std` feature, the brain's client. It shares its directory with Stem's daemon and broker configuration |
-| `ball-dmx/` | what the ball's DMX values mean where its `.qxf` cannot say, read by the ball firmware |
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
 `main.rs` includes the generated patch and calendar, wires in the components it uses, and
@@ -287,9 +286,11 @@ sound output, a sensor — is its own crate with its own configuration, and the 
 uses it depends on it and wires it in. `cortex::run` and the `Rig` it takes then never grow a
 field for a part one rig has.
 
-The ball firmware, `ball/`, is not a member of this workspace: it is built on the Mac for its
-own target, and shares the `stem` crate with the brain by path. Everything in the workspace
-is built on the Pi, because the brain links ALSA.
+Firmware for a wireless fixture is not a member of this workspace: it is built on the Mac for
+its own target, reads its universe, port and address out of the workspace through
+`cortex-build`'s `addressing()`, and shares the `stem` crate with the brain by path, which is
+why that crate stays `no_std`. Everything in the workspace is built on the Pi, because the
+brain links ALSA.
 
 **Recordings and models are compiled in.** The rig crate names its recordings and their
 gains; `cortex-build` checks each WAV's format and turns it into a typed constant — the
@@ -433,7 +434,7 @@ connection of its own — its `face/…` topics go out through the brain's (§3.
 The rig's microphone input: capture, feature extraction, and the `AudioFeatures` it handed
 the show — onsets, and how much of what it heard was music — which drove the washes'
 sparkle and the heads' dance. It drove the claw at ADE, and was removed after it; the code is
-on the `2026-10-23-ADE-Amsterdam` tag (`cortex/src/ear/`, and `cortex/src/sparkle.rs` for
+on the `last-version-with-ear` tag (`cortex/src/ear/`, and `cortex/src/sparkle.rs` for
 the mapping).
 
 It had no DMX channels and no place in the workspace, but it was a part of the rig the way
@@ -454,7 +455,9 @@ the config, nothing more.
 ### 3.5 The ball
 
 An ESP32-C3 on the Pi's WiFi, following the sACN universe. The firmware is `no_std` Rust on
-Embassy.
+Embassy. It was removed from the code after the ADE show; the last version, with the deploy's
+firmware build and board flashing, is on the `last-version-with-ball` tag (`ball/`,
+`ball-dmx/`, `attach.sh`). Its definition, `fixtures/ball.qxf`, stays in the fixture library.
 
 **A ball is a fixture in the patch like any other**, and its firmware is built from the
 workspace too. A ball is whatever the workspace patches through `fixtures/ball.qxf`: the
@@ -516,7 +519,7 @@ no rule of its own.
 A network camera in — an Axis M3105-LVE — one small reading of the scene out to the show, and
 an annotated feed for humans. It has had two lives. First a Python process beside the brain,
 reading a person's arms for the mage rig, removed with it; that code is on the
-`last-version-with-mage` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now a Rust crate,
+`last-version-with-eyeball` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now a Rust crate,
 `eyeball/`, running as threads inside the brain and handing the show how far into a space the
 furthest person has come.
 

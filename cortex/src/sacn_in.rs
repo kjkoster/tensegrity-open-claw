@@ -304,8 +304,8 @@ fn slots_of(pkt: &[u8], count: usize) -> [u8; SLOTS] {
 /// `recv_from` blocks indefinitely — and no console at all is the normal state of this rig,
 /// so the block is unbounded rather than occasional. It cannot run on the single-threaded
 /// embassy executor without stalling the frame loop, and embassy has no reactor for `std`
-/// sockets. Same shape as audio capture: a blocking producer feeding the frame loop through
-/// a latest-value seam.
+/// sockets. Same shape as any sensor: a blocking producer feeding the frame loop through a
+/// latest-value seam.
 pub fn spawn_receiver(
     own_cid: [u8; 16],
     sacn: Sacn,

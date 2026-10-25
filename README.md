@@ -52,16 +52,10 @@ macOS.
 - **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
   `10.0.10.1`, leased from `10.0.10.10+`. `etc/hostapd.conf` is the only source of truth
   for the access point: every deploy installs it over the Pi's copy and restarts `hostapd`,
-  which drops every WiFi client for a few seconds. Wireless fixtures have the access point's
-  BSSID, SSID, channel and passphrase compiled in, read from that same file when the firmware
-  is built, so changing any of them takes a deploy with every one of them plugged in to be
-  re-flashed.
-  The BSSID is the Pi's own wlan0 MAC (`cat /sys/class/net/wlan0/address`): moving to a
-  different Pi means updating it there first.
+  which drops every WiFi client for a few seconds.
 - **A silent station is dropped after 6 s** (`ap_max_inactivity`, with `skip_inactivity_poll`),
-  so a wireless fixture that lost power without a goodbye can rejoin quickly; a connected one
-  pings the broker every 5 s to stay well clear of it. A laptop left idle that long is dropped too and
-  rejoins by itself.
+  so a client that lost power without a goodbye can rejoin quickly. A laptop left idle that
+  long is dropped too and rejoins by itself.
 - The **Ethernet port** is a closed wired segment: a network camera through its PoE
   injector, and a laptop for SSH, with an Ethernet hub in the cabinet when both need it.
   Nothing on it routes anywhere.
@@ -244,16 +238,7 @@ Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `etc/remote-deploy.sh` ther
 `brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
 restarts the daemon.
 
-Before any of that, `deploy.sh` builds the wireless fixture firmware on the Mac — `ball` —
-when the workspace patches a wireless fixture, and says `no wireless fixtures patched` and
-skips it when it patches none. Only the binary goes to the Pi, as `tensegrity-open-claw/binaries/ball`, and the last
-thing `remote-deploy.sh` does is flash it onto every board it finds under
-`/dev/serial/by-id`. The boards are left in their
-bootloader until all are flashed; then the access point is told to drop its stations (every
-WiFi client, briefly), and only then are the boards reset — so each rejoins on its first
-attempt instead of waiting for the access point to forget it.
-
-The cargo workspace is seven crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
+The cargo workspace is six crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
 
 The deploy ships **only what the Pi builds from and installs** — the crates, `claw.qxw`,
 `fixtures/`, `sounds/`, `stem/` and `etc/`. The list is written out in `deploy.sh` rather
@@ -315,13 +300,10 @@ offsets, drift is caught by the compiler in every direction:
 | overlap two fixtures' slots | fails, naming both fixtures and their spans |
 | name two fixtures so they yield the same Rust constant | fails — the daemon could not tell them apart |
 | patch a fixture outside the first universe | fails — the daemon sends exactly one universe |
-| change the E1.31 output's universe or port | the brain listens and sends there, and so does every wireless fixture once re-flashed |
+| change the E1.31 output's universe or port | the brain listens and sends there |
 | change the E1.31 output's unicast address | the brain's receiver binds that address instead |
-| change a wireless fixture's channels or bands in its `.qxf` | the brain and the fixture's firmware both follow, once re-flashed |
-| patch two of one wireless fixture in different modes | fails — every board runs the same firmware, so they must share one |
 | switch the E1.31 output to multicast | fails — the brain only receives a console by unicast |
 | remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
-| delete or rename a wireless fixture a board is provisioned as | its firmware stops compiling at that board's row |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
 | patch a fixture whose shutter, Effect or Maintenance channel marks no off band | fails, naming the band the e-stop needs marked |
 | add a scene that is not in `brain/presets.rs` | fails, naming it — and the preset it is most likely a typo of |

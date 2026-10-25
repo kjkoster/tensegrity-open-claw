@@ -27,13 +27,13 @@ and the rose and the heartbeat return for the next group.
 
 The rig runs to a fixed list of shows in local time (`brain/shows.rs`), in one show state at
 a time, chosen each frame by the show state machine — the brain's Director: test mode first,
-then the calendar, then, inside a show, presence and the timers. Outside a show the state is
-`blackout`: dark and silent.
-Inside one it is one of the five below.
+then the calendar, then, inside a show, presence and the timers. Outside a show, and inside one
+until civil dusk, the state is `blackout`: dark and silent. From dusk to the show's end it is
+one of the five below. A show is listed from the morning, so the rig is up and reporting all
+day and the show proper starts by itself when it is dark enough.
 
 The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
-and runs on unchanged underneath a stop. This show does not use the calendar's dark stretches:
-pick a start time after civil dusk.
+and runs on unchanged underneath a stop.
 
 | state | what the audience sees | leaves when |
 |---|---|---|
@@ -415,16 +415,19 @@ telemetry only — the show never sees a count), `eyeball/camera` (`ok`, or why 
 
 ## 15. Show times
 
-`brain/shows.rs` lists the shows; for Halloween, one:
+`brain/shows.rs` lists the shows: test days as they come, and Halloween.
 
 ```
-CITY = "Amsterdam, Netherlands"      // your city
-("2026-10-31 18:00", "2026-10-31 21:00")
+CITY = "Delft"
+("2026-10-26 09:00", "2026-10-26 22:00")      // test day
+("2026-10-31 09:00", "2026-10-31 22:00")      // Halloween
 ```
 
-The clocks changed on October 25th, so this is CET; civil dusk on the 31st is around 17:50,
-and the start sits after it. The startup log lists the show and says which clock it believes,
-as [`README.md`](README.md) describes.
+Each runs from the morning so the rig is up and reporting all day; it is `blackout` by
+daylight, and the show proper begins at civil dusk, which the build works out for Delft —
+around 17:50 on the 31st, in CET since the clocks changed on October 25th. The startup log
+lists each show with its dark stretch and says which clock it believes, as
+[`README.md`](README.md) describes.
 
 ## 16. Commissioning
 

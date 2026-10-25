@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # remote-deploy.sh — runs ON claw-pi (pushed there by deploy.sh).
-# Builds the brain natively, installs it and restarts it, then flashes every attached MCU
-# based on its /dev/serial/by-id name.
+# Installs what the Pi runs beside the brain, then builds the brain natively, installs it and
+# restarts it.
 #
 set -euo pipefail
 
@@ -14,17 +14,6 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
-
-# ── Device-to-binary table ────────────────────────────────────────────────────
-# Map each board's full /dev/serial/by-id name to the binary it should receive.
-# Add one entry per board; the script fails if a connected device is not listed.
-#
-# To find a board's ID: ls /dev/serial/by-id/  (while the board is plugged in)
-#
-declare -A DEVICE_MAP=(
-  ["usb-Espressif_USB_JTAG_serial_debug_unit_40:4C:CA:FB:79:10-if00"]="ball"
-)
-# ─────────────────────────────────────────────────────────────────────────────
 
 # Each Python daemon gets its own venv and its own pip install, so its requirements.txt is the
 # only statement of what it needs and the deploy is what acts on it. Separate venvs rather than
@@ -50,7 +39,7 @@ python_daemon() {
     sudo "$venv/bin/pip" install -r "$requirements"
 }
 
-# --- 1. 4G uplink watchdog -------------------------------------------------
+# --- 4G uplink watchdog ----------------------------------------------------
 # Ahead of everything else, for the same reason the broker goes ahead of the build and a
 # stronger one: this is what gets the Pi back onto the network after the modem wedges, and the
 # rig is a long way from the person who would otherwise have to walk to it. A deploy that dies
@@ -79,18 +68,17 @@ else
     echo "WARNING: 4g-watchdog.timer did not start — journalctl -u 4g-watchdog.timer -n 40"
 fi
 
-# --- 2. WiFi access point --------------------------------------------------
+# --- WiFi access point -----------------------------------------------------
 # The versioned configuration replaces whatever is on the Pi, so a setting changed there by
 # hand does not survive a deploy. 0600 because it holds the passphrase.
 #
-# Restarted on every deploy, changed or not. That drops every station for a few seconds, and
-# it is also what clears the access point's memory of them before the boards are flashed
-# further down, which restarts them without their saying goodbye.
+# Restarted on every deploy, changed or not, so the configuration in the repo is the one
+# running. That drops every station for a few seconds.
 step "install and restart WiFi access point"
 sudo install -m 0600 "$REPO/etc/hostapd.conf" /etc/hostapd/hostapd.conf
 sudo systemctl restart hostapd
 
-# --- 3. Stem's broker ------------------------------------------------------
+# --- Stem's broker ---------------------------------------------------------
 # Before anything that reports to it. Every daemon on this rig holds its own client
 # connection and announces itself on `health/`, so the broker is not one more service among
 # them — it is the thing that lets the rest of this script be watched while it runs. Bringing
@@ -114,11 +102,11 @@ else
     echo "mosquitto not installed — skipping (sudo apt install mosquitto mosquitto-clients)"
 fi
 
-# --- 4. build brain natively on the Pi ------------------------------------
+# --- Build brain natively on the Pi ---------------------------------------
 step "build brain"
 ( cd "$REPO" && cargo build --release )
 
-# --- 5. brain daemon -------------------------------------------------------
+# --- Brain daemon ----------------------------------------------------------
 step "install and restart brain daemon"
 # Removed first, so that what lands is a file of its own whatever was there before: a symlink
 # at this path must be replaced, never written through to the binary it points at.
@@ -130,7 +118,7 @@ sudo systemctl enable brain
 sudo systemctl restart brain
 echo "brain daemon restarted"
 
-# --- 6. Stem ---------------------------------------------------------------
+# --- Stem ------------------------------------------------------------------
 # rig_mqtt.py installs beside its importer rather than into a site-packages directory: the
 # daemon is run by absolute path, which puts /usr/local/bin first on its import path, and
 # one file copy beats owning a package layout for a single shared module.
@@ -145,49 +133,6 @@ if sudo systemctl restart stem; then
     echo "stem daemon restarted"
 else
     echo "WARNING: stem did not start — journalctl -u stem -n 40"
-fi
-
-# --- 7. flash attached microcontrollers ------------------------------------
-# Last, so a board that is not in DEVICE_MAP fails the deploy only after the rig is back up.
-# Absent boards are simply skipped.
-#
-# A board is left in its bootloader after flashing rather than reset at once. Its radio went
-# dead the moment flashing began, without a goodbye, so the access point still lists it as
-# associated and would ignore its attempts to rejoin until that entry timed out. With every
-# board flashed and quiet, the access point is told to drop its stations — the fixtures and
-# any laptop alike, which the hostapd restart above already did once — and only then are the
-# boards reset, so each one is let straight back in on its first attempt.
-step "flash attached microcontrollers"
-shopt -s nullglob
-flashed=()
-for dev in /dev/serial/by-id/*; do
-  name="$(basename "$dev")"
-  if [[ -v DEVICE_MAP["$name"] ]]; then
-    binary="${DEVICE_MAP[$name]}"
-    echo ">> $name  -> $binary"
-    espflash flash --after no-reset --port "$dev" "$REPO/binaries/$binary"
-    flashed+=("$dev")
-  else
-    echo "ERROR: unknown device $name — add it to DEVICE_MAP in remote-deploy.sh" >&2
-    exit 1
-  fi
-done
-
-if [ "${#flashed[@]}" -eq 0 ]; then
-  echo "no MCUs attached; nothing to flash."
-else
-  step "drop stations from the access point, then start the flashed boards"
-  # The interface from the configuration rather than spelled out here, so the two cannot
-  # disagree about which one hostapd is serving. The repository's copy, which is the one just
-  # installed: the installed one is root's alone, for the passphrase in it.
-  iface="$(sed -n 's/^interface=//p' "$REPO/etc/hostapd.conf")"
-  for station in $(sudo hostapd_cli -i "$iface" list_sta); do
-    echo ">> deauthenticate $station"
-    sudo hostapd_cli -i "$iface" deauthenticate "$station"
-  done
-  for dev in "${flashed[@]}"; do
-    espflash reset --port "$dev"
-  done
 fi
 
 step "remote deploy complete"

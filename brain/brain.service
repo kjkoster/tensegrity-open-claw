@@ -20,11 +20,11 @@ CPUSchedulingPriority=50
 # Deliberately no CPUAffinity. It belongs in the code, not here.
 #
 # What the design wants is one core kept clear for the DMX loop — a statement about one thread.
-# A unit-file affinity is a statement about the whole process, and this process runs five
-# threads: the frame loop, audio capture, the sACN receiver and the brain's and the face's
-# telemetry clients. Confining all five to one core, all at the same real-time priority,
-# starves the ALSA capture thread of the moments it needs to drain a 512-frame period, and the
-# interface overruns — which is an xrun, on a rig that listens.
+# A unit-file affinity is a statement about the whole process, and this process runs several
+# threads beside the frame loop: the sACN receiver, telemetry, and whatever parts the rig has,
+# an audio thread among them. Confining all of them to one core, all at the same real-time
+# priority, starves an audio thread of the moments it needs to serve its period, and the
+# interface under- or overruns — an xrun, which on a rig with sound is heard.
 #
 # Pinning only the DMX thread, from inside the process where the thread exists, is the version
 # of this that is worth having.

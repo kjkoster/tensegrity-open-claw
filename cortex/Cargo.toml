@@ -4,10 +4,9 @@ name         = "cortex"
 rust-version = "1.99"
 version      = "0.1.0"
 
-# Everything under the show: audio capture and features, the noise fields, the sACN transports,
-# the frame loop.
+# What every rig shares under its show: the sACN transports, the frame loop, the show calendar,
+# the latest-value seam.
 [dependencies]
-alsa = "0.12.1"
 arc-swap = "1.7"
 signal-hook = "0.4.5"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
@@ -15,5 +14,4 @@ embassy-time     = { version = "0.5.0",  features = ["std"] }
 # For whether the kernel holds the clock as synchronised, which std has no call for.
 libc = "0.2.189"
 rig-mqtt = { path = "../rig-mqtt" }
-rusb = "0.9.4"
 zihatec-rs-485-dmx = "0.1.0"

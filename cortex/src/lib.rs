@@ -3,28 +3,25 @@
 //! The show and the patch generated from its QLC+ workspace live in the rig's own crate;
 //! what does not depend on which fixtures are patched lives here.
 //!
-//! A rig hands over a [`Rig`] and gets the frame loop, the ear, both transports, the
-//! takeover arbitration and the e-stop for it.
+//! A rig hands over a [`Rig`] and gets the frame loop, both transports, the takeover
+//! arbitration and the e-stop for it.
 
 pub mod calendar;
 pub mod clock;
 pub mod config;
 pub mod dmx;
 pub mod draw;
-pub mod ear;
 pub mod envelope;
 pub mod estop;
 pub mod latest;
 pub mod moving_head;
 pub mod qlc_plus;
-pub mod sparkle;
 pub mod telemetry;
 
 mod orchestrator;
 mod sacn_in;
 mod sacn_out;
 
-use ear::AudioFeatures;
 use config::FRAME_RATE_HZ;
 use embassy_executor::{Executor, Spawner};
 use qlc_plus::{PatchEntry, Sacn};
@@ -44,8 +41,9 @@ pub const TELEMETRY_SERVICE: &str = "brain";
 /// The workspace itself is not here and never crosses into the running program. It is a
 /// build artifact: the ingest consumes it and the patch below is everything that survives.
 ///
-/// `show` is called once per frame with the latest audio features, the frame period in
-/// seconds, and the full 512-slot buffer to fill. It is a closure rather than a trait
+/// `show` is called once per frame with the frame period in seconds and the full 512-slot
+/// buffer to fill. Whatever the show senses it holds itself, as the readers of the seams its
+/// sensors publish on. It is a closure rather than a trait
 /// implementation because the boundary carries no meaning beyond "the rig fills the slot
 /// buffer" — when the intent frame lands it replaces the closure and the rig's content does
 /// not move.
@@ -67,7 +65,7 @@ pub struct Rig {
     /// Whether the e-stop is pressed, asked once per frame. The stop acts on the frame that
     /// goes out, after the takeover, so a console cannot drive the rig past it.
     pub estop: Box<dyn FnMut() -> bool>,
-    pub show: Box<dyn FnMut(&AudioFeatures, f64, &mut [u8])>,
+    pub show: Box<dyn FnMut(f64, &mut [u8])>,
     /// The rig's own tasks, beside the frame loop. Called once, with the executor's spawner,
     /// after the frame task is spawned. A closure so the rig can move hardware it claimed
     /// before the brain came up into the tasks that drive it.
@@ -101,28 +99,28 @@ pub(crate) fn frame_width(patch: &[PatchEntry]) -> usize {
         .map_or(0, |slot| slot + 1)
 }
 
-/// What the brain runs on, in the `sys` subtree every part of the rig publishes its own under:
+/// What the brain runs on, under `sys/brain/`, where every part of the rig publishes its own:
 /// the board as its device tree names it, the cores, the top CPU frequency in MHz, the
 /// installed RAM in KB, and the target triplet the brain was compiled for. A reading the
 /// board does not offer is left out rather than published as a guess.
 fn publish_system(publisher: &telemetry::Publisher) {
     if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
-        publisher.publish("sys/board", model.trim_end_matches('\0').trim(), true);
+        publisher.publish_sys("board", model.trim_end_matches('\0').trim());
     }
     if let Some(kb) = installed_ram_kb() {
-        publisher.publish("sys/ram_kb", kb.to_string(), true);
+        publisher.publish_sys("ram_kb", kb.to_string());
     }
     if let Ok(cores) = std::thread::available_parallelism() {
-        publisher.publish("sys/cores", cores.to_string(), true);
+        publisher.publish_sys("cores", cores.to_string());
     }
     let max_khz = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq";
     if let Some(khz) = std::fs::read_to_string(max_khz)
         .ok()
         .and_then(|text| text.trim().parse::<u64>().ok())
     {
-        publisher.publish("sys/cpu_frequency_mhz", (khz / 1000).to_string(), true);
+        publisher.publish_sys("cpu_frequency_mhz", (khz / 1000).to_string());
     }
-    publisher.publish("sys/triplet", env!("TRIPLET"), true);
+    publisher.publish_sys("triplet", env!("TRIPLET"));
 }
 
 /// The RAM fitted to a Raspberry Pi, decoded from the revision code in `/proc/cpuinfo`.
@@ -143,24 +141,16 @@ fn installed_ram_kb() -> Option<u64> {
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
 ///
 /// The executor lives here rather than in the rig, so a rig binary is its patch, its presets
-/// and its show, and nothing else — `fn main` is one call. The ear always listens, on every
-/// rig: a rig with no use for it simply never reads the features it is handed, and an ear
-/// with nothing listening to it is cheaper than two configurations that can disagree about
-/// which interface the cabinet has.
+/// and its show, and nothing else — `fn main` is one call.
 pub fn run(mut rig: Rig) -> ! {
-    // The ear runs on its own OS thread, alongside Embassy, and reports on its own client:
-    // a part of the rig on the broker like the face, not a topic of the brain's.
-    let (_ear_telemetry, ear_publisher, ear_farewell) = telemetry::spawn("ear");
-    let (_ear, rx) = ear::spawn(ear_publisher);
-
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
     socket
         .set_multicast_ttl_v4(1)
         .expect("set multicast TTL failed");
     let cid = sacn_out::new_cid();
 
-    // The external-takeover receiver: a second OS thread alongside the ear, because a
-    // blocking recv_from would stall the executor's single task. It publishes candidates;
+    // The external-takeover receiver: an OS thread of its own, because a blocking recv_from
+    // would stall the executor's single task. It publishes candidates;
     // the frame loop decides once per frame whether one is actually driving.
     let (takeover_tx, takeover_rx) = latest::latest(sacn_in::Takeover::idle());
     let sacn = rig.sacn;
@@ -196,7 +186,6 @@ pub fn run(mut rig: Rig) -> ! {
 
     // What the brain was built as and against goes under `brain/`, retained, so a subscriber
     // arriving later still gets it.
-    rig.farewells.push(ear_farewell);
     let publisher = &rig.telemetry;
     publisher.publish("dmx/universe", sacn.universe.to_string(), true);
     publisher.publish("frame_rate_hz", FRAME_RATE_HZ.to_string(), true);
@@ -225,7 +214,7 @@ pub fn run(mut rig: Rig) -> ! {
     // The frame task takes the rig whole, so the one-shot hook comes out of it first.
     let tasks = std::mem::replace(&mut rig.tasks, Box::new(|_| {}));
     executor.run(|spawner| {
-        spawner.spawn(orchestrator::frame_task(socket, cid, rx, takeover_rx, shutdown, rig).unwrap());
+        spawner.spawn(orchestrator::frame_task(socket, cid, takeover_rx, shutdown, rig).unwrap());
         tasks(spawner);
     })
 }

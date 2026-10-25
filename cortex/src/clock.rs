@@ -1,6 +1,6 @@
-//! The shared monotonic clock used across every pipeline stage:
-//! `now_us` stamps each `AudioFeatures` snapshot and every consumer's staleness
-//! check reads against the same epoch.
+//! The shared monotonic clock used across every pipeline stage: a sensor stamps each
+//! snapshot with `now_us`, and every consumer's staleness check reads against the same
+//! epoch.
 
 use std::sync::OnceLock;
 use std::time::Instant;

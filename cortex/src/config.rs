@@ -1,7 +1,7 @@
 //! All tunables in one place. The festival tuning loop is "edit numbers, rebuild, restart".
 //!
 //! These describe the *cabinet* rather than the sculpture hanging off it: the Pi, the RS-485
-//! HAT, the audio interface, the serial device.
+//! HAT, the serial device, the broker.
 
 use std::net::Ipv4Addr;
 
@@ -74,74 +74,3 @@ pub const MQTT_FAREWELL_MS: u64 = 500;
 // USB serial adapters renumber around it, and resolves to the PL011 once Bluetooth is
 // disabled.
 pub const SERIAL_DEVICE: &str = "/dev/serial0";
-
-// ── Perceived brightness ─────────────────────────────────────────────────────
-pub const GAMMA: f64 = 2.2;
-
-// ── Ear — capture ────────────────────────────────────────────────────────────
-// The ear's interface is whichever class-compliant USB audio interface is in the cabinet —
-// today an Alesis io|2, chosen as the cheapest used one available, not for anything it does.
-// Swapping it is these three lines: its ALSA card name, and its USB identity for the probe.
-pub const ALSA_DEVICE: &str = "plughw:CARD=io2,DEV=0"; // confirm with `arecord -L`
-pub const EAR_USB_VENDOR: u16 = 0x13b2; // confirm with `lsusb`
-pub const EAR_USB_PRODUCT: u16 = 0x0008;
-pub const REQUESTED_RATE_HZ: u32 = 48_000; // always use the negotiated rate, never this
-pub const CHANNELS: usize = 2;
-pub const PERIOD_FRAMES: usize = 512; // ≈10.7 ms @ 48 kHz; do not chase smaller
-pub const PERIODS_PER_BUFFER: usize = 4;
-pub const DEVICE_RETRY_MAX_S: u64 = 30;
-
-// ── Ear — high-pass filter ───────────────────────────────────────────────────
-pub const HPF_HZ: f32 = 90.0;
-pub const FILTER_Q: f32 = 0.707;
-
-// ── Ear — envelope followers ─────────────────────────────────────────────────
-pub const ENV_ATTACK_S: f32 = 0.010; // ≤ 15 ms keeps lights tight on hits
-pub const ENV_RELEASE_S: f32 = 0.200;
-pub const ONSET_ENV_ATTACK_S: f32 = 0.001;
-pub const ONSET_ENV_RELEASE_S: f32 = 0.050;
-
-// ── Ear — noise-floor tracking ───────────────────────────────────────────────
-pub const FLOOR_WINDOW_S: f32 = 8.0;
-pub const FLOOR_SUBWINDOWS: usize = 16;
-pub const FLOOR_MARGIN: f32 = 1.75;
-
-// ── Ear — AGC ────────────────────────────────────────────────────────────────
-pub const AGC_RISE_S: f32 = 1.0;
-pub const AGC_FALL_S: f32 = 30.0; // must stay slow or the AGC becomes a compressor
-pub const AGC_MIN_REF: f32 = 1e-3;
-pub const NORM_HEADROOM: f32 = 1.5; // genuine peaks may read > 1.0
-
-// ── Ear — onsets ─────────────────────────────────────────────────────────────
-pub const ONSET_STATS_S: f32 = 1.5; // history window for the adaptive threshold
-pub const ONSET_K: f32 = 2.0; // fire above mean + k·std
-pub const ONSET_MIN_STRENGTH: f32 = 0.02; // absolute veto against digital silence
-pub const ONSET_REFRACTORY_S: f32 = 0.09;
-
-// ── Ear — published features ─────────────────────────────────────────────────
-pub const STALE_US: u64 = 250_000; // older snapshots read as silence
-
-// ── Ear — silence ↔ music state machine ──────────────────────────────────────
-pub const UP_THRESHOLD: f32 = 0.15;
-pub const DOWN_THRESHOLD: f32 = 0.05; // must be < UP_THRESHOLD
-pub const UP_HOLD_S: f32 = 0.5;
-pub const DOWN_HOLD_S: f32 = 6.0; // a quiet bridge must not flip the state
-pub const FADE_UP_S: f32 = 1.5;
-pub const FADE_DOWN_S: f32 = 3.0;
-
-// ── Mapping layer (DMX side) ─────────────────────────────────────────────────
-pub const MUSIC_INTENSITY_FLOOR: f64 = 0.0; // steady field in music; 0 = black, glints are all the light
-pub const SLEW_INTENSITY_S: f64 = 0.03;
-
-// ── Sparkle — silence breathing ──────────────────────────────────────────────
-pub const SPARKLE_BREATH_PERIOD_S: f64 = 18.0; // own slow breath, far longer than the PWM 3.5 s
-pub const SPARKLE_BREATH_FLOOR: f64 = 0.08; // never fully dark in silence
-pub const SPARKLE_BREATH_CEIL: f64 = 0.60; // gentle ceiling; calm, not bright
-
-// ── Sparkle — glints (LED flashes; the sparkle) ──────────────────────────────
-pub const SPARKLE_FLASH_FRAMES: u32 = 1; // on-time floor in frames (sub-frame impossible)
-pub const SPARKLE_ACCENT_GAIN: f64 = 0.85; // glint brightness pop per onset
-pub const SPARKLE_AFTERGLOW_DECAY_S: f64 = 0.025; // ~25 ms tail (≈1 frame); lower → sharper on-off / square strobe
-
-// ── Observability ────────────────────────────────────────────────────────────
-pub const STATUS_INTERVAL_S: f32 = 5.0;
