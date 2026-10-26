@@ -1,0 +1,9 @@
+# The SSD's line in memory-pi's /etc/fstab. The deploy puts it there, replacing any line that
+# mounts /tank, and adds nothing else to the file.
+#
+# By label rather than by device, so it mounts whatever the SSD enumerates as. In fstab rather
+# than as a mount unit because these two options exist only here: nofail, so a missing SSD does
+# not hold up the boot, and a ten-second device timeout instead of ninety, so a Pi without its
+# SSD still boots promptly. Greptime's RequiresMountsFor=/tank keeps it from writing into the
+# empty mount point, which would fill the SD card.
+LABEL=memory  /tank  ext4  noatime,nofail,x-systemd.device-timeout=10s  0  2

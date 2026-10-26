@@ -35,4 +35,37 @@ wifi_profile "$REPO/etc-memory-pi/claw.nmconnection" claw
 sudo nmcli connection reload
 echo "reboot memory-pi for a changed WiFi connection to take effect"
 
+# --- The SSD -----------------------------------------------------------------
+# The repo's line replaces whatever line mounts /tank, and the rest of /etc/fstab is left as the
+# image wrote it. Written only when it differs, so a deploy with nothing new leaves the file
+# alone.
+#
+# Never unmounted: Greptime writes there, and a deploy can run at any time. A changed line is
+# applied with a remount, which takes new options on a mounted file system without letting go
+# of it; a changed device or file system type cannot be, and waits for a reboot. A /tank that is
+# not mounted yet — the first deploy, or an SSD plugged in after boot — is mounted here.
+step "mount the SSD on /tank"
+tank_line="$(grep -v -e '^#' -e '^$' "$REPO/etc-memory-pi/fstab-tank")"
+if grep -qxF "$tank_line" /etc/fstab; then
+    echo "/etc/fstab already mounts /tank"
+else
+    # Built in full before anything is written, so /etc/fstab is never read and replaced at
+    # the same time.
+    fstab="$(awk '$2 != "/tank"' /etc/fstab)"
+    printf '%s\n%s\n' "$fstab" "$tank_line" | sudo install -m 0644 /dev/stdin /etc/fstab
+    sudo systemctl daemon-reload
+    echo "/etc/fstab now mounts /tank"
+    if mountpoint -q /tank; then
+        sudo mount -o remount /tank
+        echo "/tank remounted with the new options"
+    fi
+fi
+sudo mkdir -p /tank
+if mountpoint -q /tank; then
+    echo "/tank mounted"
+else
+    sudo mount /tank
+    echo "/tank mounted now"
+fi
+
 step "remote deploy complete"

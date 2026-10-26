@@ -32,9 +32,10 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 |---|---|
 | Door (the face) | Three buttons: an emergency stop (a twist-to-unlock smash button) and two green momentary pushbuttons, the left and right button, each with a green LED lamp. On the Pi's GPIO: e-stop on 23/24, buttons on 27/25, lamps on 13/12. |
 | Raspberry Pi (`claw-pi`) | Raspberry Pi 3 Model B Plus Rev 1.3, 1 GB RAM (905 MB usable), on a DINner Plate Pi DIN rail holder, local user `kjkoster`. 64-bit Debian 13 (Trixie). A 6.9 GB root partition. Named `claw-pi` for historical reasons. |
+| Raspberry Pi (`memory-pi`) | Raspberry Pi 3 Model B, 1 GB RAM, on a second DINner Plate Pi DIN rail holder, local user `kjkoster`. 64-bit Raspberry Pi OS Lite (Debian 13, Trixie) on a 64 GB SD card. On the WiFi access point at `10.0.10.2`. Powered from the USB hub's charge port. Records the rig's telemetry onto the external SSD. |
 | DMX HAT | Zihatec RS422/485 HAT Rev D on the Pi's header: the wired DMX-512 output. |
-| USB hub | 12 V powered, which turned out to be needed so as not to overload the Pi's USB ports. The modem and the audio interface plug into it. |
-| External SSD | USB-C, with a DIN rail clip. For recording the rig's MQTT telemetry on the Pi. |
+| USB hub | 12 V powered, which turned out to be needed so as not to overload the Pi's USB ports. The modem and the audio interface plug into it, and its charge port powers `memory-pi`. |
+| External SSD | Samsung T7, 500 GB (465.8 GiB), USB-C, with a DIN rail clip. On `memory-pi` through a USB-A to USB-C cable; one ext4 partition labelled `memory`. Holds the recorded MQTT telemetry. |
 | PoE injector | Powers the camera; its data port goes to the Pi's `eth0`. |
 | Ethernet hub | On its own power supply. For when a laptop needs the Pi's wired segment beside the camera. |
 
