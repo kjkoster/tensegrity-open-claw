@@ -5,13 +5,16 @@ reference for the system**: the Pi, the cabinet, its wiring, the network, and bu
 deploying — whatever show it runs. Nothing here depends on which fixtures a show chose; that,
 and the configuration and operation that come with them, belongs in [`SHOW.md`](SHOW.md).
 
-The system is three parts:
+The system is four parts:
 
 - **Pi controller (`claw-pi`)** — a Raspberry Pi in the cabinet running the `brain` daemon.
   Reads its sensors, runs the show, and emits one DMX universe **two ways** at 40 Hz: out the
   wired RS-485 HAT as raw DMX-512, and over the network as E1.31 sACN. The wire drives the
   wired fixtures; the sACN copy drives the wireless ones, and is what a monitor or QLC+ works
   against.
+- **Memory Pi (`memory-pi`)** — a second Raspberry Pi in the cabinet, on the first one's WiFi,
+  recording everything published on the telemetry broker into a database on an SSD and
+  showing it in Grafana.
 - **Wired fixtures** — on the HAT's DMX line.
 - **Wireless fixtures** — on the Pi's WiFi, following the sACN universe.
 
@@ -33,12 +36,23 @@ macOS.
 - SSH alias **`claw-pi`** → `10.8.0.3` over WireGuard, user `kjkoster`, key
   `~/.ssh/id_rsa` (`IdentitiesOnly yes`). The Mac is a peer at `10.8.0.4` routing a single
   `/32` and nothing else — not a general VPN. The tunnel's config is not versioned here.
+- SSH alias **`memory-pi`** → `10.0.10.2` on the access point, user `kjkoster`, jumping through
+  `claw-pi`. It has no WireGuard tunnel of its own, deliberately: if `claw-pi` dies there is
+  precious little to do remotely anyway, so a second way in would buy nothing. The deploy and
+  every SSH forward to it go the same way. In `~/.ssh/config`:
+
+  ```
+  Host memory-pi
+      HostName 10.0.10.2
+      User kjkoster
+      ProxyJump claw-pi
+  ```
 - The Pi's interfaces, per `ifconfig` on `claw-pi`:
 
   | Interface | Address | Purpose |
   |---|---|---|
   | `eth0` | `10.0.1.1/24`, from `etc/claw-eth0.nmconnection`; DHCP for laptops from `.100`–`.199` | the wired segment: a network camera, and SSH / deploy from a laptop |
-  | `wlan0` | `10.0.10.1/24` | the WiFi AP |
+  | `wlan0` | `10.0.10.1/24`, from `etc/claw-ap.nmconnection`; DHCP for laptops from `.100`–`.199` | the WiFi AP |
   | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
   | `wwan0` | DHCP | 4G uplink |
 
@@ -72,8 +86,10 @@ combination only) nor report signal in dBm (no extended signal support), so Stem
 0–100 signal quality instead.
 
 > ⚠️ **The connection's configuration is not captured in the repo.** The APN, SIM and routing
-> metrics (4G as default route while the AP `10.0.10.0/24` and dev Ethernet `10.0.1.0/24` stay
-> local) live only in the Pi's NetworkManager profile.
+> metrics (4G as default route while the AP `10.0.10.0/24` and the wired segment `10.0.1.0/24`
+> stay local) live only in the Pi's NetworkManager profile,
+> `/etc/NetworkManager/system-connections/cellular.nmconnection` — the one profile on the Pi
+> the repo does not yet carry.
 
 The **watchdog over that link is** in the repo, and `remote-deploy.sh` installs it:
 
@@ -232,10 +248,10 @@ DMX **OUT** of the last device on the bus.
   `Restart=always`, `RestartSec=5`, `After=network.target`, RT scheduling as above).
 - `sudo systemctl enable --now brain` / `sudo systemctl restart brain`.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
-- The WiFi bring-up units belong here too once documented; the 4G watchdog's are above.
 
-`remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf` and
-the 4G watchdog's unit and timer (above).
+`remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf`, the 4G watchdog's
+unit and timer (above), and the access point's and wired segment's NetworkManager profiles,
+which it brings up (see [Networking](#networking)).
 
 ## Build & deploy
 
@@ -451,6 +467,111 @@ rig: shutdown — releasing the sACN source (3 terminate frames)
 
 Set every fixture's own **DMX-loss behaviour to hold last values**, so a cable fault behaves
 like the stop rather than like a homing command.
+
+---
+
+# The memory Pi (`memory-pi`)
+
+A Pi 3B in the cabinet that records everything published on the broker into GreptimeDB on an
+external SSD, and shows it in Grafana. Why it is built this way is in [`DESIGN.md`](DESIGN.md)
+§3.9.
+
+## Access
+
+- SSH alias **`memory-pi`**, jumping through `claw-pi` (see [Access](#access) above): it has no
+  WireGuard tunnel of its own.
+- `wlan0` at **`10.0.10.2/24`**, set on the Pi itself by `etc-memory-pi/claw.nmconnection`, no
+  DHCP. It is the Pi's only network; `claw-pi`'s access point routes it out over 4G.
+
+## What runs
+
+| Unit | What | Installed from |
+|---|---|---|
+| `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `etc-memory-pi/memory.py`, venv in `/opt/memory/venv` |
+| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, on loopback alone: HTTP `4000`, gRPC `4001`, MySQL `4002` | the release pinned in `etc-memory-pi/greptime.version`, unpacked to `/opt/greptimedb` |
+| `recorder.service` | every live message into Greptime's `rig` database | `etc-memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
+| `grafana-server.service` | Grafana on `127.0.0.1:3000` | Grafana's apt repository, with the settings drop-in and data source from `etc-memory-pi/grafana/` |
+
+Every one of them reconnects for as long as it takes: both Pis power up together, and
+`memory-pi` is up long before `claw-pi`'s access point.
+
+## Deploy
+
+From the Mac at the repo root:
+
+```
+./deploy-memory-pi.sh
+```
+
+Rsyncs `etc-memory-pi/`, `etc/claw-wifi.env`, `etc/deploy-lib.sh` and Stem's `rig_mqtt.py`
+and `rig_board.py` to `memory-pi:tensegrity-open-claw/`, then runs
+`etc-memory-pi/remote-deploy.sh` there. It assumes a fresh Pi and removes nothing, and it
+never touches `claw-pi`, as `deploy.sh` never touches `memory-pi`.
+
+- **The first deploy is long.** Greptime's release (about 170 MB) and the Grafana package come
+  over `claw-pi`'s 4G, which they fill: SSH to `claw-pi` times out while they download. Each
+  is downloaded once — Greptime again only when its pin changes, Grafana only when it is
+  missing.
+- **Grafana upgrades with apt**, and a release is large and frequent. To choose when that
+  happens: `sudo apt-mark hold grafana`, and `unhold` to upgrade.
+- **A changed WiFi profile waits for a reboot**, because the deploy arrives over that very
+  link: `ssh memory-pi sudo reboot`.
+
+## The SSD on `/tank`
+
+A Samsung T7, one ext4 partition labelled `memory`, mounted on `/tank` from the line in
+`etc-memory-pi/fstab-tank`, which the deploy puts in `/etc/fstab`. `nofail` and a ten-second
+device timeout let `memory-pi` boot without it; Greptime will not start without it. The deploy
+never unmounts it: a changed line is applied with a remount, and a change of device waits for
+a reboot.
+
+## The recordings
+
+One database, `rig`, kept forever. One table per topic's first level — `stem`, `memory`,
+`brain`, `health`, `sys`, `recorder` — with the rest of the topic in the `topic` tag, numbers
+in `value` (`true` and `false` as 1 and 0), words in `text`, and the time the recorder
+received it in `greptime_timestamp`. Retained replays, empty payloads and anything before the
+clock synchronised are not recorded, so a table appears once its topics first change live.
+
+Is it recording:
+
+```
+ssh memory-pi journalctl -u recorder -n 20
+ssh memory-pi "curl -s 'localhost:4000/v1/sql?db=rig' --data-urlencode 'sql=SHOW TABLES'"
+```
+
+`recorder/greptime` says `ok`, or why it cannot write; `recorder/written` counts what it
+stored.
+
+## Grafana
+
+From the Mac:
+
+```
+ssh -L 3000:localhost:3000 memory-pi
+```
+
+then **`http://localhost:3000`**. Viewing needs no login — reaching it at all takes the SSH
+key — and editing takes the admin login, `admin` / `admin` until Grafana asks for a new
+password at the first sign-in. Its one data source, **Greptime**, is Greptime as a
+MySQL server on `127.0.0.1:4002`, database `rig`; a panel is SQL with Grafana's time filter.
+Both Pis' temperatures, for example, as a time series:
+
+```sql
+SELECT greptime_timestamp AS time, 'claw-pi' AS metric, value
+FROM stem
+WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
+UNION ALL
+SELECT greptime_timestamp AS time, 'memory-pi' AS metric, value
+FROM memory
+WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
+ORDER BY time
+```
+
+The settings and the data source are provisioned from `etc-memory-pi/grafana/` on every
+deploy. No dashboards are: one made in the UI is kept in Grafana's own database on
+`memory-pi`'s SD card and survives deploys. Export it as JSON (**Share → Export**) for a copy
+off the Pi.
 
 ---
 

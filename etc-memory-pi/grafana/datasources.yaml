@@ -1,0 +1,17 @@
+# Grafana's one data source: Greptime, read as a MySQL server. Greptime speaks the MySQL
+# protocol and Grafana's MySQL data source is built in, so no plugin is installed or kept up to
+# date. The deploy installs this as provisioning, so the source cannot drift from the repo.
+apiVersion: 1
+
+datasources:
+  - name: Greptime
+    uid: greptime
+    type: mysql
+    # Loopback, where Greptime's MySQL listener is.
+    url: 127.0.0.1:4002
+    # Greptime has no users configured and accepts any name; this one says who is asking.
+    user: grafana
+    jsonData:
+      database: rig
+    isDefault: true
+    editable: false

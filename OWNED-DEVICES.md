@@ -36,6 +36,7 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | DMX HAT | Zihatec RS422/485 HAT Rev D on the Pi's header: the wired DMX-512 output. |
 | USB hub | 12 V powered, which turned out to be needed so as not to overload the Pi's USB ports. The modem and the audio interface plug into it, and its charge port powers `memory-pi`. |
 | External SSD | Samsung T7, 500 GB (465.8 GiB), USB-C, with a DIN rail clip. On `memory-pi` through a USB-A to USB-C cable; one ext4 partition labelled `memory`. Holds the recorded MQTT telemetry. |
+| Multiport USB charger | Durata, 100–240 V 50–60 Hz 0.8 A in, 5 V 4.4 A out at most across its four ports, each marked AUTO-ID: it detects what is plugged in and offers its fastest standard charging current, and a Pi simply takes 5 V. To power `claw-pi` and `memory-pi`, and the SSD through `memory-pi`'s USB, in place of the USB hub's charge port. |
 | PoE injector | Powers the camera; its data port goes to the Pi's `eth0`. |
 | Ethernet hub | On its own power supply. For when a laptop needs the Pi's wired segment beside the camera. |
 
@@ -78,10 +79,3 @@ in:
 | CLF Yara (washes) | HQ Power VDPLPS36B2 pinspot |
 | CLF Poseidon Laser Beam XS (moving heads) | UKing ZQ02015 |
 
-## Not yet confirmed
-
-- The Pi's power supply: the Pi reports under-voltage and throttling since boot
-  (`get_throttled` = `0x50000`) while nearly idle, so the supply, or its lead, sags.
-- The makes and models of the Ethernet hub and its supply, the USB Ethernet adapter and the
-  speakers, and where the adapter is.
-- The external SSD's make, model and size.

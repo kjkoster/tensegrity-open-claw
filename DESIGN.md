@@ -190,7 +190,7 @@ decision corrects itself when NTP steps the clock.
 ### 1.6 What may fail runs in its own process
 
 Anything the show must survive losing, and that has no reason to be inside the brain, runs
-outside it: Stem. A daemon that crashes, stalls or is restarted mid-tune then costs what it
+outside it: Stem, and Memory on a Pi of its own (§3.9). A daemon that crashes, stalls or is restarted mid-tune then costs what it
 provides and never a frame, and a process aiming moving heads at people does not share an
 address space with anything that can take it down.
 
@@ -227,6 +227,9 @@ arrives on.
 
 The Pi acts as a WiFi access point, and is reachable from the programming Mac over a
 WireGuard tunnel — which is how both deployment and console traffic get there.
+
+Telemetry — the broker, and the recordings of everything published on it — lives on a second
+Pi on that access point, Memory (§3.9), so the Pi that drives the show carries none of it.
 
 ```
     ┌── Mac ──────────────────────────────────────────┐
@@ -276,6 +279,13 @@ frame rate sits under.
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
 | `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
+
+**Beside the crates**, what the Pis run that is not Rust: `stem/` also holds Stem's daemon,
+its broker configuration and the Python modules every health daemon shares; `etc/` is what
+`claw-pi`'s deploy installs that belongs to no crate — its network profiles, the rig's WiFi
+in `claw-wifi.env`, the 4G watchdog, the boot configuration; `etc-memory-pi/` is everything
+`memory-pi` runs (§3.9). Each Pi has its own deploy script, `deploy.sh` and
+`deploy-memory-pi.sh`, sharing `etc/deploy-lib.sh`, and either deploys while the other is down.
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
 `main.rs` includes the generated patch and calendar, wires in the components it uses, and
@@ -352,8 +362,15 @@ a neural model in the brain is the first thing likely to.
 
 The Pi runs in **AP mode** (NetworkManager) so fixtures and laptops join its own network
 rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
-closed wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd
-service for unattended operation.
+wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd service
+for unattended operation.
+
+**Everything that must be found by address sets its own.** The access point and the wired
+segment each give the Pi a fixed address, `.1`, and hand out addresses by DHCP only from
+`.100`–`.199`, as a convenience for laptops. A device the rig talks to by address — the camera,
+a second Pi, a wireless fixture — configures a fixed address below `.100` on itself, so no
+lease, no lease server and no reservation on the Pi stands between it and being found. Both
+networks route their clients out over 4G.
 
 Settings — SSID, serial console, DIP switches, `config.txt` — are in
 [`README.md`](README.md).
@@ -370,20 +387,24 @@ the rig's telemetry is read-only and goes through it (§1.3). It is separate fro
 matters — and, being Python and a broker rather than Rust, it has no place inside the brain
 anyway.
 
-**The broker belongs to Stem.** The transport the reports travel on is part of that job rather
-than a service the brain happens to offer. It is Debian's Mosquitto, configured by an overlay
-in its include directory (`stem/stem.conf`), so a package upgrade cannot quietly revert the
-rig's settings. It keeps nothing on disk, and every client replays its retained topics on each
-connect instead.
+**The broker belongs to Stem, and runs on `memory-pi`** (§3.9), beside the recordings that
+read it, so the Pi that drives the show carries none of the telemetry. The transport the
+reports travel on is part of Stem's job rather than a service the brain happens to offer. It
+is Debian's Mosquitto, configured by an overlay in its include directory (`stem/stem.conf`),
+so a package upgrade cannot quietly revert the rig's settings. It keeps nothing on disk, and
+every client replays its retained topics on each connect instead. Stem's daemon stays on
+`claw-pi`, the hardware it reads, and reaches the broker across the access point like every
+other client there.
 
 **The daemon is deliberately the least capable process on the rig**: it reads the hardware and
 how it is holding up, publishes it, and does nothing else. Keeping duties out of it means its
 death costs telemetry and never uptime.
 
 Every process holds its own connection to the broker, announces itself on `health/<service>`,
-and leaves a will that says `gone`: `brain`, the daemon, the `ball` (over the AP, to the DHCP
-gateway). A part inside the brain — the face, the mouth, the eyeball — lives and dies with it, so a will of its own would only repeat `health/brain`; it
-publishes its own subtree through the brain's connection (§1.6).
+and leaves a will that says `gone`: `brain`, Stem's daemon, and Memory's health daemon and
+recorder. A part inside the brain — the
+face, the mouth, the eyeball — lives and dies with it, so a will of its own would only repeat
+`health/brain`; it publishes its own subtree through the brain's connection (§1.6).
 
 **The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
 program sees Stem, the process it reports to. It carries the health contract and the packets,
@@ -656,3 +677,69 @@ port it usually is.
 
 The interface itself is incidental — an Alesis io|2, the one the ear used — and swapping it is
 its ALSA card name and USB identity in the mouth's config.
+
+### 3.9 Memory
+
+The rig's long memory: everything published on the broker, kept in a time-series database on
+an external SSD, so a show can be read back afterwards — what the eyeball saw, what the show
+made of it, how hot a Pi ran, when the uplink dropped — and the broker itself. It runs on a Pi
+of its own, `memory-pi`, configured entirely from `etc-memory-pi/` and deployed by
+`deploy-memory-pi.sh`.
+
+**A Pi of its own, because `claw-pi` has no room for it.** `claw-pi` is a 3B+ with 905 MB,
+swap on its SD card, and the eyeball's detector beside the frame loop; a database that flushes
+and compacts in bursts has no place there. `memory-pi` is a Pi 3B, enough because Greptime
+publishes 64-bit ARM binaries and runs in a few hundred MB.
+
+**Never part of the show.** The show reads no topic (§1.3), so Memory's death, its SSD's or
+its Pi's costs the telemetry and the history and never a frame. Everything on it reconnects
+with backoff for as long as it takes, because both Pis power up together and `memory-pi` is
+up long before the access point.
+
+**On the access point, at an address it sets itself.** `memory-pi`'s only network is
+`claw-pi`'s access point, at a fixed `10.0.10.2` from its own NetworkManager profile, built
+from the same `claw-wifi.env` as the access point so the two cannot disagree. `claw-pi`'s
+shared mode routes it out over 4G for its clock, apt and downloads. The Mac reaches it only by
+jumping through `claw-pi`: a tunnel of its own would buy nothing, because a `claw-pi` that has
+died leaves little to do remotely anyway.
+
+**Five processes:**
+
+- **Mosquitto**, Stem's broker (§3.1). Every client on the rig connects to `10.0.10.2`.
+- **The health daemon**, `memory.py`: Stem's counterpart for `memory-pi`, publishing
+  `health/memory`, `sys/memory` and `memory/…`. It shares Stem's board readers through
+  `stem/rig_board.py`, so a fix to how a reading is taken lands on both Pis, and adds the
+  SSD's free space and its own end of the WiFi link.
+- **GreptimeDB**, standalone, from a pinned release with its SHA-256 in the repo, since no
+  apt source carries it. Its data is on the SSD; it listens on loopback alone.
+- **The recorder**, `recorder.py`, subscribing to `#` on loopback and writing every live
+  message into Greptime's `rig` database over InfluxDB line protocol, in batches every five
+  seconds. Greptime has no MQTT listener of its own, and its documented route is EMQX's rule
+  engine, which would mean replacing Mosquitto; a recorder is a page of Python.
+- **Grafana**, from Grafana's apt repository, reading Greptime as a MySQL server through its
+  built-in data source, on loopback, its settings a drop-in for its unit and its data source
+  provisioned from the repo. It is there so a dashboard can be made when one is wanted; none
+  is provisioned, and one made in the UI lives in Grafana's own database.
+
+**What is stored.** One table per topic's first level — `stem`, `memory`, `brain`, `health`,
+`sys` — with the rest of the topic as the `topic` tag, and the payload in `value` where it is
+a number, `true` and `false` as 1 and 0 so a flag draws as a line, and in `text` otherwise.
+The time is when the recorder received it. Kept forever: a few MB a day against 500 GB.
+
+**Not stored:** retained replays, which the broker sends on every connect and would write
+each state again each time; empty payloads, which delete a retained topic rather than say
+anything; and anything before the clock has synchronised once, which would be filed under the
+stale time the Pi booted with.
+
+**The broker comes first.** Greptime and Grafana are capped in memory and run at a lower
+priority, Greptime's writes waiting on everyone else's disk, so a compaction or a heavy
+dashboard can never take the broker down with it on a 1 GB Pi.
+
+**The SSD carries the recordings only.** `memory-pi` boots from its SD card and mounts the SSD
+on `/tank` with `nofail` and a short device timeout, so a missing SSD costs the recordings and
+leaves the Pi up and reporting why. Greptime requires the mount, so it never writes into the
+empty mount point on the SD card.
+
+**Power is cut, never shut down.** The cabinet has no off switch. Greptime writes its log to
+the SSD every ten seconds, so a power cut costs at most those seconds and what the recorder
+was holding: the recordings are read in days, not seconds.

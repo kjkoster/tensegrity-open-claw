@@ -120,4 +120,35 @@ sudo systemctl enable recorder
 sudo systemctl restart recorder
 echo "recorder restarted"
 
+# --- Grafana -------------------------------------------------------------------
+# From Grafana's apt repository. Its signing key is fetched once, and the package installed only
+# when it is missing — the package is large, and claw-pi's 4G bundle carries it — after which it
+# upgrades with the rest of the system like any other package.
+#
+# The settings are a drop-in for its unit and the data source is provisioning, so both are
+# the repo's on every deploy and the package's own files are never edited.
+step "install and restart Grafana"
+sudo install -d -m 0755 /etc/apt/keyrings
+if [ ! -f /etc/apt/keyrings/grafana.asc ]; then
+    curl -fsSL https://apt.grafana.com/gpg.key |
+        sudo install -m 0644 /dev/stdin /etc/apt/keyrings/grafana.asc
+fi
+sudo install -m 0644 "$REPO/etc-memory-pi/grafana/grafana.sources" \
+    /etc/apt/sources.list.d/grafana.sources
+if dpkg-query -W -f='${Status}' grafana 2>/dev/null | grep -q "install ok installed"; then
+    echo "grafana already installed"
+else
+    sudo apt-get update
+    sudo apt-get install -y grafana
+fi
+sudo install -d -m 0755 /etc/systemd/system/grafana-server.service.d
+sudo install -m 0644 "$REPO/etc-memory-pi/grafana/grafana-server.conf" \
+    /etc/systemd/system/grafana-server.service.d/claw.conf
+sudo install -o root -g grafana -m 0640 "$REPO/etc-memory-pi/grafana/datasources.yaml" \
+    /etc/grafana/provisioning/datasources/greptime.yaml
+sudo systemctl daemon-reload
+sudo systemctl enable grafana-server
+sudo systemctl restart grafana-server
+echo "Grafana restarted"
+
 step "remote deploy complete"

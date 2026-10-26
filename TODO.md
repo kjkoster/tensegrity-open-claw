@@ -173,10 +173,13 @@ rest of the brain and running as threads inside it. Nothing from the old code is
 the camera's VAPIX settings; `DESIGN.md` §3.6 describes it. All of it is tested at the bench,
 with the camera on the table plugged into the Pi; nothing here needs a show.
 
-- [ ] **The Pi's power, first.** `get_throttled` reports under-voltage and throttling since
-      boot (`0x50000`) with the Pi nearly idle; three cores of detector will draw more. A
-      supply that holds 5.1 V at the Pi under load — an official 2.5 A one, on a short, thick
-      lead — before the timing below means anything, and `stem/throttling/` watched
+- [ ] **The Pis' power, first.** `get_throttled` reports under-voltage and throttling since
+      boot (`0x50000`) with the Pi nearly idle; three cores of detector will draw more.
+      `claw-pi` and `memory-pi` both move off the USB hub's charge port onto the Durata
+      multiport charger (5 V, 4.4 A across its ports), each on a short, thick lead. Its 5.0 V
+      leaves less margin above the Pis' 4.63 V under-voltage threshold than an official 5.1 V
+      supply, so the leads matter. Before the timing below means anything, both must run
+      under load without under-voltage — `stem/throttling/` and `memory/throttling/` watched
       after.
 - [ ] **What the Pi manages.** The Pi is a 3B+ on 64-bit Trixie, so `ort`'s prebuilt
       ONNX Runtime fits; 905 MB of RAM and 1.8 GB free on the root partition. Download
