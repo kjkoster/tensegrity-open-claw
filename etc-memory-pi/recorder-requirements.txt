@@ -1,0 +1,9 @@
+# Python dependencies for the recorder, pip-installed into /opt/recorder/venv by the deploy.
+#
+# Its own venv, apart from the health daemon's, so that daemon keeps reporting when the
+# recorder's dependencies are what has gone wrong. Greptime is written to with the standard
+# library's HTTP client, so the MQTT client is all it needs.
+
+# Pinned, and at the health daemon's and Stem's version, so every Python client on the rig is
+# the same. A changed pin is installed on the next deploy; an unpinned one is never upgraded.
+paho-mqtt==2.1.0

@@ -120,6 +120,10 @@ class Telemetry:
         # the connect callback answers all three, and it is the same mechanism `connected`
         # already needed.
         self.retained = {}
+        # Every subscription this service holds, renewed on each connect for the same reason the
+        # retained topics are replayed: a broker that restarts forgets them, and a client that
+        # only subscribed once would stay connected and hear nothing.
+        self.subscriptions = []
 
     @classmethod
     def connect(cls, service, host=HOST, port=PORT):
@@ -165,6 +169,8 @@ class Telemetry:
         client.publish(health_topic(self.service), CONNECTED, retain=True)
         for topic, payload in self.retained.items():
             client.publish(topic, payload, retain=True)
+        for topic in self.subscriptions:
+            client.subscribe(topic)
 
     def on_disconnect(self, _client, _userdata, _flags, reason, _properties):
         # Success is our own goodbye, which `close` already speaks for.
@@ -191,6 +197,22 @@ class Telemetry:
         # Nothing is lost by leaving abruptly: the goodbye above has already been published and
         # waited for, and every log line is written unbuffered.
         os._exit(0)
+
+    def subscribe(self, topic, handler):
+        """Hands every message matching `topic` to `handler`, from now and after every reconnect.
+
+        The handler runs on paho's network thread, with paho's message: `.topic`, `.payload`
+        as bytes, and `.retain`, which is set only on a replay of a retained topic and never on
+        a live publish.
+        """
+        if self.client is None:
+            return
+        self.subscriptions.append(topic)
+        self.client.message_callback_add(topic, lambda _client, _userdata, message: handler(message))
+        # Already connected, the connect callback has been and gone and will not subscribe
+        # until the next reconnect. Not yet connected, this is refused, and that callback does it.
+        if self.client.is_connected():
+            self.client.subscribe(topic)
 
     def publish(self, topic, value, retain=False):
         """Publishes under the service's own prefix, one topic per scalar field."""

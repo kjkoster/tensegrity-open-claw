@@ -68,4 +68,56 @@ sudo systemctl enable memory
 sudo systemctl restart memory
 echo "memory daemon restarted"
 
+# --- GreptimeDB ----------------------------------------------------------------
+# From a pinned release rather than apt, which carries no GreptimeDB. Downloaded only when the
+# installed version differs from greptime.version — the tarball is close to 200 MB over claw-pi's
+# 4G bundle — and installed only once its checksum matches. VERSION beside the binary records
+# what was installed, so an unchanged pin downloads nothing.
+#
+# The data directory is made only on a mounted /tank: the mount step above has already failed
+# the deploy otherwise, and a directory made on the empty mount point would sit on the SD card.
+step "install and restart GreptimeDB"
+. "$REPO/etc-memory-pi/greptime.version"
+if [ "$(cat /opt/greptimedb/VERSION 2>/dev/null)" = "$GREPTIME_VERSION" ]; then
+    echo "GreptimeDB $GREPTIME_VERSION already installed"
+else
+    # /var/tmp, on the SD card, not /tmp: Debian keeps /tmp in RAM, capped at half of it, and the
+    # unpacked binary alone is larger than that on a 1 GB Pi.
+    download="$(mktemp -d -p /var/tmp)"
+    tarball="greptime-linux-arm64-$GREPTIME_VERSION.tar.gz"
+    curl -fL --retry 3 -o "$download/$tarball" \
+        "https://github.com/GreptimeTeam/greptimedb/releases/download/$GREPTIME_VERSION/$tarball"
+    echo "$GREPTIME_SHA256  $download/$tarball" | sha256sum -c -
+    tar -xzf "$download/$tarball" -C "$download"
+    sudo mkdir -p /opt/greptimedb
+    sudo install -m 0755 "$download/greptime-linux-arm64-$GREPTIME_VERSION/greptime" \
+        /opt/greptimedb/greptime
+    echo "$GREPTIME_VERSION" | sudo tee /opt/greptimedb/VERSION >/dev/null
+    rm -rf "$download"
+    echo "GreptimeDB $GREPTIME_VERSION installed"
+fi
+if ! id greptime >/dev/null 2>&1; then
+    sudo useradd --system --no-create-home --shell /usr/sbin/nologin greptime
+fi
+sudo install -d -o greptime -g greptime -m 0750 /tank/greptimedb
+sudo install -d -m 0755 /etc/greptimedb
+sudo install -m 0644 "$REPO/etc-memory-pi/greptimedb.toml" /etc/greptimedb/greptimedb.toml
+sudo install -m 0644 "$REPO/etc-memory-pi/greptimedb.service" /etc/systemd/system/greptimedb.service
+sudo systemctl daemon-reload
+sudo systemctl enable greptimedb
+sudo systemctl restart greptimedb
+echo "GreptimeDB restarted"
+
+# --- Recorder ----------------------------------------------------------------
+# After Greptime, which it writes to. rig_mqtt.py is already in /usr/local/bin from the health
+# daemon's step.
+step "install and restart the recorder"
+sudo install -m 0755 "$REPO/etc-memory-pi/recorder.py" /usr/local/bin/recorder.py
+sudo install -m 0644 "$REPO/etc-memory-pi/recorder.service" /etc/systemd/system/recorder.service
+python_daemon /opt/recorder/venv "$REPO/etc-memory-pi/recorder-requirements.txt"
+sudo systemctl daemon-reload
+sudo systemctl enable recorder
+sudo systemctl restart recorder
+echo "recorder restarted"
+
 step "remote deploy complete"

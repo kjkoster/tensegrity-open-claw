@@ -1,0 +1,19 @@
+[Unit]
+Description=Tensegrity Memory Recorder
+# Wanted, not Required: with Greptime down the recorder holds what it receives and keeps
+# reporting why it cannot write, rather than vanishing along with the database.
+Wants=greptimedb.service
+After=greptimedb.service
+# No ordering on the network: the broker is on claw-pi, across a WiFi link that is rarely up
+# when this starts, and the client reconnects with backoff for as long as it takes.
+
+[Service]
+# Its own venv, apart from the health daemon's.
+ExecStart=/opt/recorder/venv/bin/python3 /usr/local/bin/recorder.py
+# The broker lives on claw-pi, at its address on the access point.
+Environment=RIG_MQTT_HOST=10.0.10.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

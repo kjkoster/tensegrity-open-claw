@@ -1,0 +1,59 @@
+# GreptimeDB on memory-pi, standalone. The deploy installs this over /etc/greptimedb/greptimedb.toml,
+# so a setting changed on the Pi does not survive it. Only what differs from the release's
+# defaults is set here.
+
+# Nothing leaves the Pi but what the rig asks for: anonymous usage reports would go out over
+# claw-pi's 4G bundle.
+enable_telemetry = false
+
+# A Pi 3B has four cores, and the defaults are sized for a server.
+[runtime]
+global_rt_size = 4
+compact_rt_size = 2
+
+# Loopback only, for every protocol that stays on: the recorder and Grafana are local, and the
+# Mac reaches both through SSH.
+#
+# HTTP carries the recorder's writes, as InfluxDB line protocol, and the API and dashboard.
+[http]
+addr = "127.0.0.1:4000"
+
+# gRPC cannot be switched off in standalone mode; it is kept off the network instead.
+[grpc]
+bind_addr = "127.0.0.1:4001"
+runtime_size = 2
+
+# MySQL is how Grafana reads, through its built-in MySQL data source.
+[mysql]
+enable = true
+addr = "127.0.0.1:4002"
+
+# InfluxDB line protocol is how the recorder writes.
+[influxdb]
+enable = true
+
+# Every protocol nothing on the rig speaks is off.
+[postgres]
+enable = false
+
+[opentsdb]
+enable = false
+
+[jaeger]
+enable = false
+
+[otlp]
+enable = false
+
+[prom_store]
+enable = false
+
+# Everything on the SSD: the WAL, the metadata and the data all default to under data_home.
+[storage]
+data_home = "/tank/greptimedb"
+
+# To the journal, through stdout, and to hourly files under /tank/greptimedb/logs, which
+# Greptime writes even when `dir` is set empty, and caps at 720 — about thirty days. On the
+# SSD, so they cost the SD card nothing.
+[logging]
+append_stdout = true

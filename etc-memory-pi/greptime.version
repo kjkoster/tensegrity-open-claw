@@ -1,0 +1,6 @@
+# The GreptimeDB release memory-pi runs, and the SHA-256 of its linux-arm64 tarball as published
+# beside it in the release. No apt source carries GreptimeDB, so the deploy downloads this
+# release itself, only when the installed one differs, and refuses a download whose checksum
+# does not match. A new version is these two lines.
+GREPTIME_VERSION=v1.2.1
+GREPTIME_SHA256=dea2d57227fd6d4f26825653c7be441fae800db7d11987870446ba11eb06e918

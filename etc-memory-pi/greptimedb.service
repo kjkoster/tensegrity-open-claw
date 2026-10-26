@@ -1,0 +1,16 @@
+[Unit]
+Description=GreptimeDB, Memory's time-series database
+# Not without the SSD: started on an empty /tank, it would write into the mount point and fill
+# the SD card.
+RequiresMountsFor=/tank
+
+[Service]
+ExecStart=/opt/greptimedb/greptime standalone start -c /etc/greptimedb/greptimedb.toml
+# Its own unprivileged user, owning nothing but its data directory on the SSD.
+User=greptime
+Group=greptime
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

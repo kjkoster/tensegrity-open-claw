@@ -126,6 +126,14 @@ The eyeball runs inside the brain, at normal priority below its real-time thread
 model costs the eyeball frames and never a DMX one; why, and what it costs, is in
 [`DESIGN.md`](DESIGN.md) §1.6.
 
+## Power
+
+The cabinet has no off switch. Every Pi in it is never shut down, only loses power, so nothing
+on the rig may depend on a clean shutdown. On `memory-pi` that costs at most the last ten
+seconds of recordings: Greptime writes its log to the SSD every ten seconds, which is enough
+for recordings read back in days. The SSD's ext4 replays its journal and is checked at boot
+before it mounts.
+
 ## OS configuration (once)
 
 ### Boot configuration
