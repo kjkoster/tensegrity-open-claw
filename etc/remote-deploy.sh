@@ -13,46 +13,7 @@ set -euo pipefail
 # result would be a clean deploy that rebuilt and reinstalled the previous sources.
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
-step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
-
-# Each Python daemon gets its own venv and its own pip install, so its requirements.txt is the
-# only statement of what it needs and the deploy is what acts on it. Separate venvs rather than
-# one shared: Stem has to keep reporting when another daemon is exactly what has gone wrong,
-# which it cannot do while sharing that daemon's dependency tree.
-#
-# Created with --system-site-packages, so anything already present from apt stays visible as a
-# floor under whatever pip resolves.
-python_daemon() {
-    local venv="$1" requirements="$2"
-    if [ ! -x "$venv/bin/python3" ]; then
-        sudo mkdir -p "$(dirname "$venv")"
-        sudo python3 -m venv --system-site-packages "$venv"
-        echo "created $venv"
-    fi
-    # Not quiet, and not tolerated: a deploy that cannot install what a daemon imports has
-    # failed, and finding that out here beats finding it in a crash loop.
-    #
-    # No --upgrade either. With it, every deploy re-queries the index for newer versions of
-    # everything; without it, pip sees the requirements already satisfied and does not touch
-    # the network at all. This Pi reaches PyPI over a 4G modem, so that is the difference
-    # between a deploy that needs the uplink and one that does not.
-    sudo "$venv/bin/pip" install -r "$requirements"
-}
-
-# Installs a NetworkManager profile template with the rig's WiFi filled in from claw-wifi.env,
-# the one place it is defined. Bash substitution rather than sed, so no character in the
-# passphrase can break it; quoted, so not even `&`. 0600, root's, as NetworkManager requires
-# of a profile holding a secret.
-wifi_profile() {
-    local template="$1" name="$2" profile
-    . "$REPO/etc/claw-wifi.env"
-    profile="$(<"$template")"
-    profile="${profile//@SSID@/"$CLAW_SSID"}"
-    profile="${profile//@PSK@/"$CLAW_PSK"}"
-    profile="${profile//@CHANNEL@/"$CLAW_CHANNEL"}"
-    printf '%s\n' "$profile" |
-        sudo install -m 0600 /dev/stdin "/etc/NetworkManager/system-connections/$name.nmconnection"
-}
+. "$REPO/etc/deploy-lib.sh"
 
 # --- 4G uplink watchdog ----------------------------------------------------
 # Ahead of everything else, for the same reason the broker goes ahead of the build and a
@@ -83,26 +44,21 @@ else
     echo "WARNING: 4g-watchdog.timer did not start — journalctl -u 4g-watchdog.timer -n 40"
 fi
 
-# --- WiFi access point -----------------------------------------------------
-# NetworkManager's, like every other connection on the rig's Pis. The versioned profile
-# replaces whatever is on the Pi, so a setting changed there by hand does not survive a deploy.
+# --- WiFi access point and wired segment -----------------------------------
+# NetworkManager's, like every other connection on the rig's Pis. The versioned profiles
+# replace whatever is on the Pi, so a setting changed there by hand does not survive a deploy.
+# The access point's is a template filled from claw-wifi.env; the wired segment's shares
+# nothing with another file and installs as it is.
 #
-# Brought up on every deploy, changed or not, so the profile in the repo is the one running.
-# That drops every station for a few seconds. A deploy over 4G arrives through the tunnel, not
-# the access point, so it is not cut off by it.
-step "install and restart WiFi access point"
+# Both brought up on every deploy, changed or not, so the profiles in the repo are the ones
+# running. That drops every station for a few seconds. A deploy over 4G arrives through the
+# tunnel, not through either of them, so it is not cut off.
+step "install and restart WiFi access point and wired segment"
 wifi_profile "$REPO/etc/claw-ap.nmconnection" claw-ap
-sudo nmcli connection reload
-sudo nmcli connection up claw-ap
-
-# --- Wired segment ---------------------------------------------------------
-# NetworkManager's too, and installed the same way, but no template: nothing in it is shared
-# with another file. Brought up on every deploy for the same reason as the access point; a
-# deploy over 4G does not arrive through it.
-step "install and restart wired segment"
 sudo install -m 0600 "$REPO/etc/claw-eth0.nmconnection" \
     /etc/NetworkManager/system-connections/claw-eth0.nmconnection
 sudo nmcli connection reload
+sudo nmcli connection up claw-ap
 sudo nmcli connection up claw-eth0
 
 # --- Stem's broker ---------------------------------------------------------
@@ -146,12 +102,13 @@ sudo systemctl restart brain
 echo "brain daemon restarted"
 
 # --- Stem ------------------------------------------------------------------
-# rig_mqtt.py installs beside its importer rather than into a site-packages directory: the
-# daemon is run by absolute path, which puts /usr/local/bin first on its import path, and
-# one file copy beats owning a package layout for a single shared module.
+# rig_mqtt.py and rig_board.py install beside their importer rather than into a site-packages
+# directory: the daemon is run by absolute path, which puts /usr/local/bin first on its import
+# path, and a file copy beats owning a package layout for two shared modules.
 step "install and restart Stem"
 sudo install -m 0755 "$REPO/stem/stem.py" /usr/local/bin/stem.py
 sudo install -m 0644 "$REPO/stem/rig_mqtt.py" /usr/local/bin/rig_mqtt.py
+sudo install -m 0644 "$REPO/stem/rig_board.py" /usr/local/bin/rig_board.py
 sudo install -m 0644 "$REPO/stem/stem.service" /etc/systemd/system/stem.service
 python_daemon /opt/stem/venv "$REPO/stem/requirements.txt"
 sudo systemctl daemon-reload

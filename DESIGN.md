@@ -388,7 +388,8 @@ publishes its own subtree through the brain's connection (§1.6).
 **The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
 program sees Stem, the process it reports to. It carries the health contract and the packets,
 purely `no_std` so the firmware can use them; each program brings its own transport, the
-brain's being `cortex::telemetry`. `stem/rig_mqtt.py` is the Python half.
+brain's being `cortex::telemetry`. `stem/rig_mqtt.py` is the Python half, and
+`stem/rig_board.py` the board readers every Python health daemon shares.
 
 ### 3.2 The 4G watchdog
 

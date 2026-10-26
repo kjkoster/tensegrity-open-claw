@@ -1,0 +1,18 @@
+[Unit]
+Description=Tensegrity Memory Health Daemon
+# No ordering on the network: the broker is on claw-pi, across a WiFi link that is rarely up
+# when this starts, and the client reconnects with backoff for as long as it takes.
+
+[Service]
+# Its own venv, not a shared one, so it keeps reporting when the recorder's dependencies are
+# what has gone wrong.
+ExecStart=/opt/memory/venv/bin/python3 /usr/local/bin/memory.py
+# The broker lives on claw-pi, at its address on the access point.
+Environment=RIG_MQTT_HOST=10.0.10.1
+Restart=always
+RestartSec=5
+# A positive Nice, as Stem's: everything this reads is slow-moving.
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

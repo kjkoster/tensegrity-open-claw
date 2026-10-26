@@ -18,8 +18,11 @@ PI_DIR="tensegrity-open-claw"
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 # --- Ship configuration to the Pi -----------------------------------------
-#   etc-memory-pi/      memory-pi's own configuration, and remote-deploy.sh, which installs it
+#   etc-memory-pi/      memory-pi's own configuration and daemons, and remote-deploy.sh, which
+#                       installs them
 #   etc/claw-wifi.env   the rig's WiFi, which claw-pi's access point is built from too
+#   etc/deploy-lib.sh   what both Pis' remote deploys share
+#   stem/rig_*.py       Stem's shared modules: the MQTT conventions and the board readers
 #
 # --delete, so a file removed here also leaves the Pi rather than lingering there to be
 # installed by a remote-deploy.sh that no longer knows about it.
@@ -27,9 +30,10 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # The directories are made first, because rsync creates only the last level of a missing
 # destination and a fresh Pi has none of them.
 step "rsync configuration to $PI:$PI_DIR"
-ssh "$PI" "mkdir -p $PI_DIR/etc-memory-pi $PI_DIR/etc"
+ssh "$PI" "mkdir -p $PI_DIR/etc-memory-pi $PI_DIR/etc $PI_DIR/stem"
 rsync -az --checksum --delete "etc-memory-pi/" "$PI:$PI_DIR/etc-memory-pi/"
-rsync -az --checksum "etc/claw-wifi.env" "$PI:$PI_DIR/etc/"
+rsync -az --checksum "etc/claw-wifi.env" "etc/deploy-lib.sh" "$PI:$PI_DIR/etc/"
+rsync -az --checksum "stem/rig_mqtt.py" "stem/rig_board.py" "$PI:$PI_DIR/stem/"
 
 # --- Install on the Pi ----------------------------------------------------
 step "run remote deploy on $PI"
