@@ -200,10 +200,6 @@ with the camera on the table plugged into the Pi; nothing here needs a show.
       either goes into `etc/` and git, installed by the deploy like `config-claw.txt` —
       `cmdline.txt` carries the SD card's `PARTUUID`, so the repo's copy cannot simply
       overwrite it.
-- [ ] **`eth0` gets its address.** It is down and unconfigured: NetworkManager's default
-      `Wired connection 1`, which asks for DHCP that nothing on the camera's wire answers.
-      Give it a static `10.0.1.1/24` with no gateway, from a file in `etc/` and git that the
-      deploy installs, like the access point's configuration.
 - [ ] **The camera once**: if the `root` password really is lost, factory-reset it (control
       button held while powering up) and set one; re-address it to `10.0.1.90`; put the
       password in the eyeball's configuration only. Its PoE injector's data port into the

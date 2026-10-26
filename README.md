@@ -37,7 +37,7 @@ macOS.
 
   | Interface | Address | Purpose |
   |---|---|---|
-  | `eth0` | `10.0.1.1/24`, static — not yet configured: today NetworkManager's default DHCP profile, down | the closed wired segment: a network camera, and SSH / deploy from a laptop |
+  | `eth0` | `10.0.1.1/24`, from `etc/claw-eth0.nmconnection`; DHCP for laptops from `.100`–`.199` | the wired segment: a network camera, and SSH / deploy from a laptop |
   | `wlan0` | `10.0.10.1/24` | the WiFi AP |
   | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
   | `wwan0` | DHCP | 4G uplink |
@@ -49,16 +49,19 @@ macOS.
 
 ### WiFi AP (fixtures join this)
 
-- **AP mode via `hostapd` + `dnsmasq`** — fixed SSID/channel per deployment. Clients address
-  `10.0.10.1`, leased from `10.0.10.10+`. `etc/hostapd.conf` is the only source of truth
-  for the access point: every deploy installs it over the Pi's copy and restarts `hostapd`,
-  which drops every WiFi client for a few seconds.
-- **A silent station is dropped after 6 s** (`ap_max_inactivity`, with `skip_inactivity_poll`),
-  so a client that lost power without a goodbye can rejoin quickly. A laptop left idle that
-  long is dropped too and rejoins by itself.
-- The **Ethernet port** is a closed wired segment: a network camera through its PoE
-  injector, and a laptop for SSH, with an Ethernet hub in the cabinet when both need it.
-  Nothing on it routes anywhere.
+- **NetworkManager runs every connection on both Pis**, the access point included, from
+  profiles in the repo. The rig's WiFi — SSID, passphrase, channel — is defined once, in
+  `etc/claw-wifi.env`; each Pi's deploy fills it into its profile templates, so the access
+  point and its clients cannot disagree.
+- **The access point** is `etc/claw-ap.nmconnection`, in NetworkManager's shared mode: the
+  Pi at `10.0.10.1`, DHCP for laptops from `.100`–`.199`, DNS relayed, and every client routed
+  out over 4G. Everything that must be found by address sets its own, below `.100`. Every
+  deploy installs the profile and brings it up, which drops every WiFi client for a few
+  seconds.
+- The **Ethernet port** is the wired segment: a network camera through its PoE injector, and
+  a laptop for SSH, with an Ethernet hub in the cabinet when both need it. It is
+  `etc/claw-eth0.nmconnection`, in shared mode like the access point: the Pi at `10.0.1.1`,
+  DHCP for a laptop from `.100`–`.199`, routed out over 4G; the camera sets its own address.
 
 ### 4G uplink
 

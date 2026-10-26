@@ -1,0 +1,29 @@
+# memory-pi's connection to claw-pi's access point, as a NetworkManager profile. A template:
+# the deploy fills the @…@ placeholders from claw-wifi.env and installs the result.
+
+[connection]
+id=claw
+type=wifi
+interface-name=wlan0
+# Above the profile Raspberry Pi Imager writes for the same network, which every fresh install
+# has, so this one is chosen without the deploy having to remove that one.
+autoconnect-priority=10
+# Never give up: both Pis power up together and memory-pi is up long before the access point.
+autoconnect-retries=0
+
+[wifi]
+ssid=@SSID@
+band=bg
+channel=@CHANNEL@
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=@PSK@
+
+[ipv4]
+method=manual
+address1=10.0.10.2/24,10.0.10.1
+dns=10.0.10.1;
+
+[ipv6]
+method=disabled

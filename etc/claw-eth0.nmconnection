@@ -1,0 +1,20 @@
+# claw-pi's wired segment, as a NetworkManager profile: the camera, and a laptop when one is
+# plugged in.
+
+[connection]
+id=claw-eth0
+type=ethernet
+interface-name=eth0
+# Above any profile the image or NetworkManager itself makes for eth0, so this one is chosen
+# without the deploy having to remove those.
+autoconnect-priority=10
+
+[ipv4]
+# Shared, as on the access point: DHCP for a laptop on the wire, routed out like every other
+# client. The camera sets its own address, below .100.
+method=shared
+address1=10.0.1.1/24
+shared-dhcp-range=10.0.1.100,10.0.1.199
+
+[ipv6]
+method=disabled

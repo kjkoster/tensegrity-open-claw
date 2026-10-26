@@ -1,0 +1,35 @@
+# claw-pi's WiFi access point, as a NetworkManager profile. A template: the deploy fills the
+# @…@ placeholders from claw-wifi.env and installs the result.
+
+[connection]
+id=claw-ap
+type=wifi
+interface-name=wlan0
+
+[wifi]
+mode=ap
+ssid=@SSID@
+band=bg
+channel=@CHANNEL@
+
+[wifi-security]
+key-mgmt=wpa-psk
+proto=rsn
+pairwise=ccmp
+group=ccmp
+# Protected management frames off: the Pi's brcmfmac chip mishandles them in AP mode.
+pmf=1
+psk=@PSK@
+
+[ipv4]
+# Shared: NetworkManager hands out addresses, relays DNS and routes the clients out through the
+# default route. Everything that must be found by address sets its own, below .100; DHCP is a
+# convenience for laptops.
+method=shared
+address1=10.0.10.1/24
+shared-dhcp-range=10.0.10.100,10.0.10.199
+# sACN multicast leaves through the AP, not the 4G uplink's default route.
+route1=224.0.0.0/4
+
+[ipv6]
+method=disabled

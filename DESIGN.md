@@ -350,7 +350,7 @@ The deployed unit is a **Raspberry Pi 3B+** running standard 64-bit Debian / Ras
 has more headroom and runs the same software unchanged, if thermals or CPU ever justify it —
 a neural model in the brain is the first thing likely to.
 
-The Pi runs in **AP mode** (hostapd + dnsmasq) so fixtures and laptops join its own network
+The Pi runs in **AP mode** (NetworkManager) so fixtures and laptops join its own network
 rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
 closed wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd
 service for unattended operation.

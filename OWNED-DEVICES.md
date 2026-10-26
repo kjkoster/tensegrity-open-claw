@@ -42,7 +42,7 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 
 | Device | Details |
 |---|---|
-| WiFi access point | The Pi's own WiFi: SSID `closed claw DMX`, channel 6, from `etc/hostapd.conf`. |
+| WiFi access point | The Pi's own WiFi: SSID `closed claw DMX`, channel 6, from `etc/claw-wifi.env`. |
 | 4G modem | Huawei E3372 USB stick (Vodafone-branded, USB vendor `12d1`) in MBIM mode, on the USB hub. |
 | SIM | Odido 4G, 4 GB monthly data bundle. The Pi's address on Odido's network is publicly routable, with no DNS name. |
 | WireGuard server | `wg` / `wg.kjkoster.org`, hosted on Google Cloud. The Pi (`10.8.0.3`) and the Mac (`10.8.0.4`) each keep a permanent tunnel to it, so the Mac reaches `claw-pi` at `10.8.0.3`. |

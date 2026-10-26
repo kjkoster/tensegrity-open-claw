@@ -39,6 +39,21 @@ python_daemon() {
     sudo "$venv/bin/pip" install -r "$requirements"
 }
 
+# Installs a NetworkManager profile template with the rig's WiFi filled in from claw-wifi.env,
+# the one place it is defined. Bash substitution rather than sed, so no character in the
+# passphrase can break it; quoted, so not even `&`. 0600, root's, as NetworkManager requires
+# of a profile holding a secret.
+wifi_profile() {
+    local template="$1" name="$2" profile
+    . "$REPO/etc/claw-wifi.env"
+    profile="$(<"$template")"
+    profile="${profile//@SSID@/"$CLAW_SSID"}"
+    profile="${profile//@PSK@/"$CLAW_PSK"}"
+    profile="${profile//@CHANNEL@/"$CLAW_CHANNEL"}"
+    printf '%s\n' "$profile" |
+        sudo install -m 0600 /dev/stdin "/etc/NetworkManager/system-connections/$name.nmconnection"
+}
+
 # --- 4G uplink watchdog ----------------------------------------------------
 # Ahead of everything else, for the same reason the broker goes ahead of the build and a
 # stronger one: this is what gets the Pi back onto the network after the modem wedges, and the
@@ -69,14 +84,26 @@ else
 fi
 
 # --- WiFi access point -----------------------------------------------------
-# The versioned configuration replaces whatever is on the Pi, so a setting changed there by
-# hand does not survive a deploy. 0600 because it holds the passphrase.
+# NetworkManager's, like every other connection on the rig's Pis. The versioned profile
+# replaces whatever is on the Pi, so a setting changed there by hand does not survive a deploy.
 #
-# Restarted on every deploy, changed or not, so the configuration in the repo is the one
-# running. That drops every station for a few seconds.
+# Brought up on every deploy, changed or not, so the profile in the repo is the one running.
+# That drops every station for a few seconds. A deploy over 4G arrives through the tunnel, not
+# the access point, so it is not cut off by it.
 step "install and restart WiFi access point"
-sudo install -m 0600 "$REPO/etc/hostapd.conf" /etc/hostapd/hostapd.conf
-sudo systemctl restart hostapd
+wifi_profile "$REPO/etc/claw-ap.nmconnection" claw-ap
+sudo nmcli connection reload
+sudo nmcli connection up claw-ap
+
+# --- Wired segment ---------------------------------------------------------
+# NetworkManager's too, and installed the same way, but no template: nothing in it is shared
+# with another file. Brought up on every deploy for the same reason as the access point; a
+# deploy over 4G does not arrive through it.
+step "install and restart wired segment"
+sudo install -m 0600 "$REPO/etc/claw-eth0.nmconnection" \
+    /etc/NetworkManager/system-connections/claw-eth0.nmconnection
+sudo nmcli connection reload
+sudo nmcli connection up claw-eth0
 
 # --- Stem's broker ---------------------------------------------------------
 # Before anything that reports to it. Every daemon on this rig holds its own client
