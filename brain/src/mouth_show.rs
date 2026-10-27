@@ -1,83 +1,44 @@
-//! The mouth's part of the show: for now, a bench test of the sound against the light.
+//! The show's sounds: what it asks of the mouth, and the envelopes its looks follow.
 //!
-//! It plays every recording in turn with a second's silence after each, round and round, and
-//! lights the face's left lamp with the envelope of the one playing, so that with headphones on
-//! the interface the sound and the lamp can be checked against each other. The lamp plays the
-//! envelope by frame index from the frame that cued the sound, as any look following a
-//! recording does.
-//!
-//! The e-stop mutes the mouth, as it darkens the light.
+//! The one place the show touches the mouth, so a show without one changes here and in the
+//! few lines that call it.
 
-use crate::patch::FACE;
-use crate::sounds::{COUNT, SOUNDS};
-use cortex::config::FRAME_RATE_HZ;
+use crate::sounds::{COUNT, HEARTBEAT, OWL, THUNDERCLAP};
 use mouth::Mouth;
-
-/// The silence after each recording: one second.
-const PAUSE_FRAMES: usize = FRAME_RATE_HZ as usize;
-
-enum Step {
-    /// A recording playing, and the frame of it this one is.
-    Sound { index: usize, frame: usize },
-    /// The silence before the next recording, and the frames of it still to go.
-    Pause { next: usize, frames_left: usize },
-}
 
 pub struct MouthShow {
     mouth: Mouth<COUNT>,
-    step: Step,
 }
 
 impl MouthShow {
     pub fn new(mouth: Mouth<COUNT>) -> Self {
-        Self {
-            mouth,
-            step: Step::Pause {
-                next: 0,
-                frames_left: PAUSE_FRAMES,
-            },
-        }
+        Self { mouth }
     }
 
-    /// Steps the sequence one frame, and fills the left lamp.
-    pub fn fill(&mut self, slots: &mut [u8], estop: bool) {
-        self.mouth.mute(estop);
-        let level = loop {
-            match self.step {
-                Step::Sound { index, frame } => match SOUNDS.all[index].envelope.get(frame) {
-                    Some(&level) => {
-                        self.step = Step::Sound {
-                            index,
-                            frame: frame + 1,
-                        };
-                        break level;
-                    }
-                    None => {
-                        self.step = Step::Pause {
-                            next: (index + 1) % COUNT,
-                            frames_left: PAUSE_FRAMES,
-                        }
-                    }
-                },
-                Step::Pause {
-                    next,
-                    frames_left: 0,
-                } => {
-                    self.mouth.play(SOUNDS.all[next]);
-                    self.step = Step::Sound {
-                        index: next,
-                        frame: 0,
-                    };
-                }
-                Step::Pause { next, frames_left } => {
-                    self.step = Step::Pause {
-                        next,
-                        frames_left: frames_left - 1,
-                    };
-                    break 0;
-                }
-            }
-        };
-        FACE.left_lamp.set(slots, level);
+    /// The heartbeat's loudness per frame, which the rose pulses with.
+    pub fn heartbeat_envelope() -> &'static [u8] {
+        HEARTBEAT.envelope
+    }
+
+    /// The thunderclap's loudness per frame, which the lightning follows; its length is the
+    /// length of the thunderclap.
+    pub fn thunderclap_envelope() -> &'static [u8] {
+        THUNDERCLAP.envelope
+    }
+
+    pub fn heartbeat(&mut self) {
+        self.mouth.play(&HEARTBEAT);
+    }
+
+    pub fn owl(&mut self) {
+        self.mouth.play(&OWL);
+    }
+
+    pub fn thunderclap(&mut self) {
+        self.mouth.play(&THUNDERCLAP);
+    }
+
+    pub fn mute(&mut self, mute: bool) {
+        self.mouth.mute(mute);
     }
 }

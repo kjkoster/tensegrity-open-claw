@@ -653,9 +653,9 @@ its show has sound; `cortex` knows nothing of it (§2.3).
 
 **A unit, so a show without sound leaves it out.** On the rig crate's side the mouth is its
 recordings in `sounds/`, the sound table that names them and their gains, and one show file of
-its own; the rest of the rig crate touches it in the few lines that spawn it, include its
-generated `sounds` module and hand its show file the frame. Taking it out is deleting those
-and the two crates.
+its own, through which the show cues its sounds and reads their envelopes; the rest of the rig
+crate touches it in the few lines that spawn it and include its generated `sounds` module, and
+in the show's calls into that file. Taking it out is deleting those and the two crates.
 
 **The recordings are compiled from the files as they were found** (§2.3). The build decodes
 each, resamples it to the interface's native rate so nothing resamples at run time, keeps it

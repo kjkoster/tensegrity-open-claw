@@ -2,8 +2,7 @@
 //!
 //! Everything below the show is `cortex`. What lives here is this rig's patch, its pointing
 //! presets, its calendar, its recordings, and the per-frame fill that turns the show into
-//! slots — for now a placeholder that keeps the rig dark while the Halloween show is built,
-//! with the mouth's bench test beside it.
+//! slots.
 
 use cortex::Rig;
 use cortex::latest::latest;
@@ -13,7 +12,9 @@ use show::Show;
 
 mod face;
 mod face_show;
+mod heart;
 mod mouth_show;
+mod presence;
 mod show;
 
 // `patch` and `presets`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
@@ -37,7 +38,11 @@ fn main() {
     let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
     let estop_state = face_state.clone();
     let mouth = mouth::spawn(&sounds::SOUNDS, brain_publisher.part("mouth"));
-    let mut show = Show::new(brain_publisher.clone(), MouthShow::new(mouth));
+    let mut show = Show::new(
+        brain_publisher.clone(),
+        &shows::CALENDAR,
+        MouthShow::new(mouth),
+    );
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),

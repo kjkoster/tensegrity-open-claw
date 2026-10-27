@@ -41,6 +41,11 @@ Each is a choice, written down so it can be changed on purpose.
 | How the mouth hears a trigger | A counter per sound in the cue, and mute as a level. The mouth reads the latest cue every period, four or five times a frame, and only a counter that has moved reads once — the face's presses work the same way. | A list of triggers per frame: replayed on every period the frame is still the latest. |
 | How a recording becomes samples | `mouth-build` decodes the file as it was found (`symphonia`), resamples it to 48 kHz (`rubato`), keeps it stereo, trims below −60 dB of its peak at both ends, normalises its peak to −0.3 dBFS less its gain, pads it to whole DMX frames, and writes the frames to `OUT_DIR` as little-endian bytes. The generated source views `include_bytes!` of them as `&'static [[u8; 4]]` with `as_chunks`, in a `static`, and the mixer reads each sample with `i16::from_le_bytes`. | Converting by hand into WAVs in a second directory: a step to forget, and a second copy of every recording. An aligned static viewed as `[i16]` with `slice::from_raw_parts`: `unsafe`, and the byte order implicit. A `const fn` turning the bytes into an `[i16; N]`: runs into rustc's `long_running_const_eval` lint. |
 | The volume of each recording | A gain in dB per recording in `brain/sounds.rs`, a `const` read by the build script, which applies it to the samples; the mixer only adds voices up. No master gain, the speakers' knobs set the whole. | A cargo feature: features are on-or-off and unify across the build, so they cannot carry a number. An environment variable: invisible in git, and different on every machine that builds. |
+| What arms the scare | Only a crossing: the distance at or past the line after a positive value, held for `SCARE_CONFIRM_SECS`. Someone appearing past the line from the tombstone — back from the door, out of the house — is not scared. | Any distance at or past the line: scares people on their way out. |
+| Test mode from `blackout` | Enters `idle`, so the rose and the heart can be looked at without a scare first. | Staying dark until the right button is pressed. |
+| The flash before the thunderclap | A state of its own, `lightning`: two frames at full, silent, and the thunderclap cued on the frame after, so the light leads the crack. `LIGHTNING_SECS` is 50 ms, rounded to whole frames, at least one; two frames chosen at the bench. | The flash as the first frames of `thunderclap`: the recording and its envelope would no longer start together. |
+| Presence before the eyeball | The yard is empty outside test mode. In test mode the left button steps it: nobody, 0.5, 0.1. 0.1, not 0, so it races the heart and never scares; the right button scares. | A fake distance that wanders by itself: a heart nobody asked to quicken. |
+| The face's lamps during the show | The left lamp is the rose's level in every mode, so the show can be watched against the sound from the door; the right lamp is test mode. | Both lamps for test mode only, as before: nothing to see of the show until the heads are driven. |
 | Telemetry clients inside the brain | One connection, the brain's. The face, the mouth and the eyeball publish their subtrees, `face/…`, `mouth/…` and `eyeball/…`, through it, and have no `health/` topic of their own. A client and a will are for a process that can die on its own: the brain, the ball, Stem. | A client each, as the face and the ear had: none can die without the brain, so their wills only repeat `health/brain`, at the cost of a connection, a thread and a farewell apiece. |
 | `rig-mqtt` is renamed `stem` | The crate is the Rust programs' view of Stem, the process they report to, so it is named for it and lives in `stem/` beside the daemon, the broker configuration and `rig_mqtt.py`, its Python half. It stays purely `no_std`, for firmware; the brain's client, which needs sockets and threads, stays in `cortex` as `cortex::telemetry`. | A directory of its own: Stem split across two places. The client inside the crate behind a `std` feature: std in a crate kept `no_std` for firmware. |
 | Which heads strobe | Heads 2 and 3, the inner pair; 1 and 4 steady. | Any pair. A constant. |
@@ -68,12 +73,10 @@ Each needs a choice before the step that uses it.
 | The strobe's rate | `STROBE_RATE` is "fast", which is no value, and the strobe band is unmeasured. A fast strobe aimed at children's faces sits in the 3–30 flashes a second that photosensitive-epilepsy guidance warns against. | `STROBE_RATE` in flashes a second, at most 3, read off the measured band; or no strobe, and let the hops carry the lightning. |
 | `bLnd` on the heads | `SHOW.md` §12 says `bLAc`; `README.md`'s e-stop section says every fixture holds its last values. The manual gives `bLAc` as "return to zero", which may send the head home, and `HoLd` keeps it lit wherever it was — mid-thunderclap included, for the five seconds a brain restart takes. | Find out on one head what `bLAc` does. If it darkens and stays put, use it and make the README's rule "dark and still"; if it homes, decide between a homing head and a lit one. |
 | Is there a rose gobo | The gobo channel is one undivided "Fixed Gobo" band, 8–63, and the manual shows no gobo images. The idle look rests on one of them being a rose. | Step through the band on a head before anything is built around it. |
-| What arms the scare | The scare fires when the distance is at or past zero. Someone coming back from the door, or out of the house, appears past the line from the tombstone and is scared on the way out. | Fire only on a crossing: the distance at or below zero after a positive value. Appearing past the line from the tombstone does not count. |
 | Is the door in the picture | `respite` holds while anyone is seen. If the camera does not see the doorstep, a group collecting sweets is the tombstone and the rose returns while they stand there. | Frame the door in, or make `LEAVE_SECS` long enough to cover a doorstep visit. |
 | A second group during `respite` | Respite ends only on an empty yard, so a group arriving behind the first is not scared. | Accept it: a scare re-armed under people still in the yard would hit them a second time. |
 | The heartbeat's length | It must be shorter than one beat at `SCARE_BPM`: 0.46 s at 130. The recording in `audio/` is 0.76 s. | Let beats overlap: the mixer mixes voices anyway, and the rose takes the loudest of the envelopes playing. The check becomes "shorter than a beat at rest". |
 | The rose's colour | The show's table in 4.4 names `ROSE_COLOUR`, and nothing gives it a value yet. | A constant beside the others, naming a band of the colour wheel, chosen on the bench head. |
-| Test mode from `blackout` | Turned on outside show hours, test mode stays dark until the right button is pressed, so the rose cannot be looked at without a scare first. | Test mode turned on in `blackout` enters `idle`. |
 | The eyeball's threads | Your rule is Embassy on std too. Nothing in the eyeball runs on a timer: capture is paced by the camera, detection by itself, the preview by its client. | OS threads with latest seams between them, like the brain's other blocking producers, and nothing on the frame loop's executor. |
 | Whether the Pi keeps up | YOLOX-Nano is expected at 150–300 ms a frame on the Pi 3B+ — three to six frames a second — and 60–120 ms on a Pi 4. The debounces and the staleness window were written for ten: `SCARE_CONFIRM_SECS` is "two frames", `EYEBALL_STALE_SECS` "twenty". A spare Pi 4 runs the same software unchanged. | Measure first (chunk 3). Then set the two constants from the measured rate, and swap in the Pi 4 if the 3B+ cannot hold about five frames a second. |
 | ONNX Runtime inside the brain | It is C++. A crash in it ends the brain, which systemd restarts in seconds of signal loss. Its prebuilt binaries exist for 64-bit ARM, which is what the Pi runs (`aarch64`, Debian 13, glibc 2.41), and are downloaded by the Pi's first build of the brain, over 4G, once. `tract-onnx` is pure Rust, cannot crash that way, needs no download and runs YOLOX's operators, at some cost in speed. | `ort` while it holds the frame rate; `tract` if the speed allows it. |
@@ -136,11 +139,10 @@ no `ear` and one telemetry thread.
 ## 2. Sound
 
 The recordings, compiled in from `brain/sounds/` as they were found, and the mouth that plays
-them. Done and running: `mouth/`, `mouth-build/`, `brain/sounds.rs`, and a bench test in
-`brain/src/mouth_show.rs` that plays every recording in turn, a second's silence after each,
-with the face's left lamp following the envelope of the one playing. The recordings play
-cleanly and in step with the lamp, and the lamps' PWM is at 20 kHz, above what leaked into
-the audio at 1 kHz.
+them. Done and running: `mouth/`, `mouth-build/` and `brain/sounds.rs`. A bench test that
+played every recording in turn showed them playing cleanly and in step with the left lamp;
+the show itself plays them now, through `brain/src/mouth_show.rs`. The lamps' PWM is at
+20 kHz, above what leaked into the audio at 1 kHz.
 
 - [ ] The 4G dongle's transmit bursts, a "ticka-ticka-ticka" under the sound that stops with
       the dongle out. Cable management: the dongle on a shielded USB extension, out of the
@@ -337,30 +339,24 @@ chunk 5.
 
 *The show is where everything meets: it needs chunks 2 and 3, and 4.1–4.3.*
 
-- [ ] `brain/src/heart.rs`: the oscillator — phase, period set per beat, the rate gliding
-      toward its target through `cortex::envelope::Envelope` with `RATE_TAU` both ways,
-      started at `REST_BPM`; the rose's dimmer read from `sounds::HEARTBEAT.envelope` by frames
-      since the beat, `ROSE_FLOOR` below it; `Mouth::play` on each beat. The bench test in
-      `mouth_show.rs` gives way to it.
-- [ ] `brain/src/presence.rs`: one distance, the eyeball's, stale → the tombstone; the two
-      debounces `SCARE_CONFIRM_SECS` and `LEAVE_SECS`, and what arms the scare, as the open
-      question settles it; publish `brain/presence` as the distance in paths, rounded to a
-      hundredth, or `tombstone`, when it changes.
-- [ ] `brain/src/show.rs`, replacing the placeholder: the Director with the six states of
-      [`SHOW.md`](SHOW.md) §2, the timers, the owl, test mode (chord; the right button fires
-      the scare on press from any state, restarting one in progress; the left button is only
-      half the chord; 15-minute timeout), the lamps: dark outside test mode, both lit in it,
-      and the buttons dead outside it but for the chord. The constants of §10 with their
-      reasons. The heart's target rate is linear in distance over `HEART_RANGE`, clamped, and
-      rests on the tombstone; there is no state for someone being in the yard. The
-      thunderclap's hops and the owl's gaps come from `cortex::draw::Draw`, keyed on the
-      state's start, the head and the hop's number, so each head has its own stream. A hop is
-      uniform over the disc (radius `√u · R`, not `u · R`, or they cluster at the centre),
-      added to the preset's pose in degrees, clamped to the head's travel, and sent with
-      `Slew::jump`. A disc in pan and tilt is an ellipse in the yard, narrower in pan the more
-      steeply a head looks down; the old dance's `on_ball` corrected for that, and nothing
-      here needs it exact.
-- [ ] Per state, what goes into the frame — asking the patch for the rose, white, open and
+Done and running, tried at the bench from the door: the Director in `brain/src/show.rs` with
+its seven states, the timers,
+the owl, test mode and the constants; the heart in `heart.rs`; presence in `presence.rs`, its
+debounces and arming, with the yard empty outside test mode and the left button stepping it
+inside; the show's sounds in `mouth_show.rs`; the face's left lamp as the rose and its right
+lamp as test mode; `brain/show`, `brain/testmode`, `brain/presence` and the `show: a → b —
+why` lines.
+
+- [ ] Presence from the eyeball once chunk 3 lands: its distance in place of the tombstone
+      outside test mode, stale after `EYEBALL_STALE_SECS` → the tombstone.
+- [ ] The thunderclap's hops: from `cortex::draw::Draw`, keyed on the state's start, the
+      head and the hop's number, so each head has its own stream. A hop is uniform over the
+      disc (radius `√u · R`, not `u · R`, or they cluster at the centre), added to the
+      preset's pose in degrees, clamped to the head's travel, and sent with `Slew::jump`. A
+      disc in pan and tilt is an ellipse in the yard, narrower in pan the more steeply a head
+      looks down; the old dance's `on_ball` corrected for that, and nothing here needs it
+      exact. The head constants of [`SHOW.md`](SHOW.md) §10 with their reasons.
+- [ ] Per state, what goes into the frame for the heads and the wash — asking the patch for the rose, white, open and
       strobe bands, never a byte. "Dark" is dimmer 0 with the strobe channel open. Every
       head's `Light Strips`, `Automatic Mode` and `Reset` are parked in every state.
 
@@ -370,11 +366,9 @@ chunk 5.
   | `idle` | `ROSE_HEAD`: "Rose", gobo Rose, `ROSE_COLOUR`, dimmer = heart envelope paced by the distance, held dark for the first `BUILDUP_SECS` after `respite` while the heads travel; others dark | off | heartbeat on each beat; owls |
   | `cut` | dark; still on "Rose" | off | mute |
   | `buildup` | "Thunderclap", gobo Open, colour White, motor speed fastest, dark | off | mute |
+  | `lightning` | dimmer full, open, still | off | silent |
   | `thunderclap` | dimmer full, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, others open; each head hops every `THUNDER_HOP_SECS` to a fresh uniform point inside `THUNDER_RADIUS_DEG` of its "Thunderclap" pose, motor speed fastest | off | thunderclap |
   | `respite` | dark, on "Thunderclap" | `DOOR_AMBER` | silent |
-
-- [ ] `brain/show` and `brain/testmode` retained; the `show: a → b — why` log
-      lines.
 
 **Landed when**, at the bench, the scare runs from the cabinet door in test mode from every
 state, as [`SHOW.md`](SHOW.md) §16 step 6: the bench head shows the rose, cuts, moves and

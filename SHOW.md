@@ -29,7 +29,7 @@ The rig runs to a fixed list of shows in local time (`brain/shows.rs`), in one s
 a time, chosen each frame by the show state machine — the brain's Director: test mode first,
 then the calendar, then, inside a show, presence and the timers. Outside a show, and inside one
 until civil dusk, the state is `blackout`: dark and silent. From dusk to the show's end it is
-one of the five below. A show is listed from the morning, so the rig is up and reporting all
+one of the six below. A show is listed from the morning, so the rig is up and reporting all
 day and the show proper starts by itself when it is dark enough.
 
 The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
@@ -40,6 +40,7 @@ and runs on unchanged underneath a stop.
 | `idle` | the rose on the path, pulsing with a heartbeat that quickens as someone comes up the path; owls | someone reaches the trigger line |
 | `cut` | nothing: blackout and silence, hard | `CUT_SECS` have passed |
 | `buildup` | still nothing, but the heads are heard turning | `BUILDUP_SECS` have passed |
+| `lightning` | a flash, before anything is heard | `LIGHTNING_SECS` have passed: two frames |
 | `thunderclap` | the heads white, two strobing, two steady; the thunderclap | the recording ends |
 | `respite` | the heads dark; the front door amber | the yard is empty |
 
@@ -47,15 +48,15 @@ There is no state for "someone is in the yard": the heart's pace is a function o
 distance, and an empty yard is simply the distance at which it rests. A state boundary there
 would need a debounce of its own and would say nothing the distance does not.
 
-`cut` → `buildup` → `thunderclap` → `respite` is one sequence, the scare; it is three states
-rather than one because every consumer matches them exhaustively, test mode can watch each,
-and `brain/show` says which is running. From `respite` the show returns to `idle`.
+`cut` → `buildup` → `lightning` → `thunderclap` → `respite` is one sequence, the scare; it is
+several states rather than one because every consumer matches them exhaustively, test mode can
+watch each, and `brain/show` says which is running. From `respite` the show returns to `idle`.
 
 The state is published retained on every change:
 
 | topic | values |
 |---|---|
-| `brain/show` | `blackout`, `idle`, `cut`, `buildup`, `thunderclap` or `respite` |
+| `brain/show` | `blackout`, `idle`, `cut`, `buildup`, `lightning`, `thunderclap` or `respite` |
 | `brain/testmode` | whether test mode is on |
 | `brain/presence` | the distance the show decided on this frame, in paths, or `tombstone` — see [§6](#6-presence-one-distance) |
 
@@ -64,7 +65,8 @@ The log has a `show: …` line for each change of the show state, with what caus
 ```
 show: idle → cut — the furthest at -0.02, past the trigger line
 show: cut → buildup
-show: buildup → thunderclap
+show: buildup → lightning
+show: lightning → thunderclap
 show: thunderclap → respite — the recording ended
 show: respite → idle — the yard has been empty for 3.0 s
 ```
@@ -114,6 +116,11 @@ feedback from a head, so the state is a timer: `BUILDUP_SECS` is measured on the
 move from "Rose" to "Thunderclap" plus a margin, and the two presets are aimed so that move is
 one a cheap head completes in it. Which is why the parked heads in "Rose" tilt into the
 balcony rather than away from it.
+
+**`lightning`, two frames.** Everything at full for `LIGHTNING_SECS`, still silent. The
+thunderclap is cued on the frame after
+and is heard a buffer later, so the flash leads the crack by about 60 ms, the way lightning
+does.
 
 **`thunderclap`, the length of the recording.** The heads light white: `STROBE_HEADS` strobe
 at `STROBE_RATE` through their shutter channel, the other two are steady, all at full. The
@@ -175,13 +182,15 @@ eyeball does is in [§14](#14-the-eyeball).
 The two green lamps in the door's buttons are patched as the `Face` fixture and follow the
 frame like any other, so a takeover and the e-stop reach them with no special case.
 
-| | both lamps |
-|---|---|
-| normally | dark |
-| test mode | lit |
+| | left lamp | right lamp |
+|---|---|---|
+| normally | the rose | dark |
+| test mode | the rose | lit |
 
-Outside test mode the door is dark and its buttons do nothing but enter it: a lit lamp means
-the rig is not on the calendar, and nothing else.
+The left lamp is the rose's level, whether or not the heads are driven: the heartbeat's pulse
+in `idle`, the flash and the thunderclap's envelope in the scare, dark otherwise. So the show
+can be watched against the sound from the door. The right lamp lit means test mode, and so
+that the rig is not on the calendar; outside test mode the buttons do nothing but enter it.
 
 ## 8. Test mode is on the door, not on a console
 
@@ -190,22 +199,24 @@ buttons can take the show over:
 
 | | |
 |---|---|
-| hold both buttons for 2 s | test mode on, in the current show state; both lamps light |
-| right button, on press | the scare, from wherever the show is: `cut` → `buildup` → `thunderclap` → `respite` |
-| hold both buttons for 2 s again | test mode off; the calendar has the show again |
+| hold both buttons for 2 s | test mode on, in the current show state, or `idle` from `blackout`; the right lamp lights |
+| right button, on press | the scare, from wherever the show is: `cut` → `buildup` → `lightning` → `thunderclap` → `respite` |
+| left button, on press | presence, in turn: nobody, someone halfway up the path (0.5), someone just short of the trigger line (0.1) |
+| hold both buttons for 2 s again | test mode off; the calendar has the show again, and the yard is empty |
 
 The right button fires the scare the moment it goes down, whatever state the show is in —
-mid-scare included, which restarts it from `cut`. Nothing else changes in test mode: the
-states end the way they always do, `respite` on an empty yard, `idle` on the trigger line,
-and the heart follows presence, so with nobody in the yard it runs at rest. The left button
-has no job of its own; it is half of the chord. The e-stop still wins, as it wins over
-everything.
+mid-scare included, which restarts it from `cut`. The left button stands in for the eyeball,
+which is not built yet: outside test mode the yard is empty. Its nearest step is short of the
+line, so it quickens the heart to nearly the scare rate and never scares by itself. Nothing
+else changes in test mode: the states end the way they always do, `respite` on an empty yard,
+`idle` on the trigger line, and the heart follows presence. The e-stop still wins, as it wins
+over everything.
 
-One consequence of firing on press: leaving test mode is a chord, and if the right button
-goes down first the scare fires before the chord is recognised. Press the left button first,
-or accept one last scare on the way out.
+One consequence of acting on press: a chord counts a press of the button it was begun with.
+Begin it with the left button, which only steps presence, or accept one last scare on the way
+out.
 
-Test mode ends itself after fifteen minutes without a press, because a rig left in it would
+Test mode ends itself after fifteen minutes without a chord, because a rig left in it would
 ignore the calendar unattended.
 
 ## 9. The presets
@@ -235,6 +246,7 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `OWL_MIN_SECS`, `OWL_MAX_SECS` | 45 s, 120 s | the gap between owls |
 | `SCARE_CONFIRM_SECS`, `LEAVE_SECS` | 0.2 s, 3 s | the two debounces on presence: into the scare, out of respite |
 | `CUT_SECS`, `BUILDUP_SECS` | 1 s, 1 s | the two dark seconds; `BUILDUP_SECS` is measured, see [§16](#16-commissioning) |
+| `LIGHTNING_SECS` | 50 ms | the flash before the thunderclap: two frames |
 | `STROBE_HEADS`, `STROBE_RATE` | heads 2 and 3, fast | which heads strobe in the thunderclap |
 | `THUNDER_RADIUS_DEG`, `THUNDER_HOP_SECS` | 15°, 0.4 s | the circle each head hops around in the thunderclap, and how often it hops |
 | `DOOR_AMBER` | (255, 110, 0) | the door, as R, G, B on the wash |
@@ -421,7 +433,7 @@ telemetry only — the show never sees a count), `eyeball/camera` (`ok`, or why 
 
 ```
 CITY = "Delft"
-("2026-10-26 09:00", "2026-10-26 22:00")      // test day
+("2026-10-27 09:00", "2026-10-27 22:00")      // test day
 ("2026-10-31 09:00", "2026-10-31 22:00")      // Halloween
 ```
 

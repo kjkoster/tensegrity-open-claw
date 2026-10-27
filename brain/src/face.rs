@@ -6,12 +6,11 @@
 //! from the frame that actually goes out. So a console that takes the rig over drives them,
 //! and the e-stop darkens them with everything else.
 //!
-//! Holding both buttons for two seconds is a chord. A right press is counted the moment the
-//! button goes down, so it acts at once; the price is that a chord begun with the right button
-//! counts a press too, so a chord is best begun with the left one. Presses and chords are
-//! counters rather than flags, so a show that reads the state once per frame cannot miss one
-//! that came and went between two frames. The left button has no job of its own: it is half
-//! of the chord.
+//! Holding both buttons for two seconds is a chord. A press is counted the moment its button
+//! goes down, so it acts at once; the price is that a chord counts a press of the button it was
+//! begun with too. Presses and chords are counters rather than flags, so a show that reads the
+//! state once per frame cannot miss one that came and went between two frames. What a press
+//! means is the show's to say.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
@@ -65,7 +64,8 @@ pub struct FaceState {
     /// Chords so far. Like the presses below, a count whose differences are what mean
     /// anything.
     pub chords: u32,
-    /// Right presses so far, each counted as the button settles down.
+    /// Presses of each button so far, each counted as the button settles down.
+    pub left_presses: u32,
     pub right_presses: u32,
 }
 
@@ -172,6 +172,7 @@ pub fn claim(telemetry: Publisher, frames: LatestRx<Frame>) -> (Face, LatestRx<F
     let state = FaceState {
         estop: contacts.decide(&telemetry),
         chords: 0,
+        left_presses: 0,
         right_presses: 0,
     };
     let (states, state_reader) = latest(state);
@@ -228,7 +229,9 @@ async fn input_task(mut face: Face) -> ! {
             estop_quiet = 0;
         }
 
-        face.left_button.poll(&face.telemetry);
+        if face.left_button.poll(&face.telemetry) && face.left_button.pressed() {
+            face.state.left_presses = face.state.left_presses.wrapping_add(1);
+        }
         if face.right_button.poll(&face.telemetry) && face.right_button.pressed() {
             face.state.right_presses = face.state.right_presses.wrapping_add(1);
         }
