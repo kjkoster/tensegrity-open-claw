@@ -43,14 +43,24 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
 // ── Telemetry (the broker) ───────────────────────────────────────────────────
 // Stem owns the broker; every daemon holds its own client and announces itself under
-// `health/`. Loopback, because the broker is on this Pi — what reaches the tunnel and the AP
-// is the broker's own listener, which is Stem's configuration to make, not this process's to
-// decide. The port and the keepalive are the rig's, in the `stem` crate.
-pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::LOCALHOST;
+// `health/`. The broker runs on memory-pi, beside the recordings, at the fixed address it sets
+// itself on this Pi's access point, so the Pi that drives the show carries none of the
+// telemetry. The port and the keepalive are the rig's, in the `stem` crate.
+pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 0, 10, 2);
 
-// How long to wait for the CONNACK before treating the broker as unusable. Generous: it is a
-// loopback handshake, and the only thing that makes it slow is a broker still starting up.
+// How long a connection attempt may take before it counts as failed and backs off. The broker
+// is across the WiFi, and a memory-pi that is off would otherwise leave the attempt to the
+// kernel's own SYN retries, the better part of two minutes.
+pub const MQTT_CONNECT_TIMEOUT_S: u64 = 5;
+
+// How long to wait for the CONNACK before treating the broker as unusable. Generous: the only
+// things that make it slow are a broker still starting up and a WiFi link catching up.
 pub const MQTT_CONNACK_TIMEOUT_S: u64 = 5;
+
+// How long a write may block before the broker counts as gone. Writes land in the socket
+// buffer and return at once while the broker keeps up; one that blocks this long is writing to
+// a peer that is no longer reading.
+pub const MQTT_WRITE_TIMEOUT_S: u64 = 5;
 
 // Messages that may sit queued for the telemetry thread. Deliberately shallow — the queue
 // exists so the frame loop never waits on a socket, not so telemetry survives an outage, and

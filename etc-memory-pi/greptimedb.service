@@ -11,6 +11,13 @@ User=greptime
 Group=greptime
 Restart=always
 RestartSec=5
+# The broker comes first on a 1 GB Pi. When memory runs out, the kernel kills Greptime before
+# the broker: no memory cap is possible, because the Pi's kernel ships with the memory cgroup
+# controller off. Its disk waits on everyone else's, and its CPU comes after the broker's and
+# the health daemon's.
+OOMScoreAdjust=500
+Nice=15
+IOSchedulingClass=idle
 
 [Install]
 WantedBy=multi-user.target

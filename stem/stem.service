@@ -1,16 +1,18 @@
 [Unit]
 Description=Tensegrity Stem Health Daemon
-After=network.target
-# Wanted, not Required: a broker that is down must leave Stem running and publishing nothing,
+# Ordered after the network so that its goodbye leaves before the network goes. Nothing waits
+# for the broker: a broker that is down must leave Stem running and publishing nothing,
 # because a health daemon that exits when the transport fails is silent in precisely the
 # situation it exists for.
-Wants=mosquitto.service
-After=mosquitto.service
+After=network.target
 
 [Service]
 # Its own venv, not a shared one. Stem must not inherit another daemon's dependencies — it has to
 # keep reporting when that daemon is exactly what has gone wrong.
 ExecStart=/opt/stem/venv/bin/python3 /usr/local/bin/stem.py
+# The broker is Stem's, but runs on memory-pi, at the address it sets itself on the access
+# point.
+Environment=RIG_MQTT_HOST=10.0.10.2
 Restart=always
 RestartSec=5
 # No WatchdogSec, and Stem pets nothing. Its death costs telemetry and must never cost uptime,

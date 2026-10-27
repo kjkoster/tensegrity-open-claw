@@ -23,6 +23,7 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 #   etc/claw-wifi.env   the rig's WiFi, which claw-pi's access point is built from too
 #   etc/deploy-lib.sh   what both Pis' remote deploys share
 #   stem/rig_*.py       Stem's shared modules: the MQTT conventions and the board readers
+#   stem/stem.conf      Stem's broker configuration: the broker runs on memory-pi
 #
 # --delete, so a file removed here also leaves the Pi rather than lingering there to be
 # installed by a remote-deploy.sh that no longer knows about it.
@@ -33,7 +34,7 @@ step "rsync configuration to $PI:$PI_DIR"
 ssh "$PI" "mkdir -p $PI_DIR/etc-memory-pi $PI_DIR/etc $PI_DIR/stem"
 rsync -az --checksum --delete "etc-memory-pi/" "$PI:$PI_DIR/etc-memory-pi/"
 rsync -az --checksum "etc/claw-wifi.env" "etc/deploy-lib.sh" "$PI:$PI_DIR/etc/"
-rsync -az --checksum "stem/rig_mqtt.py" "stem/rig_board.py" "$PI:$PI_DIR/stem/"
+rsync -az --checksum "stem/rig_mqtt.py" "stem/rig_board.py" "stem/stem.conf" "$PI:$PI_DIR/stem/"
 
 # --- Install on the Pi ----------------------------------------------------
 step "run remote deploy on $PI"

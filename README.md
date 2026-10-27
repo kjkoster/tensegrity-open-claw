@@ -249,9 +249,11 @@ DMX **OUT** of the last device on the bus.
 - `sudo systemctl enable --now brain` / `sudo systemctl restart brain`.
 - **Disabled** for the DMX serial to work: `serial-getty@ttyAMA0.service`, `hciuart`.
 
-`remote-deploy.sh` also installs `stem.service`, the broker's `stem.conf`, the 4G watchdog's
-unit and timer (above), and the access point's and wired segment's NetworkManager profiles,
-which it brings up (see [Networking](#networking)).
+`remote-deploy.sh` also installs `stem.service`, the 4G watchdog's unit and timer (above), and
+the access point's and wired segment's NetworkManager profiles, which it brings up (see
+[Networking](#networking)). Stem's broker is not on this Pi: it runs on
+[`memory-pi`](#the-memory-pi-memory-pi), at `10.0.10.2`, where the brain and Stem's daemon
+report to it across the access point.
 
 ## Build & deploy
 
@@ -472,9 +474,9 @@ like the stop rather than like a homing command.
 
 # The memory Pi (`memory-pi`)
 
-A Pi 3B in the cabinet that records everything published on the broker into GreptimeDB on an
-external SSD, and shows it in Grafana. Why it is built this way is in [`DESIGN.md`](DESIGN.md)
-§3.9.
+A Pi 3B in the cabinet that runs Stem's broker, records everything published on it into
+GreptimeDB on an external SSD, and shows it in Grafana. Why it is built this way is in
+[`DESIGN.md`](DESIGN.md) §3.9.
 
 ## Access
 
@@ -483,17 +485,54 @@ external SSD, and shows it in Grafana. Why it is built this way is in [`DESIGN.m
 - `wlan0` at **`10.0.10.2/24`**, set on the Pi itself by `etc-memory-pi/claw.nmconnection`, no
   DHCP. It is the Pi's only network; `claw-pi`'s access point routes it out over 4G.
 
+## Setting up a fresh `memory-pi`
+
+Headless, in the cabinet; a monitor is the last resort, after rewriting the card. The deploy
+does the rest, so the card only has to get the Pi onto the access point once:
+
+- **Write the card with Raspberry Pi Imager**: 64-bit Raspberry Pi OS Lite, hostname
+  `memory-pi`, user `kjkoster` with the Mac's public key, SSH with key login only, WiFi
+  `closed claw DMX` with its passphrase from `etc/claw-wifi.env`, and the country `NL`, without
+  which the radio stays blocked.
+- **Power it up with `claw-pi` already running**, so the access point is there for the first
+  boot. It takes a DHCP address from `.100`–`.199`; find it on `claw-pi`:
+  `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases`
+- **Format the SSD**, once, if it is new or wiped — ext4, labelled `memory`, which erases it:
+  `sudo mkfs.ext4 -L memory /dev/sda1`
+- **Deploy** with the alias pointed at that DHCP address for now. The deploy installs the
+  repo's WiFi profile, which takes `10.0.10.2` at the next boot, and everything else:
+  `./deploy-memory-pi.sh`, then `ssh memory-pi sudo reboot`, then the alias back to
+  `10.0.10.2`.
+- **Remove Imager's network profiles**, which the repo's outranks but which would otherwise
+  linger, including a DHCP one for `eth0`:
+  `sudo rm /etc/netplan/90-NM-*.yaml && sudo netplan generate && sudo nmcli connection reload`
+
+The first deploy downloads Greptime's release and the Grafana package over 4G; see
+[Deploy](#deploy) below.
+
 ## What runs
 
 | Unit | What | Installed from |
 |---|---|---|
+| `mosquitto.service` | Stem's broker, on port `1883` of every interface: loopback, and `10.0.10.2` for `claw-pi` and the access point | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
 | `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `etc-memory-pi/memory.py`, venv in `/opt/memory/venv` |
 | `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, on loopback alone: HTTP `4000`, gRPC `4001`, MySQL `4002` | the release pinned in `etc-memory-pi/greptime.version`, unpacked to `/opt/greptimedb` |
 | `recorder.service` | every live message into Greptime's `rig` database | `etc-memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
 | `grafana-server.service` | Grafana on `127.0.0.1:3000` | Grafana's apt repository, with the settings drop-in and data source from `etc-memory-pi/grafana/` |
 
 Every one of them reconnects for as long as it takes: both Pis power up together, and
-`memory-pi` is up long before `claw-pi`'s access point.
+`memory-pi` is up long before `claw-pi`'s access point. The broker comes first: Greptime and
+Grafana run at `Nice=15`, Greptime's disk at idle priority, and `OOMScoreAdjust=500` has the
+kernel kill one of them, not the broker, when memory runs out. They cannot be capped in
+memory, because the Pi's kernel ships with the memory cgroup controller off
+(`cgroup_disable=memory`); Grafana is kept small with `GOMEMLIMIT=200MiB` instead.
+
+To watch the broker from the Mac, forward it over the jump:
+
+```
+ssh -L 1883:localhost:1883 memory-pi
+mosquitto_sub -h localhost -v -t '#'
+```
 
 ## Deploy
 
@@ -503,8 +542,8 @@ From the Mac at the repo root:
 ./deploy-memory-pi.sh
 ```
 
-Rsyncs `etc-memory-pi/`, `etc/claw-wifi.env`, `etc/deploy-lib.sh` and Stem's `rig_mqtt.py`
-and `rig_board.py` to `memory-pi:tensegrity-open-claw/`, then runs
+Rsyncs `etc-memory-pi/`, `etc/claw-wifi.env`, `etc/deploy-lib.sh` and Stem's `rig_mqtt.py`,
+`rig_board.py` and `stem.conf` to `memory-pi:tensegrity-open-claw/`, then runs
 `etc-memory-pi/remote-deploy.sh` there. It assumes a fresh Pi and removes nothing, and it
 never touches `claw-pi`, as `deploy.sh` never touches `memory-pi`.
 

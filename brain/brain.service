@@ -1,11 +1,10 @@
 [Unit]
 Description=Tensegrity Brain Daemon
+# Ordered after the network so that systemd stops the brain first: the broker is on memory-pi,
+# across the access point, and a network taken down ahead of the brain would leave its
+# goodbye unsaid and an orderly reboot reading as a crash. Nothing waits for the broker: one
+# that is down or not up yet costs telemetry and never the show.
 After=network.target
-# Ordered after the broker so that systemd stops the brain first: a broker stopped ahead of it
-# never hears the goodbye, and an orderly reboot reads as a crash. Wanted, not Required — a
-# broker that is down must cost telemetry and never the show.
-Wants=mosquitto.service
-After=mosquitto.service
 
 [Service]
 ExecStart=/usr/local/bin/brain

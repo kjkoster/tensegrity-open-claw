@@ -61,29 +61,7 @@ sudo nmcli connection reload
 sudo nmcli connection up claw-ap
 sudo nmcli connection up claw-eth0
 
-# --- Stem's broker ---------------------------------------------------------
-# Before anything that reports to it. Every daemon on this rig holds its own client
-# connection and announces itself on `health/`, so the broker is not one more service among
-# them — it is the thing that lets the rest of this script be watched while it runs. Bringing
-# it up ahead of the build also means a build that fails leaves the rig's telemetry intact
-# rather than taking it down with the deploy.
-#
-# The config is versioned here and the package is not installed from here: `apt install
-# mosquitto` is a one-time act on a new Pi, while this file changes with the rig. A Pi without
-# the package is a Pi whose rig still has to come up, so its absence is reported rather than
-# repaired — telemetry is observability, and observability is never a reason to fail a deploy.
-step "install Stem's broker configuration"
-if [ -d /etc/mosquitto/conf.d ]; then
-    sudo install -m 0644 "$REPO/stem/stem.conf" /etc/mosquitto/conf.d/stem.conf
-    sudo systemctl enable mosquitto
-    if sudo systemctl restart mosquitto; then
-        echo "broker restarted"
-    else
-        echo "WARNING: mosquitto did not start — journalctl -u mosquitto -n 40"
-    fi
-else
-    echo "mosquitto not installed — skipping (sudo apt install mosquitto mosquitto-clients)"
-fi
+# Stem's broker is not installed here: it runs on memory-pi, deployed by deploy-memory-pi.sh.
 
 # --- Build brain natively on the Pi ---------------------------------------
 step "build brain"

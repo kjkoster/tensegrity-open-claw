@@ -53,6 +53,23 @@ else
     echo "/tank mounted now"
 fi
 
+# --- Stem's broker -------------------------------------------------------------
+# Before anything that reports to it: every daemon on the rig holds its own client connection
+# and announces itself on `health/`. Debian's Mosquitto, installed when missing, with the rig's
+# settings as an overlay in its include directory, so an upgrade cannot revert them. The
+# clients come with it, for `mosquitto_sub` on the Pi itself.
+step "install and restart Stem's broker"
+if dpkg-query -W -f='${Status}' mosquitto 2>/dev/null | grep -q "install ok installed"; then
+    echo "mosquitto already installed"
+else
+    sudo apt-get update
+    sudo apt-get install -y mosquitto mosquitto-clients
+fi
+sudo install -m 0644 "$REPO/stem/stem.conf" /etc/mosquitto/conf.d/stem.conf
+sudo systemctl enable mosquitto
+sudo systemctl restart mosquitto
+echo "broker restarted"
+
 # --- Health daemon -----------------------------------------------------------
 # rig_mqtt.py and rig_board.py are Stem's, shipped here by deploy-memory-pi.sh. They install
 # beside their importer, as on claw-pi: the daemon is run by absolute path, which puts

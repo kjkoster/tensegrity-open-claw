@@ -242,10 +242,14 @@ fn session(
     backoff_s: &mut u64,
 ) -> std::io::Result<()> {
     let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, stem::PORT);
-    let mut stream = TcpStream::connect(address)?;
+    let mut stream = TcpStream::connect_timeout(
+        &address.into(),
+        Duration::from_secs(cfg::MQTT_CONNECT_TIMEOUT_S),
+    )?;
     // Nagle would hold a small publish back waiting for company that never comes; these are
     // one-datagram-sized messages seconds apart.
     stream.set_nodelay(true)?;
+    stream.set_write_timeout(Some(Duration::from_secs(cfg::MQTT_WRITE_TIMEOUT_S)))?;
 
     stream.write_all(&stem::connect(service))?;
     read_connack(&mut stream)?;
@@ -263,6 +267,12 @@ fn session(
     // Half the keepalive: the broker drops a client at 1.5× the interval it was given, so
     // pinging twice per interval means one lost ping is not a disconnection.
     let tick = Duration::from_secs(u64::from(stem::KEEPALIVE_S) / 2);
+    // The client's side of the same rule. A broker across the WiFi can vanish without a word —
+    // memory-pi losing power — and writes into its dead connection keep succeeding into the
+    // socket buffer for many minutes. Each ping's answer is read at the next ping's drain, so a
+    // slow link costs nothing; two pings in a row with nothing read back mean the broker has
+    // gone, and the session ends so the reconnect can begin.
+    let mut unanswered = 0;
     loop {
         match incoming.recv_timeout(tick) {
             Ok(Command::Publish(message)) => {
@@ -297,7 +307,17 @@ fn session(
             // ever answered, keeps the drain's wait off every publish.
             Err(RecvTimeoutError::Timeout) => {
                 stream.write_all(&stem::PINGREQ)?;
-                drain(&mut stream)?;
+                if drain(&mut stream)? {
+                    unanswered = 0;
+                } else {
+                    unanswered += 1;
+                    if unanswered >= 2 {
+                        return Err(std::io::Error::new(
+                            ErrorKind::TimedOut,
+                            "broker stopped answering pings",
+                        ));
+                    }
+                }
             }
             // Every sender is gone, so nothing will be said any more, the goodbye included.
             // Waiting on would return at once, every time.
@@ -307,13 +327,15 @@ fn session(
 }
 
 /// Reads and discards whatever the broker sent — PINGRESPs, only — and notices a close.
+/// Returns whether anything arrived, which is how a broker that has gone silent is noticed.
 ///
 /// Unread bytes are not free: a PINGRESP every fifteen seconds fills the receive buffer over
 /// days, the TCP window shuts, and the broker eventually blocks writing to a client that was
 /// never listening. Draining is what keeps a publish-only client honest.
-fn drain(stream: &mut TcpStream) -> std::io::Result<()> {
+fn drain(stream: &mut TcpStream) -> std::io::Result<bool> {
     stream.set_read_timeout(Some(DRAIN_TIMEOUT))?;
     let mut scratch = [0u8; 64];
+    let mut heard = false;
     loop {
         match stream.read(&mut scratch) {
             Ok(0) => {
@@ -322,9 +344,9 @@ fn drain(stream: &mut TcpStream) -> std::io::Result<()> {
                     "broker closed the connection",
                 ));
             }
-            Ok(_) => continue,
+            Ok(_) => heard = true,
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
-                return Ok(());
+                return Ok(heard);
             }
             Err(e) => return Err(e),
         }

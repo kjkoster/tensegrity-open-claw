@@ -731,9 +731,12 @@ each state again each time; empty payloads, which delete a retained topic rather
 anything; and anything before the clock has synchronised once, which would be filed under the
 stale time the Pi booted with.
 
-**The broker comes first.** Greptime and Grafana are capped in memory and run at a lower
-priority, Greptime's writes waiting on everyone else's disk, so a compaction or a heavy
-dashboard can never take the broker down with it on a 1 GB Pi.
+**The broker comes first.** Greptime and Grafana run at a lower priority, Greptime's writes
+waiting on everyone else's disk, and are the first the kernel kills when memory runs out, so
+a compaction or a heavy dashboard can never take the broker down with it on a 1 GB Pi. They
+are not capped in memory: the Pi's kernel ships with the memory cgroup controller off, and
+turning it on is a boot parameter on a file the repo cannot own. Grafana, a Go program that
+otherwise holds on to what it freed, is kept small with a Go memory limit instead.
 
 **The SSD carries the recordings only.** `memory-pi` boots from its SD card and mounts the SSD
 on `/tank` with `nofail` and a short device timeout, so a missing SSD costs the recordings and

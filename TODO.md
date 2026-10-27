@@ -88,6 +88,39 @@ half; one broker connection, with the face publishing through it; and the worksp
 this show's fixtures, with no scenes yet. The previous show is the `2026-10-23-ADE-Amsterdam`
 tag.
 
+- [ ] **The Pis' power.** `get_throttled` reports under-voltage and throttling since boot
+      (`0x50000`) on `claw-pi` nearly idle, and the eyeball's three cores of detector in
+      chunk 3 will draw more. `claw-pi` and `memory-pi` both move off the USB hub's charge
+      port onto the Durata multiport charger (5 V, 4.4 A across its ports), each on a short,
+      thick lead; the SSD stays on `memory-pi`'s USB. Its 5.0 V leaves less margin above the
+      Pis' 4.63 V under-voltage threshold than an official 5.1 V supply, so the leads matter.
+      Both must then run under load without under-voltage, watched on
+      `stem/throttling/now/under_voltage` and `memory/throttling/now/under_voltage` — before
+      the eyeball's timing means anything. OWNED-DEVICES.md's hub, charger and `memory-pi`
+      rows change with it.
+- [ ] **`memory-pi` hangs at power-up, at random.** Red and green both lit solid, stuck before
+      Linux starts, so no software on it can help; a soft reboot never does it. First, about
+      five power cycles without the SSD: if every one boots, the SSD's start-up draw dipping
+      the 5 V is the cause. Then a buffer capacitor, which is fitted in any case: a low-ESR
+      electrolytic of 1000–2200 µF across 5 V and GND on the GPIO header — pin 2 or 4 to
+      pin 6, after the Pi's input fuse — with the polarity right. Not on the 4-pin PoE
+      header, which carries the Ethernet pairs, not 5 V. If it still hangs without the SSD, the
+      cap does not answer it: try another supply, then another SD card, and otherwise move the
+      card and the SSD to the spare Pi 4.
+- [ ] **`claw-pi`'s cellular profile into the repo**, the one NetworkManager profile there the
+      repo does not carry. Only when a 4G drop is affordable: every connection to both Pis
+      runs over it. The profile today is APN `internet`, no PIN, DHCP for IPv4 and IPv6, and
+      no routing metrics; the 4G watchdog works on the modem device, not the profile's name,
+      so renaming it is safe.
+      - `etc/claw-cellular.nmconnection`, named like `claw-ap` and `claw-eth0`: `type=gsm`,
+        `apn=internet`, `ipv4.method=auto`, `ipv6.method=auto` as today. No `uuid`.
+      - `etc/remote-deploy.sh` installs it with the other profiles and reloads NetworkManager,
+        but never brings it up: a deploy over 4G arrives through it, and reactivating it would
+        cut the deploy off halfway. A change takes effect at the modem's next reconnect.
+      - Once, on `claw-pi`, after that deploy: `sudo nmcli connection delete cellular`.
+      - README.md's 4G warning box becomes a plain note that the profile is in the repo, and
+        says 4G is the default route because it is the only connection with a gateway; the
+        routing metrics it mentions do not exist.
 - [ ] The `stem` crate does without `alloc` wherever it can, for the firmware to come: the
       packets written into a caller's buffer rather than returned as a `Vec`.
 
@@ -173,14 +206,6 @@ rest of the brain and running as threads inside it. Nothing from the old code is
 the camera's VAPIX settings; `DESIGN.md` §3.6 describes it. All of it is tested at the bench,
 with the camera on the table plugged into the Pi; nothing here needs a show.
 
-- [ ] **The Pis' power, first.** `get_throttled` reports under-voltage and throttling since
-      boot (`0x50000`) with the Pi nearly idle; three cores of detector will draw more.
-      `claw-pi` and `memory-pi` both move off the USB hub's charge port onto the Durata
-      multiport charger (5 V, 4.4 A across its ports), each on a short, thick lead. Its 5.0 V
-      leaves less margin above the Pis' 4.63 V under-voltage threshold than an official 5.1 V
-      supply, so the leads matter. Before the timing below means anything, both must run
-      under load without under-voltage — `stem/throttling/` and `memory/throttling/` watched
-      after.
 - [ ] **What the Pi manages.** The Pi is a 3B+ on 64-bit Trixie, so `ort`'s prebuilt
       ONNX Runtime fits; 905 MB of RAM and 1.8 GB free on the root partition. Download
       `yolox_nano.onnx` from the YOLOX `0.1.1rc0` release assets and commit it to
