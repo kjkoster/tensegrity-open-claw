@@ -39,7 +39,8 @@ Each is a choice, written down so it can be changed on purpose.
 | The tombstone | `+∞`. An empty yard is infinitely far; every comparison then falls the safe way, and there is no magic number. | `NaN`: compares false both ways, which is a footgun; a sentinel like `-1`: collides with a real negative distance past the line. |
 | Where the mouth runs | Its own crate, `mouth/`, running as a thread in the brain like the ear was, fed by a latest-value seam from the show. The cut and the beat are frame-synchronous; a separate process would add a hop between them. `cortex` holds only what every rig shares. | Its own process (`DESIGN.md` §1.6): a dead DAC costs the sound either way, and the thread reports it. |
 | How the mouth hears a trigger | A counter per sound in the cue, and mute as a level. The mouth reads the latest cue every period, four or five times a frame, and only a counter that has moved reads once — the face's presses work the same way. | A list of triggers per frame: replayed on every period the frame is still the latest. |
-| How a recording becomes samples | The build writes each WAV's raw PCM to `OUT_DIR`; the generated source wraps `include_bytes!` of it in a 2-byte-aligned static and views it as `&'static [i16]` with `slice::from_raw_parts`, in a `const`. The Pi and WAV are both little-endian. | A `const fn` turning the bytes into an `[i16; N]`: hundreds of thousands of compile-time iterations for a thunderclap, which runs into rustc's `long_running_const_eval` lint. A literal array: megabytes of generated source. |
+| How a recording becomes samples | `mouth-build` decodes the file as it was found (`symphonia`), resamples it to 48 kHz (`rubato`), keeps it stereo, trims below −60 dB of its peak at both ends, normalises its peak to −0.3 dBFS less its gain, pads it to whole DMX frames, and writes the frames to `OUT_DIR` as little-endian bytes. The generated source views `include_bytes!` of them as `&'static [[u8; 4]]` with `as_chunks`, in a `static`, and the mixer reads each sample with `i16::from_le_bytes`. | Converting by hand into WAVs in a second directory: a step to forget, and a second copy of every recording. An aligned static viewed as `[i16]` with `slice::from_raw_parts`: `unsafe`, and the byte order implicit. A `const fn` turning the bytes into an `[i16; N]`: runs into rustc's `long_running_const_eval` lint. |
+| The volume of each recording | A gain in dB per recording in `brain/sounds.rs`, a `const` read by the build script, which applies it to the samples; the mixer only adds voices up. No master gain, the speakers' knobs set the whole. | A cargo feature: features are on-or-off and unify across the build, so they cannot carry a number. An environment variable: invisible in git, and different on every machine that builds. |
 | Telemetry clients inside the brain | One connection, the brain's. The face, the mouth and the eyeball publish their subtrees, `face/…`, `mouth/…` and `eyeball/…`, through it, and have no `health/` topic of their own. A client and a will are for a process that can die on its own: the brain, the ball, Stem. | A client each, as the face and the ear had: none can die without the brain, so their wills only repeat `health/brain`, at the cost of a connection, a thread and a farewell apiece. |
 | `rig-mqtt` is renamed `stem` | The crate is the Rust programs' view of Stem, the process they report to, so it is named for it and lives in `stem/` beside the daemon, the broker configuration and `rig_mqtt.py`, its Python half. It stays purely `no_std`, for firmware; the brain's client, which needs sockets and threads, stays in `cortex` as `cortex::telemetry`. | A directory of its own: Stem split across two places. The client inside the crate behind a `std` feature: std in a crate kept `no_std` for firmware. |
 | Which heads strobe | Heads 2 and 3, the inner pair; 1 and 4 steady. | Any pair. A constant. |
@@ -107,6 +108,10 @@ tag.
       header, which carries the Ethernet pairs, not 5 V. If it still hangs without the SSD, the
       cap does not answer it: try another supply, then another SD card, and otherwise move the
       card and the SSD to the spare Pi 4.
+- [ ] **`memory-pi` struggles and fails once running.** Unplugged on 2026-10-27, so until it
+      is back the rig has no broker and no recordings: every client retries with backoff and
+      the show runs on, unreported. Troubleshoot later, beside the hang at power-up and the
+      power item above, which may share a cause.
 - [ ] **`claw-pi`'s cellular profile into the repo**, the one NetworkManager profile there the
       repo does not carry. Only when a 4G drop is affordable: every connection to both Pis
       runs over it. The profile today is APN `internet`, no PIN, DHCP for IPv4 and IPv6, and
@@ -130,74 +135,30 @@ no `ear` and one telemetry thread.
 
 ## 2. Sound
 
-The recordings, compiled in, and the mouth that plays them. Tested on the placeholder show.
+The recordings, compiled in from `brain/sounds/` as they were found, and the mouth that plays
+them. Done and running: `mouth/`, `mouth-build/`, `brain/sounds.rs`, and a bench test in
+`brain/src/mouth_show.rs` that plays every recording in turn, a second's silence after each,
+with the face's left lamp following the envelope of the one playing. The recordings play
+cleanly and in step with the lamp, and the lamps' PWM is at 20 kHz, above what leaked into
+the audio at 1 kHz.
 
-- [ ] Post-process the recordings in `audio/` into `sounds/`. `audio/` holds them as found —
-      `heartbeat.mp3` (0.76 s, mono), `owl-screech-1.mp3` (3.1 s, stereo),
-      `thunderclap.mp3` (19.8 s, stereo), all MP3 at 44.1 kHz — and stays on the Mac;
-      `sounds/` holds what the build reads, and ships. For each:
-  - decode and convert to 48 kHz 16-bit mono WAV, `afconvert -f WAVE -d LEI16@48000 -c 1`;
-  - trim the leading silence, MP3's encoder delay included, so the first sample is the
-    sound: the heartbeat's lub lands on the beat and the thunderclap's crack on the light;
-  - the heartbeat: one lub-dub, as short as it will go, and its length against the open
-    question on it;
-  - the thunderclap: cut to the length the lit thunderclap should last, since the state lasts
-    exactly as long as the file — 19.8 s of strobe and hops is a long time — with a fade at
-    the end;
-  - the owl: a fade at each end, so it starts and stops without a click;
-  - peaks normalised to just under full scale, and the levels between them left to the gain
-    table.
+- [ ] The 4G dongle's transmit bursts, a "ticka-ticka-ticka" under the sound that stops with
+      the dongle out. Cable management: the dongle on a shielded USB extension, out of the
+      cabinet, somewhere with good reception so it transmits quietly; a short USB lead for
+      the io|2 with a ferrite at each end, its excess not coiled, on a hub port away from the
+      dongle; power, data and audio in separate bundles, crossing at right angles; shielded,
+      balanced leads to the speakers; the face's leads twisted with their grounds, shortened,
+      and a ferrite at the GPIO header.
+- [ ] Choose the final recordings by ear on the speakers; the ones in `brain/sounds/` are
+      not final. Once they are, the heartbeat's trimmed length against the open question on
+      it, and the check that it is shorter than a beat into the show, as a `const` assertion
+      on `HEARTBEAT.envelope.len()`, since it is the show's rule and not the mouth's.
+- [ ] The gains in `brain/sounds.rs`, by ear on the speakers, once their knobs are set by the
+      thunderclap.
 
-  Named `heartbeat.wav`, `owl.wav`, `thunderclap.wav`. Add `sounds/` to `deploy.sh`'s list.
-- [ ] `brain/sounds.rs`, new: the three recordings and their gains — see
-      [`SHOW.md`](SHOW.md) §10. Everything else about a recording the build reads from the
-      file.
-- [ ] Sounds, a third job for `cortex-build` beside the ingest and the calendar, called from
-      the rig crate's `build.rs` with the sound table:
-  - **Check**: read each WAV in the sound table and fail on a wrong rate, depth or channel
-    count, naming the file and the expected form; fail if the heartbeat is longer than a beat
-    at the rate the open question on its length settles.
-  - **Typed constants**: strip each WAV to raw little-endian PCM in `OUT_DIR`, and generate
-    `sounds.rs` with, per recording, `pub static HEARTBEAT: Sound` holding its samples as a
-    `&'static [i16]`, its table gain, and its length in frames and in DMX frames. The samples
-    are `include_bytes!` of the raw file in a 2-byte-aligned static, viewed as `[i16]` in a
-    `const` — no literal in the generated source, nothing parsed at run time, and the type is
-    the samples, not bytes.
-  - **Envelope**: run an analyser over the heartbeat — RMS over each 25 ms window at the
-    40 Hz frame rate, a short decay so a window between the lub and the dub does not drop to
-    nothing, normalised so the loudest window is 255 — and emit it as `HEARTBEAT_ENVELOPE:
-    [u8; N]`, one byte per DMX frame of the recording. The rose plays this from the beat.
-    `cargo` watches `sounds/`, so a new recording is a rebuild.
-- [ ] `mouth/`, a new workspace member the brain depends on, with ALSA and `rusb` and its own
-      `config.rs`; `cortex` knows nothing of it. Its `Sound` type is what the generated
-      `sounds.rs` is made of.
-- [ ] An ALSA playback thread on `plughw:CARD=io2,DEV=0`, 48 kHz, stereo, period 256 frames,
-      two periods of buffer (~11 ms), started from the ear's capture thread: the same open,
-      negotiation, xrun recovery and reopen with backoff, turned round. It mixes voices from
-      the compiled-in recordings into each period, each at its table gain, under a master
-      gain `MOUTH_GAIN`.
-- [ ] The seam: the brain's show closure publishes a `MouthCue` each frame — a trigger
-      counter per sound and `mute` — on a latest-value seam the mouth reads every period. A
-      counter that has moved starts that sound's voice at the next period boundary; `mute`
-      zeroes the next buffer and kills every voice, so the cut lands within a period of the
-      frame.
-- [ ] The e-stop mutes it, as it darkens the lamps: the brain's closure sets `mute` while
-      the face says the e-stop is pressed, which covers boot hold too, since the closure runs
-      every frame whether or not anything goes out. A takeover does not mute.
-- [ ] Health: through the brain's client, the topics of [`SHOW.md`](SHOW.md) §13. The `usb/`
-      ones come from the ear's `rusb` probe, which already finds the device by VID:PID and
-      reads its strings; it gains the speed and the port path. The `alsa/` ones are read back
-      from the opened stream's hardware params, not from what was asked for. Published on
-      open and again on every reopen, so a re-enumeration is visible. A failed open retries
-      with backoff and never stalls the frame loop.
-- [ ] In `mouth/src/config.rs`: the ear's capture settings turned into playback ones, its USB
-      identity as `USB_VENDOR` and `USB_PRODUCT`, and `MOUTH_GAIN`.
-- [ ] The placeholder show plays each recording on a right-button press in test mode, in
-      turn.
-
-**Landed when** the placeholder plays the heartbeat, the owl and the thunderclap through a
-speaker on the bench, the e-stop cuts the sound within a buffer, and pulling the io|2's USB
-shows in `mouth/state` and nothing in the journal's frame timing.
+**Landed when** the bench test plays the heartbeat, the owl and the thunderclap through both
+speakers in step with the left lamp, the e-stop cuts the sound within a buffer, and pulling the
+io|2's USB shows in `mouth/state` and nothing in the journal's frame timing.
 
 ## 3. The eyeball, in the brain
 
@@ -322,8 +283,9 @@ error at the use site.
       pulled (the open question on it), and step through the gobo band for a rose (the open
       question on that).
 - [ ] In `UKing-ZQ02015.qxf`, measured on that head with Simple Desk, not taken from the manual:
-  - the gobo channel: split "Fixed Gobo" (8–63) into a band per gobo, the rose labelled
-    `Rose`, and relabel 0–7 `Open`;
+  - the gobo channel: split "Fixed Gobo" (8–63) into a band per gobo, every one of the
+    heads' gobos, each labelled by what it projects and the rose as `Rose`, and relabel 0–7
+    `Open`;
   - the strobe channel: the strobe band, labelled `Strobe`, with its preset saying which end
     is fast; a closed band only if the head has one;
   - `Light Strips`: into the Effect group, its 0–4 band `Off` with preset `NoFunction`;
@@ -377,8 +339,9 @@ chunk 5.
 
 - [ ] `brain/src/heart.rs`: the oscillator — phase, period set per beat, the rate gliding
       toward its target through `cortex::envelope::Envelope` with `RATE_TAU` both ways,
-      started at `REST_BPM`; the rose's dimmer read from `HEARTBEAT_ENVELOPE` by frames since
-      the beat, `ROSE_FLOOR` below it; a beat counter for the mouth.
+      started at `REST_BPM`; the rose's dimmer read from `sounds::HEARTBEAT.envelope` by frames
+      since the beat, `ROSE_FLOOR` below it; `Mouth::play` on each beat. The bench test in
+      `mouth_show.rs` gives way to it.
 - [ ] `brain/src/presence.rs`: one distance, the eyeball's, stale → the tombstone; the two
       debounces `SCARE_CONFIRM_SECS` and `LEAVE_SECS`, and what arms the scare, as the open
       question settles it; publish `brain/presence` as the distance in paths, rounded to a
@@ -436,3 +399,26 @@ of services.
       "Rose" and "Thunderclap", `BUILDUP_SECS`, levels, the camera and its marks, then the
       show by walking it. `BUILDUP_SECS` and the speaker levels are the last edits.
 - [ ] `OWNED-DEVICES.md`: the speakers' make and model.
+
+## Small optimisations
+
+Work the brain does at run time that the build could do once. None is needed for the show;
+each can land whenever it is convenient.
+
+- [ ] The sACN header as a template: `sacn_out::encode` allocates a `Vec` and rewrites the
+      whole header every frame, though the packet identifier, the three layer lengths, the
+      source name, the priority, the universe and the slot count are fixed per build.
+      Generate the header once, keep one buffer in the frame loop, and write only the
+      sequence and the slots into it — the frame loop's only per-frame allocation gone. The
+      release packet is the same template with the terminated bit set.
+- [ ] A fixed CID: `sacn_out::new_cid()` makes one from the clock and the process ID, so
+      every restart appears on the network as a new source, where E1.31 expects a device to
+      keep its CID. Derive it at build time, say from a hash of the rig's name, and
+      `new_cid` goes.
+- [ ] Park values in the patch: `Channel::park()` scans the channel's capabilities for its
+      `NoFunction` band on every call, and the show will park several channels per head every
+      frame. The build already finds those bands for the e-stop's mask; emit the park value
+      per channel with them, and `park()` is one write.
+- [ ] `patch::FRAME_WIDTH`: `frame_width(rig.patch)` derives the highest patched slot at
+      startup, which the build already knows. A generated constant replaces the function and
+      the comment defending it.

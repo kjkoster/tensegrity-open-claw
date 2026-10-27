@@ -6,11 +6,13 @@ version      = "0.1.0"
 
 [build-dependencies]
 cortex-build = { path = "../cortex-build" }
+mouth-build  = { path = "../mouth-build" }
 
 [dependencies]
 cortex   = { path = "../cortex" }
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
-embassy-time     = { version = "0.5.0",  features = ["std"] }
+embassy-time     = { version = "0.5.1",  features = ["std"] }
+mouth            = { path = "../mouth" }
 stem             = { path = "../stem" }
 # The face, the cabinet door's buttons and lamps.
 rppal            = "0.22.1"

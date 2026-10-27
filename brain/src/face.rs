@@ -50,8 +50,12 @@ const SETTLE_SAMPLES: u8 = 3;
 /// How long both buttons are held to make a chord: 2 s at the poll period, long enough that
 /// leaning on the door does not do it.
 const CHORD_SAMPLES: u16 = 200;
-/// Far above anything the eye sees as flicker, and slow enough for the lamps' drivers.
-const LAMP_PWM_HZ: f64 = 1000.0;
+/// At the edge of hearing, and no further. The lamps share the cabinet's supply and ground with
+/// the audio interface, and at 1 kHz their switching was audible in the quiet ends of every
+/// recording, stepping with each frame as the lamp dimmed. Their drivers cannot follow much
+/// faster: at 25 kHz the lamps were erratic. Lower is audible to the children in the audience,
+/// who hear up to about 20 kHz. A whole number of the PWM clock's ticks, so the period is exact.
+const LAMP_PWM_HZ: f64 = 20_000.0;
 
 /// What the door says, as of the face's last poll.
 #[derive(Clone, Copy)]
@@ -280,15 +284,12 @@ impl Lamp {
         }
     }
 
-    /// Takes the lamp's level from `frame`. Traced only as it turns on or off, so a console
-    /// fading it does not fill the log.
+    /// Takes the lamp's level from `frame`. Not traced: a show that plays a look on a lamp
+    /// would fill the log with it.
     fn follow(&mut self, frame: &Frame) {
         let level = self.channel.get(frame);
         if level == self.level {
             return;
-        }
-        if (level == 0) != (self.level == 0) {
-            trace_lamp(self.gpio, self.name, level);
         }
         self.level = level;
         if let Some(pwm) = &self.pwm

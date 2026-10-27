@@ -6,8 +6,8 @@
 use std::net::Ipv4Addr;
 
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
-// Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
-pub const FRAME_RATE_HZ: u64 = 40;
+// `FRAME_RATE_HZ`, in a file of its own because the rig crates' build scripts need it too.
+include!("../frame_rate.rs");
 
 // E1.31 source priority — one number with two jobs, deliberately not split. It is the
 // priority the brain transmits at, and it is the bar an external console must clear to take

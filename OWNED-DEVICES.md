@@ -57,7 +57,7 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | Device | Details |
 |---|---|
 | Audio interface | Alesis io\|2, a 2-channel USB AD/DA converter, on the USB hub. USB `0x13b2:0x0008`, ALSA card `io2`. Was the ear's input; is the mouth's output, from its main outs (TRS). |
-| Powered speakers | Two, fed from the audio interface's main outs. |
+| Powered speakers | Two Monkey Banana, fed from the audio interface's main outs, a channel each. |
 | Camera | Axis M3105-LVE, firmware 6.15.2, MIPS, powered from the PoE injector, with its own infrared illuminator. At `192.168.0.90`, user `root`; the password is lost and is never written here, so it takes a factory reset (the control button held while powering up). On the wired segment it belongs at `10.0.1.90`. Streams H.264 over RTSP (`/axis-media/media.amp?videocodec=h264`) or MJPEG over HTTP (`/axis-cgi/mjpg/video.cgi`), configured over VAPIX. Was mounted inverted for the mage. The eyeball's input. |
 
 ## Fixtures

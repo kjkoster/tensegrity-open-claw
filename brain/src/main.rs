@@ -1,16 +1,19 @@
 //! The claw: the tensegrity sculpture's rig.
 //!
 //! Everything below the show is `cortex`. What lives here is this rig's patch, its pointing
-//! presets, its calendar, and the per-frame fill that turns the show into slots — for now a
-//! placeholder that keeps the rig dark while the Halloween show is built.
+//! presets, its calendar, its recordings, and the per-frame fill that turns the show into
+//! slots — for now a placeholder that keeps the rig dark while the Halloween show is built,
+//! with the mouth's bench test beside it.
 
 use cortex::Rig;
 use cortex::latest::latest;
 use cortex::telemetry;
+use mouth_show::MouthShow;
 use show::Show;
 
 mod face;
 mod face_show;
+mod mouth_show;
 mod show;
 
 // `patch` and `presets`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
@@ -21,6 +24,9 @@ include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 // `shows`, generated from `shows.rs`: every show as instants, with its dark stretches.
 include!(concat!(env!("OUT_DIR"), "/shows.rs"));
 
+// `sounds`, generated from `sounds.rs` and the recordings in `sounds/`.
+include!(concat!(env!("OUT_DIR"), "/sounds.rs"));
+
 fn main() {
     // The face first, so the lamps are dark and the inputs pulled up while everything else
     // starts. It publishes its own `face/…` subtree on the brain's connection, reads its lamps
@@ -30,7 +36,8 @@ fn main() {
     let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
     let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
     let estop_state = face_state.clone();
-    let mut show = Show::new(brain_publisher.clone());
+    let mouth = mouth::spawn(&sounds::SOUNDS, brain_publisher.part("mouth"));
+    let mut show = Show::new(brain_publisher.clone(), MouthShow::new(mouth));
 
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),

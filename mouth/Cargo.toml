@@ -1,0 +1,15 @@
+[package]
+edition      = "2024"
+name         = "mouth"
+rust-version = "1.99"
+version      = "0.1.0"
+
+# The rig's sound: playback through a USB audio interface, for a rig crate whose show has
+# sound. Its recordings are compiled in by `mouth-build`.
+#
+# `alsa` for the playback; `rusb` to find the interface on the bus and say where it is, which
+# ALSA does not.
+[dependencies]
+alsa   = "0.12.1"
+cortex = { path = "../cortex" }
+rusb   = "0.9.4"

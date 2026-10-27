@@ -3,15 +3,18 @@ edition      = "2024"
 name         = "cortex"
 rust-version = "1.99"
 version      = "0.1.0"
+# Not a native library: `links` is how cargo lets a build script hand values to the build
+# scripts of the crates that depend on it. See `build.rs`.
+links        = "cortex"
 
 # What every rig shares under its show: the sACN transports, the frame loop, the show calendar,
 # the latest-value seam.
 [dependencies]
-arc-swap = "1.7"
+arc-swap = "1.9.3"
 signal-hook = "0.4.5"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
-embassy-time     = { version = "0.5.0",  features = ["std"] }
+embassy-time     = { version = "0.5.1",  features = ["std"] }
 # For whether the kernel holds the clock as synchronised, which std has no call for.
-libc = "0.2.189"
+libc = "0.2.191"
 stem = { path = "../stem" }
-zihatec-rs-485-dmx = "0.1.0"
+zihatec-rs-485-dmx = "0.1.1"

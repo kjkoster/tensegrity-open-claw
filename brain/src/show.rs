@@ -6,11 +6,15 @@
 //! fifteen minutes without a chord, because a rig left in it would ignore the calendar
 //! unattended.
 //!
+//! Beside it runs the mouth's bench test, in `mouth_show`, which plays the recordings in turn
+//! and takes the left lamp for their envelopes.
+//!
 //! The show state is the brain's own: `brain/show` and `brain/testmode`, retained,
 //! published on every change, and logged alongside.
 
 use crate::face::FaceState;
 use crate::face_show;
+use crate::mouth_show::MouthShow;
 use cortex::telemetry::Publisher;
 use std::time::{Duration, Instant};
 
@@ -23,10 +27,11 @@ pub struct Show {
     seen_chords: u32,
     /// When test mode was last turned on, while it is on.
     testing_since: Option<Instant>,
+    mouth: MouthShow,
 }
 
 impl Show {
-    pub fn new(telemetry: Publisher) -> Self {
+    pub fn new(telemetry: Publisher, mouth: MouthShow) -> Self {
         eprintln!("show: blackout");
         telemetry.publish("show", "blackout", true);
         eprintln!("show: test mode off");
@@ -35,6 +40,7 @@ impl Show {
             telemetry,
             seen_chords: 0,
             testing_since: None,
+            mouth,
         }
     }
 
@@ -57,6 +63,8 @@ impl Show {
         }
 
         face_show::fill(slots, self.testing_since.is_some());
+        // After the face, because the mouth's bench test takes the left lamp over.
+        self.mouth.fill(slots, face.estop);
     }
 
     fn set_testing(&mut self, on: bool) {

@@ -241,13 +241,14 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone; with `SCARE_CONFIRM_SECS`, set from the frame rate measured on the Pi |
 
 The sound table names each recording and its gain; everything else about a recording the
-build reads from the file:
+build reads from the file. The gains are set by ear at the bench, and are 0 dB, the loudest a
+recording plays, until then.
 
-| sound | file | gain | |
+| sound | file in `brain/sounds/` | gain | |
 |---|---|---|---|
-| heartbeat | `sounds/heartbeat.wav` | −6 dB | one lub-dub; must be shorter than the fastest beat, which the build checks; its envelope is the rose's pulse |
-| owl | `sounds/owl.wav` | −18 dB | far off |
-| thunderclap | `sounds/thunderclap.wav` | 0 dB | its length is the length of the state |
+| heartbeat | `heartbeat.m4a` | 0 dB | one lub-dub; must be shorter than the fastest beat, which the build checks; its envelope is the rose's pulse |
+| owl | `owl.mp3` | 0 dB | far off |
+| thunderclap | `thunderclap.m4a` | 0 dB | its length is the length of the state |
 
 ---
 
@@ -264,7 +265,7 @@ is *how* you set them on each model, which does not change.
 | 4× U\`King ZQ02015 moving head (the heads) | DMX off the HAT, 3-pin | Named `Head 1` to `Head 4`, left to right as seen from the street. Address (`Addr`) and mode (`CHnd`) from the display menu; `12CH`, the mode that carries Pan Fine and Tilt Fine, which the presets require. See [§12](#12-front-panel-settings-on-the-heads). |
 | 1× HQ Power VDPLPS36B2 LED par (the door wash) | DMX off the HAT, 3-pin | Named `Wash door`. HQ Power sells it as a pinspot; it is a wash. Mode and address are DIP switches: set the binary pattern from the datasheet. 3-channel RGB mode — the 5-channel mode adds a strobe and macros the show does not use and the e-stop would have to mask. |
 | The face | GPIO | Unchanged in the cabinet. |
-| The mouth (the Alesis io\|2 and two powered speakers) | USB on the hub; TRS to the speakers | See [§13](#13-sound). |
+| The mouth (the Alesis io\|2 and two Monkey Banana powered speakers) | USB on the hub; TRS to the speakers, left and right | See [§13](#13-sound). |
 | The eyeball's camera (the Axis M3105-LVE) | Ethernet, through its PoE injector, into the Pi's `eth0` | See [§14](#14-the-eyeball). |
 
 Not in this show: the ball, the laser, and anything rented. The deploy builds no wireless
@@ -297,29 +298,30 @@ its own idea of these. Recorded because a wrong one looks like broken software.
 ## 13. Sound
 
 The brain plays through the Alesis io|2 — the same interface the ear captured through — into
-two powered speakers. Nothing captures any more.
+two Monkey Banana powered speakers, in stereo. Nothing captures any more.
 
-- **Wiring.** The io|2's main outs (TRS) to the speakers. Turn its direct-monitor mix knob
-  fully to the computer side, so the unused mic inputs cannot bleed into the speakers, and
-  set the output level with the speakers' own knobs; the brain plays at the gains in the sound
-  table and `MOUTH_GAIN` in `mouth/src/config.rs`.
+- **Wiring.** The io|2's left and right main outs (TRS), one to each speaker. Turn its
+  direct-monitor mix knob fully to the computer side, so the unused mic inputs cannot bleed
+  into the speakers, and set the output level with the speakers' own volume knobs; the brain
+  plays each recording at its gain in the sound table, and has no master gain of its own.
 - **Placement.** The heartbeat is for the street and the thunderclap for the person on the
   path, from the same speakers: low, by the path, under the balcony, out of sight. Set the
   level by the thunderclap — it is the loud one — and let the heartbeat sit where the gains
   put it.
-- **Recordings** are in `sounds/`, 48 kHz 16-bit mono WAV, and are **compiled into the
-  brain as typed constants**: each is a `&[i16]` of samples with its length beside it, and the
-  heartbeat also carries its envelope, one byte per DMX frame. Nothing is read from disk at
-  startup or during a show, there is no WAV parser in the running program, and the binary on
-  the Pi is the whole show. The build checks each file's format, and that the heartbeat is
-  shorter than the fastest beat; a recording that fails is a build error, naming the file and
-  what it should be.
+- **Recordings** are in `brain/sounds/`, as they were found — AAC in `.m4a`, MP3 — and are
+  **compiled into the brain**: decoded, resampled to 48 kHz stereo 16-bit, trimmed of what is
+  inaudible at either end, brought to full scale, and stored with their envelope, one byte per
+  DMX frame. Nothing is read from disk at startup or during a show, there is no decoder in
+  the running program, and the binary on the Pi is the whole show. A file the build cannot
+  read is a build error naming it; the show adds that the heartbeat is shorter than the
+  fastest beat.
 - **On MQTT**, through the brain's client — the mouth is a thread in the brain, so it lives
   and dies with it and `health/brain` covers it:
 
   | topic | |
   |---|---|
-  | `mouth/state`, `mouth/error` | as the ear had them: `error` says why it is mute, present only while it is |
+  | `mouth/state` | `playing`, `muted` by the show, or `down` when the interface failed |
+  | `mouth/error` | why the interface is down, present only while it is |
   | `mouth/xruns` | buffer underruns since the brain started: the show is stuttering, make the buffer bigger or the Pi quieter |
   | `mouth/usb/vid_pid`, `mouth/usb/bus`, `mouth/usb/address`, `mouth/usb/speed` | the interface as the kernel sees it: identity, where on the bus, and `full`/`high` — a full-speed enumeration on a high-speed device is a bad cable or a bad hub port |
   | `mouth/usb/sysfs` | its `/sys/bus/usb/devices/…` path, so `lsusb -t` and the journal can be read against it |

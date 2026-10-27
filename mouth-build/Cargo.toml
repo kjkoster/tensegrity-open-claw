@@ -1,0 +1,17 @@
+[package]
+edition      = "2024"
+name         = "mouth-build"
+rust-version = "1.99"
+version      = "0.1.0"
+
+# The mouth's recordings, compiled in: a build-dependency of the rig crate, the way
+# `cortex-build` is, so the decoders and the resampler stay out of the running brain and ALSA
+# stays out of the build.
+#
+# Both are pure Rust, and both run offline on the Pi. `symphonia` decodes the recordings as
+# they were found — AAC in an MP4 container, MP3 — with nothing but the codecs those need.
+# `rubato` resamples them to the interface's rate, with its FFT resampler, which is the one it
+# recommends for a fixed pair of rates and a whole file at once.
+[dependencies]
+rubato = "5.0.1"
+symphonia = { version = "0.6.1", default-features = false, features = ["aac", "isomp4", "mp3"] }

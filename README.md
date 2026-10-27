@@ -270,13 +270,14 @@ restarts the daemon.
 The cargo workspace is six crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
 
 The deploy ships **only what the Pi builds from and installs** — the crates, `claw.qxw`,
-`fixtures/`, `sounds/`, `stem/` and `etc/`. The list is written out in `deploy.sh` rather
+`fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh` rather
 than filtered by exclusions, so adding something is a decision; the design documents, the
-reference PDFs, the source recordings in `audio/` and the git history stay on the Mac. The
+reference PDFs and the git history stay on the Mac. The
 workspace goes because the build compiles **its fixture patch and its presets** in — so
-saving in QLC+ and deploying is all it takes to get a re-aimed preset onto the rig — and
-`sounds/` because the build compiles the recordings in too, as it does the eyeball's model,
-which travels inside its crate.
+saving in QLC+ and deploying is all it takes to get a re-aimed preset onto the rig. The
+build compiles the recordings in too, as it does the eyeball's model, and both travel inside
+their crates: the recordings in `brain/sounds/`, as they were found, since the build decodes
+them itself.
 
 > The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
 > hand — the deploy leaves it alone rather than removing things on the Pi on its own.

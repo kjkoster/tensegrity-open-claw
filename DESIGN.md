@@ -274,9 +274,10 @@ frame rate sits under.
 | | |
 |---|---|
 | `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
-| `cortex-build/` | the QLC+ ingest, the calendar's resolution and the recordings' compilation, a build-dependency of the rig crate |
+| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
 | `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
+| `mouth-build/` | the mouth's recordings compiled in, a build-dependency of a rig crate that has a mouth |
 | `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
 
@@ -302,13 +303,18 @@ its own target, reads its universe, port and address out of the workspace throug
 why that crate stays `no_std`. Everything in the workspace is built on the Pi, because the
 brain links ALSA.
 
-**Recordings and models are compiled in.** The rig crate names its recordings and their
-gains; `cortex-build` checks each WAV's format and turns it into a typed constant — the
-samples as `&'static [i16]`, and whatever the build derives from them, such as a loudness
-envelope at the frame rate. A sensor's model goes in the same way, with `include_bytes!`, and
-is loaded from memory. The binary on the Pi is then the whole show: no file to be missing at
-startup, no parser in the running program, and a recording in the wrong format is a build
-error naming it.
+**Recordings and models are compiled in.** The rig crate keeps its recordings as they were
+found, in whatever format they came in, and names them and their gains in a sound table; the
+component's own build crate decodes each and turns it into a typed constant — the samples,
+and whatever the build derives from them, such as a loudness envelope at the frame rate. A
+sensor's model goes in the same way, with `include_bytes!`, and is loaded from memory. The
+binary on the Pi is then the whole show: no file to be missing at startup, no decoder in the
+running program, and a recording the build cannot read is a build error naming it.
+
+**A table built per frame is built at the frame rate.** `cortex` owns the rate and hands it
+to the build script of every crate that depends on it, through cargo's `links` metadata, so a
+rig crate's build reads the one number the frame loop runs at and a change to it rebuilds
+every such table.
 
 Beside the crates, a daemon's systemd unit lives in that daemon's directory
 (`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
@@ -641,9 +647,29 @@ even with `brain` hung.
 
 ### 3.8 The mouth
 
-The rig's sound: recordings played through a USB audio interface into powered speakers. Its
-own crate, `mouth/`, which a rig crate depends on when its show has sound; `cortex` knows
-nothing of it (§2.3).
+The rig's sound: recordings played through a USB audio interface into two powered speakers, a
+channel each. Its own crates, `mouth/` and `mouth-build/`, which a rig crate depends on when
+its show has sound; `cortex` knows nothing of it (§2.3).
+
+**A unit, so a show without sound leaves it out.** On the rig crate's side the mouth is its
+recordings in `sounds/`, the sound table that names them and their gains, and one show file of
+its own; the rest of the rig crate touches it in the few lines that spawn it, include its
+generated `sounds` module and hand its show file the frame. Taking it out is deleting those
+and the two crates.
+
+**The recordings are compiled from the files as they were found** (§2.3). The build decodes
+each, resamples it to the interface's native rate so nothing resamples at run time, keeps it
+in stereo, trims what is 60 dB or more below its peak off both ends so its first sample is
+the sound, brings its peak to just under full scale, and then takes it down by its gain in
+the table, so the samples are stored at the level they play at and that gain is the only
+thing that sets it. A gain above 0 dB would clip, and fails the build. Overall level is the speakers' own knobs; there is no master
+gain in software to disagree with them.
+
+**Every recording carries its envelope**: its loudness, one byte per DMX frame, at the frame
+rate the rig runs at. The samples are padded with silence to a whole number of frames, so the
+envelope's length is the recording's length in frames, and a look that follows a recording
+plays the envelope by frame index from the frame that cued it. Sound and light then share one
+clock, the frame count, with the sound a buffer behind the frame that asked for it.
 
 **A thread in the brain, not a process.** A show that cuts light and sound together needs
 them together: a sound a process hop late is a cut the audience hears arrive after it sees
@@ -658,11 +684,10 @@ next buffer and kills every voice, so silence lands within a period of the frame
 **The show hands it a cue every frame, over a latest-value seam**: a trigger counter per
 sound, and mute as a level. The mouth reads the latest cue every period, several times a
 frame, and a counter that has moved is the only kind of trigger that reads exactly once (§1.4).
-It mixes its voices into each period, each at the gain the rig's sound table gives it, under
-one master gain.
-
-**The recordings are compiled in** (§2.3), so the mixer reads samples and levels straight out
-of the binary, and there is no file to be missing on the night.
+It mixes its voices into each period by adding them up, straight out of the binary, and clips
+what sums past full scale. Voices overlap: a sound cued while it or another is still playing starts a
+voice of its own, from a fixed pool so playing never allocates, and when the pool is full the
+voice furthest into its recording gives way.
 
 **The e-stop silences it; a takeover does not.** The e-stop is a show-stop, so it stops the
 sound with the light: the rig crate mutes the cue while the face reports the e-stop, at boot
