@@ -41,7 +41,7 @@ and runs on unchanged underneath a stop.
 | `cut` | nothing: blackout and silence, hard | `CUT_SECS` have passed |
 | `buildup` | still nothing, but the heads are heard turning | `BUILDUP_SECS` have passed |
 | `lightning` | a flash, before anything is heard | `LIGHTNING_SECS` have passed: two frames |
-| `thunderclap` | the heads white, two strobing, two steady; the thunderclap | the recording ends |
+| `thunderclap` | the heads white, two strobing, two steady; the front door flashing white with it; the thunderclap | the recording ends |
 | `respite` | the heads dark; the front door amber | the yard is empty |
 
 There is no state for "someone is in the yard": the heart's pace is a function of the
@@ -73,7 +73,7 @@ show: respite → idle — the yard has been empty for 3.0 s
 
 ## 3. Idle: the rose and the heart
 
-One head, `ROSE_HEAD`, projects the rose gobo on the path near the house, on the "Rose"
+One head, `ROSE_HEAD`, projects the rose gobo in `ROSE_COLOUR` on the path near the house, on the "Rose"
 preset. The other three are dark on the same preset, parked tilted into the balcony — not at
 their thunderclap positions, so that all four are heard turning when the time comes, and not
 pointing anywhere a stray flash would matter.
@@ -117,14 +117,18 @@ move from "Rose" to "Thunderclap" plus a margin, and the two presets are aimed s
 one a cheap head completes in it. Which is why the parked heads in "Rose" tilt into the
 balcony rather than away from it.
 
-**`lightning`, two frames.** Everything at full for `LIGHTNING_SECS`, still silent. The
+**`lightning`, two frames.** Everything at full for `LIGHTNING_SECS`, the heads and the door
+wash white, still silent. The
 thunderclap is cued on the frame after
 and is heard a buffer later, so the flash leads the crack by about 60 ms, the way lightning
 does.
 
 **`thunderclap`, the length of the recording.** The heads light white: `STROBE_HEADS` strobe
-at `STROBE_RATE` through their shutter channel, the other two are steady, all at full. The
-thunderclap plays from its first sample. The state lasts exactly as long as the recording,
+at `STROBE_RATE` through their shutter channel, the other two are steady. The
+thunderclap plays from its first sample, and every head's dimmer follows its loudness. The
+door wash flashes with it: red, green and blue
+all at the recording's loudness, frame by frame, so the door is as bright as the crack is
+loud and dies away with it. The state lasts exactly as long as the recording,
 which the show knows from the file at build time, so a different recording changes nothing
 else.
 
@@ -141,8 +145,8 @@ shudder.
 
 ## 5. Respite: the door
 
-The heads go dark where they stand; the door wash lights the
-front door in `DOOR_AMBER`. Both switch in one frame. The state holds while anyone is in the
+The heads go dark where they stand, in one frame; the door wash fades up to `DOOR_AMBER`, at
+full, over `DOOR_FADE_SECS`. The state holds while anyone is in the
 yard, and ends when the distance has been the tombstone for `LEAVE_SECS`, so a detector that
 loses the group for a frame does not reset the show on them.
 
@@ -243,6 +247,7 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `HEART_RANGE` | 1.0 | the distance, in paths, over which the heart goes from rest to the scare rate: the whole walk from the entry; less to leave the first steps at rest |
 | `RATE_TAU` | 1.5 s | how fast the heart changes pace: the time constant of the glide, so the rate closes 63 % of the gap to its target in 1.5 s and 95 % in 4.5 s |
 | `ROSE_FLOOR` | 25 % | the rose at the quietest point of the envelope; full at its loudest |
+| `ROSE_COLOUR` | red | the rose's colour, a band of the colour wheel, until `buildup` turns the heads white |
 | `OWL_MIN_SECS`, `OWL_MAX_SECS` | 45 s, 120 s | the gap between owls |
 | `SCARE_CONFIRM_SECS`, `LEAVE_SECS` | 0.2 s, 3 s | the two debounces on presence: into the scare, out of respite |
 | `CUT_SECS`, `BUILDUP_SECS` | 1 s, 1 s | the two dark seconds; `BUILDUP_SECS` is measured, see [§16](#16-commissioning) |
@@ -250,6 +255,7 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `STROBE_HEADS`, `STROBE_RATE` | heads 2 and 3, fast | which heads strobe in the thunderclap |
 | `THUNDER_RADIUS_DEG`, `THUNDER_HOP_SECS` | 15°, 0.4 s | the circle each head hops around in the thunderclap, and how often it hops |
 | `DOOR_AMBER` | (255, 110, 0) | the door, as R, G, B on the wash |
+| `DOOR_FADE_SECS` | 1 s | the door's fade up to amber at the start of `respite` |
 | `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone; with `SCARE_CONFIRM_SECS`, set from the frame rate measured on the Pi |
 
 The sound table names each recording and its gain; everything else about a recording the
@@ -287,7 +293,7 @@ Both definitions are in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf`
 from the datasheet. `UKing-ZQ02015.qxf` came from QLC+'s library and is partly measured: the
 strobe channel's open band, the motor speed's polarity, the no-function bands of
 `Automatic Mode` and `Reset`, and colour bands that match the manual. Still to measure: a band
-per gobo on the one undivided "Fixed Gobo" band, the rose among them; the strobe band; the
+per gobo on the "Fixed Gobo" band, where only the rose, at 50, is in; the strobe band; the
 `Light Strips` channel's off band; and the real travel — the definition says 540° pan and
 180° tilt, and the manual gives no figures. The show asks the definition for all of these; a
 guess in the file is a guess on the night.

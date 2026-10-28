@@ -10,8 +10,10 @@ use cortex::telemetry;
 use mouth_show::MouthShow;
 use show::Show;
 
+mod door_show;
 mod face;
 mod face_show;
+mod heads_show;
 mod heart;
 mod mouth_show;
 mod presence;

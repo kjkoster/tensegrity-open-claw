@@ -15,8 +15,9 @@
       protocol exactly.
 
       Mode is selected by the FUNCTION DIP switches on the base, not over DMX, and it
-      selects master or slave as well as the channel count — so a fixture patched here as
-      5 Channel must have SW3..SW1 set to DMX master/slave 5-channel to match.
+      selects master or slave as well as the channel count — so the switches must be set
+      to the DMX 3-channel or 5-channel setting that matches the mode the fixture is
+      patched in.
 
       The unit also has stand-alone auto-change, auto-fade and manual modes driven entirely
       from the DIP switches with no DMX attached. Those are outside a fixture definition,

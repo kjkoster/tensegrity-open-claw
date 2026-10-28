@@ -1,5 +1,5 @@
 //! The show: the Director, which chooses the show state every frame, and what each state asks
-//! of the sound and the face.
+//! of the sound and the fixtures.
 //!
 //! Test mode first, then the calendar, then, inside a show, presence and the timers. Outside a
 //! show, and inside one until civil dusk, the state is `blackout`: dark and silent. Test mode
@@ -11,9 +11,12 @@
 //! thunderclap in, then `thunderclap`, as long as the recording, then `respite` until the yard
 //! is empty, and back to `idle`.
 //!
-//! For now the face is the only fixture the show drives: its left lamp is what the rose would
-//! do, and its right lamp says test mode is on. The heads and the door wash join once their
-//! presets are aimed.
+//! The show drives the face, the heads' wheels and dimmers, and the door wash. The face's
+//! left lamp is the rose's level, and its right lamp says test mode is on. The rose head
+//! shows the red rose until the scare's `buildup` turns every head white and open; all four
+//! light at full in `lightning` and follow the thunderclap's loudness after it. The door is
+//! white at full in `lightning`, flashes with the thunderclap, and fades up to amber in
+//! `respite`. The heads are not aimed until their presets are.
 //!
 //! In test mode the right button fires the scare from any state, restarting one in progress,
 //! and the left button steps presence through a few distances. Outside it the buttons do
@@ -23,14 +26,18 @@
 //! The show state is the brain's own: `brain/show` and `brain/testmode`, retained, published
 //! on every change, and logged with what caused it.
 
+use crate::door_show;
 use crate::face::FaceState;
 use crate::face_show;
+use crate::heads_show::{self, Heads, Wheels};
 use crate::heart::Heart;
+use crate::patch::Zq02015;
 use crate::mouth_show::MouthShow;
 use crate::presence::{Presence, Reading};
 use cortex::calendar::{self, Calendar};
 use cortex::config::FRAME_RATE_HZ;
 use cortex::draw::Draw;
+use cortex::qlc_plus::Capability;
 use cortex::telemetry::Publisher;
 use std::time::{Duration, Instant};
 
@@ -46,6 +53,8 @@ pub const HEART_RANGE: f64 = 1.0;
 pub const RATE_TAU: f64 = 1.5;
 /// The rose at the quietest point of the heartbeat; full at its loudest.
 pub const ROSE_FLOOR: f64 = 0.25;
+/// The rose's colour, from `blackout` until the scare's `buildup` turns the heads white.
+pub const ROSE_COLOUR: Capability = Zq02015::COLOR_RED;
 /// The gap between owls, drawn uniformly. Far apart, so an owl stays an event.
 const OWL_MIN_SECS: f64 = 45.0;
 const OWL_MAX_SECS: f64 = 120.0;
@@ -65,6 +74,11 @@ pub const BUILDUP_SECS: f64 = 1.0;
 /// The flash before the thunderclap: two frames, chosen at the bench. The recording starts on
 /// the frame after, so the light leads the crack.
 const LIGHTNING_SECS: f64 = 0.05;
+/// The front door in `respite`, as R, G, B on the wash: warm amber, at full.
+const DOOR_AMBER: [u8; 3] = [255, 110, 0];
+/// How long the door takes to fade up to amber at the start of `respite`.
+const DOOR_FADE_SECS: f64 = 1.0;
+const DOOR_DARK: [u8; 3] = [0, 0, 0];
 /// How long test mode lasts without a chord.
 const TEST_MODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -72,6 +86,12 @@ const TEST_MODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// frame still happens.
 pub fn frames(secs: f64) -> u32 {
     ((secs * FRAME_RATE_HZ as f64).round() as u32).max(1)
+}
+
+/// What one frame of a state looks like.
+struct Look {
+    heads: Heads,
+    door: [u8; 3],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -207,13 +227,15 @@ impl Show {
         if let Some((next, why)) = self.next(testing, testing && right_presses > 0, &reading) {
             self.enter(next, why);
         }
-        let rose = self.play(&reading);
+        let look = self.play(&reading);
         self.frames = self.frames.saturating_add(1);
 
         // The e-stop is a show-stop, so it silences the sound with the light.
         let silent = matches!(self.state, State::Blackout | State::Cut | State::Buildup);
         self.mouth.mute(face.estop || silent);
-        face_show::fill(slots, rose, testing);
+        face_show::fill(slots, look.heads.rose, testing);
+        heads_show::fill(slots, &look.heads);
+        door_show::fill(slots, look.door);
     }
 
     /// The state this frame moves to, if it moves, and why, where that is worth saying.
@@ -291,8 +313,8 @@ impl Show {
         }
     }
 
-    /// Plays this frame of the current state, and returns what the rose does: its level, 0..1.
-    fn play(&mut self, reading: &Reading) -> f64 {
+    /// Plays this frame of the current state, and returns what it looks like.
+    fn play(&mut self, reading: &Reading) -> Look {
         match self.state {
             State::Idle => {
                 let (beat, rose) = self.heart.step(reading.distance);
@@ -302,13 +324,69 @@ impl Show {
                 if self.owl.step() {
                     self.mouth.owl();
                 }
-                rose
+                Look {
+                    heads: Heads {
+                        wheels: Wheels::Rose,
+                        rose,
+                        others: 0.0,
+                    },
+                    door: DOOR_DARK,
+                }
             }
-            State::Lightning => 1.0,
-            State::Thunderclap => MouthShow::thunderclap_envelope()
-                .get(self.frames as usize)
-                .map_or(0.0, |&level| f64::from(level) / f64::from(u8::MAX)),
-            State::Blackout | State::Cut | State::Buildup | State::Respite => 0.0,
+            State::Blackout | State::Cut => Look {
+                heads: Heads {
+                    wheels: Wheels::Rose,
+                    rose: 0.0,
+                    others: 0.0,
+                },
+                door: DOOR_DARK,
+            },
+            State::Buildup => Look {
+                heads: Heads {
+                    wheels: Wheels::White,
+                    rose: 0.0,
+                    others: 0.0,
+                },
+                door: DOOR_DARK,
+            },
+            State::Lightning => Look {
+                heads: Heads {
+                    wheels: Wheels::White,
+                    rose: 1.0,
+                    others: 1.0,
+                },
+                door: [u8::MAX; 3],
+            },
+            State::Thunderclap => {
+                // The heads and all three of the door's colours at the recording's loudness:
+                // white, flashing with the crack.
+                let level = MouthShow::thunderclap_envelope()
+                    .get(self.frames as usize)
+                    .copied()
+                    .unwrap_or(0);
+                let unit = f64::from(level) / f64::from(u8::MAX);
+                Look {
+                    heads: Heads {
+                        wheels: Wheels::White,
+                        rose: unit,
+                        others: unit,
+                    },
+                    door: [level; 3],
+                }
+            }
+            State::Respite => {
+                // Counting this frame, so the fade's last frame is full amber.
+                let fade =
+                    (f64::from(self.frames + 1) / f64::from(frames(DOOR_FADE_SECS))).min(1.0);
+                Look {
+                    heads: Heads {
+                        wheels: Wheels::White,
+                        rose: 0.0,
+                        others: 0.0,
+                    },
+                    door: DOOR_AMBER.map(|colour| (f64::from(colour) * fade).round() as u8),
+                }
+            }
         }
     }
 

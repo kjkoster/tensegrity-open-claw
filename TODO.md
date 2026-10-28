@@ -72,11 +72,9 @@ Each needs a choice before the step that uses it.
 |---|---|---|
 | The strobe's rate | `STROBE_RATE` is "fast", which is no value, and the strobe band is unmeasured. A fast strobe aimed at children's faces sits in the 3–30 flashes a second that photosensitive-epilepsy guidance warns against. | `STROBE_RATE` in flashes a second, at most 3, read off the measured band; or no strobe, and let the hops carry the lightning. |
 | `bLnd` on the heads | `SHOW.md` §12 says `bLAc`; `README.md`'s e-stop section says every fixture holds its last values. The manual gives `bLAc` as "return to zero", which may send the head home, and `HoLd` keeps it lit wherever it was — mid-thunderclap included, for the five seconds a brain restart takes. | Find out on one head what `bLAc` does. If it darkens and stays put, use it and make the README's rule "dark and still"; if it homes, decide between a homing head and a lit one. |
-| Is there a rose gobo | The gobo channel is one undivided "Fixed Gobo" band, 8–63, and the manual shows no gobo images. The idle look rests on one of them being a rose. | Step through the band on a head before anything is built around it. |
 | Is the door in the picture | `respite` holds while anyone is seen. If the camera does not see the doorstep, a group collecting sweets is the tombstone and the rose returns while they stand there. | Frame the door in, or make `LEAVE_SECS` long enough to cover a doorstep visit. |
 | A second group during `respite` | Respite ends only on an empty yard, so a group arriving behind the first is not scared. | Accept it: a scare re-armed under people still in the yard would hit them a second time. |
 | The heartbeat's length | It must be shorter than one beat at `SCARE_BPM`: 0.46 s at 130. The recording in `audio/` is 0.76 s. | Let beats overlap: the mixer mixes voices anyway, and the rose takes the loudest of the envelopes playing. The check becomes "shorter than a beat at rest". |
-| The rose's colour | The show's table in 4.4 names `ROSE_COLOUR`, and nothing gives it a value yet. | A constant beside the others, naming a band of the colour wheel, chosen on the bench head. |
 | The eyeball's threads | Your rule is Embassy on std too. Nothing in the eyeball runs on a timer: capture is paced by the camera, detection by itself, the preview by its client. | OS threads with latest seams between them, like the brain's other blocking producers, and nothing on the frame loop's executor. |
 | Whether the Pi keeps up | YOLOX-Nano is expected at 150–300 ms a frame on the Pi 3B+ — three to six frames a second — and 60–120 ms on a Pi 4. The debounces and the staleness window were written for ten: `SCARE_CONFIRM_SECS` is "two frames", `EYEBALL_STALE_SECS` "twenty". A spare Pi 4 runs the same software unchanged. | Measure first (chunk 3). Then set the two constants from the measured rate, and swap in the Pi 4 if the 3B+ cannot hold about five frames a second. |
 | ONNX Runtime inside the brain | It is C++. A crash in it ends the brain, which systemd restarts in seconds of signal loss. Its prebuilt binaries exist for 64-bit ARM, which is what the Pi runs (`aarch64`, Debian 13, glibc 2.41), and are downloaded by the Pi's first build of the brain, over 4G, once. `tract-onnx` is pure Rust, cannot crash that way, needs no download and runs YOLOX's operators, at some cost in speed. | `ort` while it holds the frame rate; `tract` if the speed allows it. |
@@ -282,12 +280,11 @@ name below must be unique, and a name the code uses that the definition lacks is
 error at the use site.
 
 - [ ] With one head on the bench, find out what `bLnd` → `bLAc` does when the DMX lead is
-      pulled (the open question on it), and step through the gobo band for a rose (the open
-      question on that).
+      pulled (the open question on it).
 - [ ] In `UKing-ZQ02015.qxf`, measured on that head with Simple Desk, not taken from the manual:
-  - the gobo channel: split "Fixed Gobo" (8–63) into a band per gobo, every one of the
-    heads' gobos, each labelled by what it projects and the rose as `Rose`, and relabel 0–7
-    `Open`;
+  - the gobo channel: the rest of "Fixed Gobo" (8–49 and 51–63, either side of `Rose` at
+    50) into a band per gobo, each labelled by what it projects, the rose's own band
+    widened to its slot, and 0–7 relabelled `Open`;
   - the strobe channel: the strobe band, labelled `Strobe`, with its preset saying which end
     is fast; a closed band only if the head has one;
   - `Light Strips`: into the Effect group, its 0–4 band `Off` with preset `NoFunction`;
@@ -362,13 +359,13 @@ why` lines.
 
   | state | heads | wash | mouth |
   |---|---|---|---|
-  | `blackout` | dark, on "Rose" | off | silent |
-  | `idle` | `ROSE_HEAD`: "Rose", gobo Rose, `ROSE_COLOUR`, dimmer = heart envelope paced by the distance, held dark for the first `BUILDUP_SECS` after `respite` while the heads travel; others dark | off | heartbeat on each beat; owls |
-  | `cut` | dark; still on "Rose" | off | mute |
+  | `blackout` | dark, on "Rose"; `ROSE_HEAD` on gobo Rose in `ROSE_COLOUR`, others white and open | off | silent |
+  | `idle` | `ROSE_HEAD`: "Rose", gobo Rose, `ROSE_COLOUR`, dimmer = heart envelope paced by the distance, held dark for the first `BUILDUP_SECS` after `respite` while the heads travel; others dark, white and open | off | heartbeat on each beat; owls |
+  | `cut` | dark; still on "Rose", wheels as in `idle` | off | mute |
   | `buildup` | "Thunderclap", gobo Open, colour White, motor speed fastest, dark | off | mute |
-  | `lightning` | dimmer full, open, still | off | silent |
-  | `thunderclap` | dimmer full, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, others open; each head hops every `THUNDER_HOP_SECS` to a fresh uniform point inside `THUNDER_RADIUS_DEG` of its "Thunderclap" pose, motor speed fastest | off | thunderclap |
-  | `respite` | dark, on "Thunderclap" | `DOOR_AMBER` | silent |
+  | `lightning` | dimmer full, open, still | white, full | silent |
+  | `thunderclap` | dimmer = the thunderclap's envelope, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, others open; each head hops every `THUNDER_HOP_SECS` to a fresh uniform point inside `THUNDER_RADIUS_DEG` of its "Thunderclap" pose, motor speed fastest | R = G = B = the thunderclap's envelope | thunderclap |
+  | `respite` | dark, white and open, held where the last hop left them | `DOOR_AMBER`, faded up over `DOOR_FADE_SECS` | silent |
 
 **Landed when**, at the bench, the scare runs from the cabinet door in test mode from every
 state, as [`SHOW.md`](SHOW.md) §16 step 6: the bench head shows the rose, cuts, moves and
