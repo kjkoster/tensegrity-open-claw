@@ -292,9 +292,10 @@ firmware when the workspace patches no wireless fixture.
 Both definitions are in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf` is ours,
 from the datasheet. `UKing-ZQ02015.qxf` came from QLC+'s library and is partly measured: the
 strobe channel's open band, the motor speed's polarity, the no-function bands of
-`Automatic Mode` and `Reset`, and colour bands that match the manual. Still to measure: a band
-per gobo on the "Fixed Gobo" band, where only the rose, at 50, is in; the strobe band; the
-`Light Strips` channel's off band; and the real travel — the definition says 540° pan and
+`Automatic Mode`, `Reset` and `Light Strips` (in the Effect group, so the e-stop turns the
+strips off), colour bands that match the manual, the dimmer's dark band (0–43), and the whole gobo
+channel: nine fixed gobos with the rose at 48–55, eight shaking ones and automatic rotation.
+Still to measure: the strobe band, and the real travel — the definition says 540° pan and
 180° tilt, and the manual gives no figures. The show asks the definition for all of these; a
 guess in the file is a guess on the night.
 

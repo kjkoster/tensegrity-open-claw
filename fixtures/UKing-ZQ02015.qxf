@@ -33,20 +33,37 @@
  </Channel>
  <Channel Name="Gobo">
   <Group Byte="0">Gobo</Group>
-  <Capability Min="0" Max="7">Open (White)</Capability>
-  <Capability Min="8" Max="63">Fixed Gobo</Capability>
-  <Capability Min="64" Max="127">Shaking Gobo</Capability>
-  <Capability Min="128" Max="255" Preset="SlowToFast">Automatic Change Pattern</Capability>
+  <!-- Within a shaking band, higher shakes faster. -->
+  <Capability Min="0" Max="7">Open</Capability>
+  <Capability Min="8" Max="15">Petals</Capability>
+  <Capability Min="16" Max="23">Dots</Capability>
+  <Capability Min="24" Max="31">Virus</Capability>
+  <Capability Min="32" Max="39">Star Flower</Capability>
+  <Capability Min="40" Max="47">Triangles</Capability>
+  <Capability Min="48" Max="55">Rose</Capability>
+  <Capability Min="56" Max="63">Twister</Capability>
+  <Capability Min="64" Max="71">Circle</Capability>
+  <Capability Min="72" Max="79">Shaking Petals</Capability>
+  <Capability Min="80" Max="87">Shaking Dots</Capability>
+  <Capability Min="88" Max="95">Shaking Virus</Capability>
+  <Capability Min="96" Max="103">Shaking Star Flower</Capability>
+  <Capability Min="104" Max="111">Shaking Triangles</Capability>
+  <Capability Min="112" Max="119">Shaking Rose</Capability>
+  <Capability Min="120" Max="127">Shaking Twister</Capability>
+  <Capability Min="128" Max="255" Preset="SlowToFast">Automatic Rotation</Capability>
  </Channel>
  <Channel Name="Strobe">
   <Group Byte="0">Shutter</Group>
-  <!-- Measured on the rig: at 0 the shutter is open and the head holds steady. Nothing above
-       0 is declared, because nothing above 0 has been measured — the manual gives this
-       channel as a bare 0–255 with no breakdown, and a guessed band boundary here would read
-       as fact to everything downstream. The gap is the honest state, not an omission. -->
+  <!-- At 0 the shutter is open. Nothing above 0 is declared yet, because the manual gives
+       this channel as a bare 0–255 with no breakdown. -->
   <Capability Min="0" Max="0" Preset="ShutterOpen">Shutter open</Capability>
  </Channel>
- <Channel Name="Dimmer" Preset="IntensityMasterDimmer"/>
+ <Channel Name="Dimmer">
+  <!-- The head stays dark all the way up to 43. -->
+  <Group Byte="0">Intensity</Group>
+  <Capability Min="0" Max="43">Off</Capability>
+  <Capability Min="44" Max="255">Level</Capability>
+ </Channel>
  <Channel Name="Automatic Mode">
   <Group Byte="0">Effect</Group>
   <Capability Min="0" Max="59" Preset="NoFunction">Other channels function</Capability>
@@ -65,15 +82,13 @@
   <Capability Min="250" Max="255">Reset (hold 5s)</Capability>
  </Channel>
  <Channel Name="Light Strips">
-  <Group Byte="0">Colour</Group>
-  <Capability Min="0" Max="4">Off</Capability>
+  <Group Byte="0">Effect</Group>
+  <Capability Min="0" Max="4" Preset="NoFunction">Off</Capability>
   <Capability Min="5" Max="109">Color Selection</Capability>
   <Capability Min="110" Max="255">Color Auto Operation</Capability>
  </Channel>
- <!-- Fast to slow, which is the opposite way round from most heads: 0 is the fastest the
-      motors will move and 255 the slowest. The definition shipped with this the wrong way
-      round, and a driver that parks the channel at 255 to mean "get out of my way" gets the
-      head's own slowest internal ramp fighting an interpolated position stream instead. -->
+ <!-- Fast to slow, the opposite way round from most heads: 0 is the fastest the motors will
+      move and 255 the slowest. -->
  <Channel Name="Motor Speed" Preset="SpeedPanTiltFastSlow"/>
  <Mode Name="12 Channel">
   <Channel Number="0">Pan</Channel>

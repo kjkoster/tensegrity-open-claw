@@ -29,7 +29,7 @@ const OTHERS: [&Zq02015; 3] = [&LEFT_STROBE_HEAD, &MIDDLE_WASH_HEAD, &RIGHT_STRO
 pub fn fill(slots: &mut [u8], heads: &Heads) {
     let (colour, gobo) = match heads.wheels {
         Wheels::Rose => (ROSE_COLOUR, Zq02015::GOBO_ROSE),
-        Wheels::White => (Zq02015::COLOR_WHITE, Zq02015::GOBO_OPEN_WHITE),
+        Wheels::White => (Zq02015::COLOR_WHITE, Zq02015::GOBO_OPEN),
     };
     fill_head(slots, &ROSE_HEAD, colour, gobo, heads.rose);
     for head in OTHERS {
@@ -37,7 +37,7 @@ pub fn fill(slots: &mut [u8], heads: &Heads) {
             slots,
             head,
             Zq02015::COLOR_WHITE,
-            Zq02015::GOBO_OPEN_WHITE,
+            Zq02015::GOBO_OPEN,
             heads.others,
         );
     }

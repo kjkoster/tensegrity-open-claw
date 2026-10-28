@@ -273,7 +273,8 @@ line, the speaker, and the camera or the reference footage; aiming for real wait
 Both are already in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf` is ours, both
 modes from the datasheet, and needs nothing. `UKing-ZQ02015.qxf` came from QLC+'s library and
 has been partly measured: the strobe channel's open band at 0, the motor speed's fast-to-slow
-polarity, and `NoFunction` bands on `Automatic Mode` and `Reset` are in, and its colour bands
+polarity, `NoFunction` bands on `Automatic Mode`, `Reset` and `Light Strips` (now in the
+Effect group) are in, as are the dimmer's dark band and every gobo band, and its colour bands
 match the manual. The band constants the show asks for are generated already, on the model's
 struct as `<CHANNEL>_<BAND>`; a label used twice within the model is left unnamed, so every
 name below must be unique, and a name the code uses that the definition lacks is a compile
@@ -282,12 +283,8 @@ error at the use site.
 - [ ] With one head on the bench, find out what `bLnd` → `bLAc` does when the DMX lead is
       pulled (the open question on it).
 - [ ] In `UKing-ZQ02015.qxf`, measured on that head with Simple Desk, not taken from the manual:
-  - the gobo channel: the rest of "Fixed Gobo" (8–49 and 51–63, either side of `Rose` at
-    50) into a band per gobo, each labelled by what it projects, the rose's own band
-    widened to its slot, and 0–7 relabelled `Open`;
   - the strobe channel: the strobe band, labelled `Strobe`, with its preset saying which end
     is fast; a closed band only if the head has one;
-  - `Light Strips`: into the Effect group, its 0–4 band `Off` with preset `NoFunction`;
   - the real pan and tilt travel: the definition says 540° and 180°, from the library,
     unmeasured.
 - [ ] Install both into QLC+ and relaunch it; both must appear in *Add fixture…*.

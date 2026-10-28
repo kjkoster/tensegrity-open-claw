@@ -69,8 +69,8 @@ than an address, because a wrong address is at least wrong on every fixture equa
 wrong speed polarity is wrong on one model and right on the next.
 
 So the ingest keeps growing to read more of the definition, and the code asks the patch
-rather than spelling a number out. Where the definition does not carry the fact yet — a gobo
-channel with one undivided "fixed gobo" band, a strobe channel with no capabilities at all —
+rather than spelling a number out. Where the definition does not carry the fact yet — a band
+that still lumps several gobos together, a strobe channel with no capabilities at all —
 the fix is to measure it and put it in the `.qxf`, not to add a constant next to the code
 that wanted it. Landing a measurement makes the code that reads it work on every fixture
 sharing the definition at once.
