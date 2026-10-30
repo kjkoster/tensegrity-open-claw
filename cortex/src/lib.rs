@@ -16,6 +16,7 @@ pub mod estop;
 pub mod latest;
 pub mod moving_head;
 pub mod qlc_plus;
+pub mod rate;
 pub mod sched;
 pub mod telemetry;
 

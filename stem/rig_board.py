@@ -36,8 +36,9 @@ def read(path):
 def run(command):
     """Runs a helper and returns its output. One that is missing, fails or hangs raises; the
     caller catches `CalledProcessError` only where the helper fails for a device that can go
-    away."""
-    finished = subprocess.run(command, capture_output=True, text=True, timeout=5, check=True)
+    away. Only its output is captured: what it says on stderr, which is why it failed, goes on
+    to the daemon's own and into the journal."""
+    finished = subprocess.run(command, stdout=subprocess.PIPE, text=True, timeout=5, check=True)
     return finished.stdout.strip()
 
 

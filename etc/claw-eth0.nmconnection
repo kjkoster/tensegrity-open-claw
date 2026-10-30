@@ -11,7 +11,7 @@ autoconnect-priority=10
 
 [ipv4]
 # Shared, as on the access point: DHCP for a laptop on the wire, routed out like every other
-# client. The camera sets its own address, below .100.
+# client. The camera's address is a reservation below .100, in claw-eth0.dnsmasq.conf.
 method=shared
 address1=10.0.1.1/24
 shared-dhcp-range=10.0.1.100,10.0.1.199

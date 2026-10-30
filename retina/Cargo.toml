@@ -1,0 +1,16 @@
+[package]
+edition      = "2024"
+name         = "retina"
+rust-version = "1.99"
+version      = "0.1.0"
+
+# The rig's camera: an Axis network camera set up over VAPIX, its picture read as MJPEG, and
+# the newest frame handed on, for a rig crate whose show wants to see. What is in the picture
+# is the eyeball's business, not this crate's.
+#
+# `ureq` for HTTP, without its default TLS and gzip: the camera is plain HTTP on the Pi's own
+# wired segment. `digest_auth` answers the camera's Digest login, which ureq does not do itself.
+[dependencies]
+cortex      = { path = "../cortex" }
+digest_auth = "0.3.1"
+ureq        = { version = "3.5.0", default-features = false }

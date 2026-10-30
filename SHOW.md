@@ -174,7 +174,7 @@ It hands the show the distance of the furthest person it sees between the benchm
 tombstone, once per camera frame it has processed — a few a second on the Pi, so a value
 stands for several of the rig's frames, and the heart's glide is what turns those steps into
 a pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: an eyeball that has lost its
-camera idles the show on the rose, which is the safe default, and `eyeball/camera` says why.
+camera idles the show on the rose, which is the safe default, and `retina/camera` says why.
 Recorded footage played into the eyeball in place of the camera is how the heart is heard
 quickening with nobody on the path.
 
@@ -361,7 +361,7 @@ the picture, places their feet on the path, and hands the show how far the furth
 is from the trigger line. Its design is [`DESIGN.md`](DESIGN.md) §3.6.
 
 **Network.** The camera's PoE injector plugs straight into the Pi's `eth0`, `10.0.1.0/24`:
-the Pi at `10.0.1.1`, the camera at `10.0.1.90`. The Ethernet hub goes between them only when
+the Pi at `10.0.1.1`, the camera at `10.0.1.3`, reserved for it by the Pi's DHCP server. The Ethernet hub goes between them only when
 a laptop needs the wire too.
 
 **Camera.** Mounted so the path runs across the picture, square on: the yard entry at the
@@ -369,12 +369,12 @@ right edge, the trigger line towards the left, the whole walk between them, and 
 out of the picture altogether — the marks only bound the picture left to right, so anyone the
 camera can see walking past behind the entry would count as in the yard. Framing is what
 keeps them out. It runs under its
-own infrared illuminator with the IR-cut filter off, which the eyeball sets over VAPIX on every
-start, as the old one did and for the same reasons: infrared beats visible light by a wide
+own infrared illuminator with the IR-cut filter off, which the retina sets over VAPIX on every
+connect, as the old eyeball did and for the same reasons: infrared beats visible light by a wide
 margin at night, the rose and the amber door barely register in it, and an exposure capped at
 10 ms keeps a walking leg a shape rather than a streak. The thunderclap saturates the picture
 for a few seconds; nothing is detected during it and nothing needs to be. The camera's
-password is the eyeball's configuration and nowhere else.
+password is in the retina's configuration.
 
 **The two benchmarks.** There is no calibration, only aiming. The two benchmarks are two
 marks fixed in the camera's picture — the trigger column towards the left, the entry column
@@ -411,28 +411,31 @@ all, and with someone watching `eyeball/fps` says what it costs.
 distance from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the
 line — or `+∞`, the tombstone, with the time it was seen. The show holds the last.
 
-**The detector.** YOLOX-Nano, Megvii's own ONNX export, reading only *person*. At this
-picture — people three to six metres off, boxes over a hundred pixels tall — the accuracy
-between small detectors is noise next to their run time, and Nano is the one that fits on the
-Pi. It counts a box from a confidence of 0.3 and merges overlapping boxes only above an
-overlap of 0.6, both looser than usual: a phantom can only land between the marks and the
+**The detector.** YOLOX-Nano, Megvii's own weights exported at 320×192, half the camera's
+16:9 picture, reading only *person*. At this picture — people three to six metres off — the
+accuracy between small detectors is noise next to their run time, and Nano is the one that
+fits on the Pi. It counts a box from a confidence of 0.09, since its infrared picture scores
+people far lower than a photograph does, and merges overlapping boxes only above an overlap of
+0.6, both looser than usual: a phantom can only land between the marks and the
 show debounces it, while a missed child costs the scare, and children seen side-on overlap.
 
 **How often that is.** The detector sets the pace, not the camera, and on the Pi it shares
 four cores with the DMX loop: the model runs at normal priority on at most three of them,
 below the brain's real-time threads, so a slow model costs frames of the eyeball's and never
-a frame of the rig's. Nano is expected at 150–300 ms a frame on the Pi 3B+ and 60–120 ms on a
-Pi 4, measured before anything else is built; about five a second is what the show wants, and
-two frames are what `SCARE_CONFIRM_SECS` is meant to cover. Below that, the Pi 4 goes in. The camera is asked for 640×480 MJPEG at a rate a little above it — a stream the
-detector cannot keep up with would queue frames and the distance would lag reality by the
-queue, so the eyeball always takes the newest frame and drops what has piled up behind it,
-and publishes `eyeball/fps` so the queue shows up as a rate below the camera's rather than as
-a show that reacts late.
+a frame of the rig's. It takes 155 ms a frame on the Pi 3B+ with the brain running, 6.5
+frames a second, where the show wants about five; two frames are what `SCARE_CONFIRM_SECS`
+is meant to cover. The camera is asked for 640×360 MJPEG at 8 a second, a little above it — a
+stream the detector cannot keep up with would queue frames and the distance would lag reality
+by the queue, so the eyeball always takes the newest frame and drops what has piled up behind
+it, and publishes `eyeball/fps` so the queue shows up as a rate below the camera's rather than
+as a show that reacts late.
 
-**On MQTT**, through the brain's connection: `eyeball/distance` (what it saw, each frame, in
-paths, or `tombstone` — beside `brain/presence`, which is what the show made of it),
-`eyeball/fps` (frames processed per second), `eyeball/people` (boxes between the benchmarks,
-telemetry only — the show never sees a count), `eyeball/camera` (`ok`, or why not).
+**On MQTT**, through the brain's connection: `eyeball/distance` (what it saw, when it
+changes, in paths, or `tombstone` — beside `brain/presence`, which is what the show made of it),
+`eyeball/fps` (frames processed per second), `eyeball/people` (boxes the detector found,
+telemetry only — the show never sees a count); and the retina's, `retina/camera` (`ok`, or
+why not) and `retina/fps` (frames received per second, against which `eyeball/fps` shows the
+frames dropped for the newest).
 
 ## 15. Show times
 

@@ -1,9 +1,9 @@
 //! The person detector: YOLOX-Nano, compiled in.
 //!
-//! `yolox_nano_320x256.onnx`: Megvii's own YOLOX-Nano weights, `yolox_nano.pth` from YOLOX's
-//! release `0.1.1rc0` (Apache-2.0, 0.9 M parameters), exported at 320×256 by `models/export.py`,
+//! `yolox_nano_320x192.onnx`: Megvii's own YOLOX-Nano weights, `yolox_nano.pth` from YOLOX's
+//! release `0.1.1rc0` (Apache-2.0, 0.9 M parameters), exported at 320×192 by `models/export.py`,
 //! which says why and how; SHA-256
-//! `04f0c2e08cbb06ba226138c19e2cc6456b712daface7c93c9f6272d10aba3c60`, which the script
+//! `0258249894b093f52f002830d09184dfadcd7cb4388fcb82bb4b01547e57a919`, which the script
 //! reproduces byte for byte. ONNX opset 11; every shape is fixed, and the graph uses only
 //! operators every runtime has: convolutions, sigmoids, slices, concatenations, max-pooling,
 //! resizes and reshapes.
@@ -15,7 +15,7 @@
 //! demo tagged `0.1.1rc0` in YOLOX's repository still normalises: it predates the retrain, and
 //! is not the reference for these weights. YOLOX's later code is.
 //!
-//! One input, `images`, `[1, 3, 256, 320]`; one output, `output`, `[1, 1680, 85]`. The
+//! One input, `images`, `[1, 3, 192, 320]`; one output, `output`, `[1, 1260, 85]`. The
 //! detector reads the size from the model, so an export at another size runs unchanged.
 //!
 //! **What it gives out.** One row per cell of three grids, strides 8, 16 and 32 in that order,
@@ -24,13 +24,13 @@
 //! has no `exp`: `x = (cx + grid_x) · stride`, `w = exp(w) · stride`, and likewise for y and h.
 
 /// The ONNX file, so the binary on the Pi is the whole show and has no model file to miss.
-pub const MODEL: &[u8] = include_bytes!("../models/yolox_nano_320x256.onnx");
+pub const MODEL: &[u8] = include_bytes!("../models/yolox_nano_320x192.onnx");
 
-// A different file under the same name would load and quietly detect differently.
-const _: () = assert!(
-    MODEL.len() == 3_713_972,
-    "not the eyeball's yolox_nano_320x256.onnx"
-);
+/// The compiled-in model's input, width by height: the camera's 16:9 at half of 640×360,
+/// rounded up to the 32 the coarsest grid needs. `Detector::new` checks the model against it,
+/// since exports at different sizes are the same length, and a wrong one would load and
+/// quietly see the yard at the wrong scale.
+pub const INPUT: (usize, usize) = (320, 192);
 
 /// The letterbox's padding, the grey the model was trained with.
 pub const PAD: u8 = 114;

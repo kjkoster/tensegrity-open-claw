@@ -217,7 +217,7 @@ error and stops the start.
 |---|---|---|
 | the frame loop (the executor, with the face's tasks) and embassy-time's timer thread | 3 | FIFO 50 |
 | the mouth | 2 | FIFO 50, ahead of everything else on that core |
-| the eyeball's detector and its runtime's pool, capture, the feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
+| the retina, the eyeball's detector and its model's thread pool, the feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
 | Stem, in its own unit | 0–2 | `Nice=10` |
 
 No core is isolated on the kernel's command line: with every other thread of the brain and
@@ -329,7 +329,8 @@ frame rate sits under.
 | `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
 | `mouth-build/` | the mouth's recordings compiled in, a build-dependency of a rig crate that has a mouth |
-| `eyeball/` | the eyeball (§3.6): a network camera in, one reading of the scene out, for a rig crate that wants to see |
+| `eyeball/` | the eyeball (§3.6): the retina's frames in, one reading of the scene out, for a rig crate that wants to see |
+| `retina/` | the retina (§3.6): a network camera set up over VAPIX and read as MJPEG, its newest frame handed to the eyeball |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
 
 **Beside the crates**, what the Pis run that is not Rust: `stem/` also holds Stem's daemon,
@@ -423,12 +424,16 @@ rather than depending on whatever WiFi exists at the site, uses its **Ethernet p
 wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd service
 for unattended operation.
 
-**Everything that must be found by address sets its own.** The access point and the wired
-segment each give the Pi a fixed address, `.1`, and hand out addresses by DHCP only from
-`.100`–`.199`, as a convenience for laptops. A device the rig talks to by address — the camera,
-a second Pi, a wireless fixture — configures a fixed address below `.100` on itself, so no
-lease, no lease server and no reservation on the Pi stands between it and being found. Both
-networks route their clients out over 4G.
+**Everything that must be found by address has a fixed one, below `.100`.** The access point
+and the wired segment each give the Pi a fixed address, `.1`, and hand out addresses by DHCP
+from `.100`–`.199`, as a convenience for laptops. A device the rig talks to by address gets one
+below `.100` in one of two ways. On the wired segment, a reservation in the Pi's DHCP server,
+`etc/claw-eth0.dnsmasq.conf`, keyed on the device's MAC: the camera, which then needs nothing
+set on itself, and comes back where it is looked for after a factory reset or a replacement.
+On the access point, an address the device sets on itself: a second Pi, a wireless fixture.
+The reservations are the private dnsmasq NetworkManager runs for every shared connection,
+fed a drop-in file; no DHCP server of the rig's own runs beside it. Both networks route their
+clients out over 4G.
 
 Settings — SSID, serial console, DIP switches, `config.txt` — are in
 [`README.md`](README.md).
@@ -599,9 +604,23 @@ no rule of its own.
 A network camera in — an Axis M3105-LVE — one small reading of the scene out to the show, and
 an annotated feed for humans. It has had two lives. First a Python process beside the brain,
 reading a person's arms for the mage rig, removed with it; that code is on the
-`last-version-with-eyeball` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now a Rust crate,
-`eyeball/`, running as threads inside the brain and handing the show how far into a space the
+`last-version-with-eyeball` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now two Rust
+crates, running as threads inside the brain and handing the show how far into a space the
 furthest person has come.
+
+**The retina sees, the eyeball looks.** `retina/` is the camera: setting it up, reading its
+stream, reconnecting when it goes, and handing on its newest frame. `eyeball/` is what is in
+the frame: the detector and the distance. Between them is a one-slot mailbox of JPEG frames,
+taken rather than read, so no frame is detected twice. The eyeball says what it needs in a
+`View` — a resolution from those the camera offers, a frame rate within what it can deliver,
+infrared or colour, and which way up the camera hangs — and the retina sets the camera up for
+it, so a consumer with other needs takes no change in the retina; the bounds are types,
+checked where the view is written. What belongs to the camera rather than to whoever looks,
+the mains' 50 Hz and the exposure for people walking, stays the retina's own. The eyeball
+starts its own retina with its view, so whoever runs the eyeball only says where the picture
+comes from: the camera, or footage. A different camera is a different retina and the same eyeball; a recorded stream stands in for the camera inside the retina,
+and stills stand in for the retina at the eyeball. Each reports its own half on the broker,
+`retina/…` and `eyeball/…`, so a dead camera and a slow detector never look alike.
 
 **Inside the brain (§1.6).** One machine and no hop: the reading crosses a latest-value seam
 to the show, the same kind of seam an OSC receiver would publish on if a sensor ever moved to
@@ -624,12 +643,15 @@ first life that was arm angles, not the seventeen joints of one pose model; in t
 is one distance, not boxes or a count. The estimator is expected to be replaced, and a schema
 naming its internals would have to change with it.
 
-**The camera is configured by the eyeball, not by hand.** The host, user and password are the
-only camera settings in its configuration; which stream, at what size and rate, the image
-rotation, and the sensor's settings are the eyeball's to decide. It sets the camera's
-parameters over VAPIX on every start, reads them back, and publishes any disagreement,
-because a setting made by hand in the camera's web UI is lost on a factory reset or a
-replacement camera. Infrared beats visible light by a wide margin, so it runs the IR-cut
+**The camera is configured by the retina, not by hand.** Which stream, at what size and rate,
+the image rotation, and the sensor's settings are the retina's to decide, beside the camera's
+host and login. It sets the camera's parameters over VAPIX on every connect and reads them
+back, because a setting made by hand in the camera's web UI is lost on a factory reset or a
+replacement camera; a setting the camera refuses, or a login it rejects, will not go away by
+retrying, and stops the brain (§1.7). The login is the camera's factory default, kept as it
+is: a camera reset or replaced takes it with nothing done by hand, and the camera boots in its
+own time, before the brain or after it, with the same login waiting whenever it answers. The
+camera is on the Pi's private wired segment, so a default password costs nothing. Infrared beats visible light by a wide margin, so it runs the IR-cut
 filter off under the camera's own illuminator, with exposure capped at 10 ms so a moving limb
 is a shape and not a streak. MJPEG over HTTP, because it has no inter-frame state or jitter
 buffer and needs only a JPEG decoder, where H.264 would need a video decoder in the build.
@@ -643,7 +665,7 @@ shows as a lower frame rate on the broker rather than as a show that reacts late
 again is not, on a Pi already running a detector. So the feed is encoded on its own thread,
 from the latest annotated frame, and only while a browser is connected.
 
-**Footage in place of the camera.** The reader takes a recorded MJPEG file as readily as the
+**Footage in place of the camera.** The retina takes a recorded MJPEG file as readily as the
 camera's stream, so the model, its threshold and the aiming are judged against the same
 walks every time, and the show can be driven with nobody in the space.
 

@@ -1,9 +1,11 @@
 """Exports YOLOX-Nano to ONNX at the eyeball's input size, from Megvii's own weights.
 
 The ONNX file Megvii published is fixed at 416×416, and on claw-pi that runs at 2.5 frames a
-second. The same weights exported at 320×256, the camera's 4:3 shape, run at 5.2: the convolutions
-work on half the pixels, and none of them on the grey padding a square needs. People in the yard
-are large enough in the picture that the smaller input costs no detection that matters there.
+second. The same weights exported at 320×192 run at 6.5: half the camera's 640×360, its 16:9,
+which keeps the full width of its view, rounded up to the 32 the coarsest grid needs. The
+convolutions work on a third of the pixels, and almost none of them on the grey padding a square
+needs. People in the yard are large enough in the picture that the smaller input costs no
+detection that matters there.
 
 This does what YOLOX 0.3.0's own `tools/export_onnx.py` does, with PyTorch's current export call
 in place of the private one that script used, which PyTorch has since removed:
@@ -24,7 +26,7 @@ To run it, in a scratch directory outside the repo:
     curl -LO https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth
     python3 -m venv venv
     venv/bin/pip install torch torchvision onnx loguru tabulate psutil thop opencv-python-headless
-    venv/bin/python export.py YOLOX yolox_nano.pth yolox_nano_320x256.onnx 256 320
+    venv/bin/python export.py YOLOX yolox_nano.pth yolox_nano_320x192.onnx 192 320
 
 Usage: export.py YOLOX_SOURCE WEIGHTS OUTPUT HEIGHT WIDTH
 """

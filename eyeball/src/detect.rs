@@ -42,7 +42,13 @@ pub struct Detector {
 impl Detector {
     /// The detector with the model compiled in.
     pub fn new() -> Detector {
-        Detector::from_onnx(model::MODEL)
+        let detector = Detector::from_onnx(model::MODEL);
+        assert_eq!(
+            detector.input(),
+            model::INPUT,
+            "detect: the compiled-in model's input"
+        );
+        detector
     }
 
     /// Loads a YOLOX ONNX model and optimises it once, for its fixed shapes. The thread pool
@@ -119,7 +125,7 @@ impl Detector {
     /// picture's pixels. The rows are one grid per stride, each row-major.
     fn decode(&self, rows: &[f32], scale: f32) -> Vec<Person> {
         let mut people = Vec::new();
-        let mut cells = rows.chunks_exact(model::COLUMNS);
+        let mut cells = rows.as_chunks::<{ model::COLUMNS }>().0.iter();
         for stride in model::STRIDES {
             let across = self.width / stride;
             let down = self.height / stride;

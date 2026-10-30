@@ -57,6 +57,11 @@ step "install and restart WiFi access point and wired segment"
 wifi_profile "$REPO/etc/claw-ap.nmconnection" claw-ap
 sudo install -m 0600 "$REPO/etc/claw-eth0.nmconnection" \
     /etc/NetworkManager/system-connections/claw-eth0.nmconnection
+# The wired segment's reservations, for NetworkManager's own DHCP server, which reads them when
+# the connection comes up below.
+sudo install -d -m 0755 /etc/NetworkManager/dnsmasq-shared.d
+sudo install -m 0644 "$REPO/etc/claw-eth0.dnsmasq.conf" \
+    /etc/NetworkManager/dnsmasq-shared.d/claw-eth0.conf
 sudo nmcli connection reload
 sudo nmcli connection up claw-ap
 sudo nmcli connection up claw-eth0

@@ -1,5 +1,5 @@
 [workspace]
-members  = ["brain", "cortex", "cortex-build", "eyeball", "mouth", "mouth-build", "stem"]
+members  = ["brain", "cortex", "cortex-build", "eyeball", "mouth", "mouth-build", "retina", "stem"]
 resolver = "3"
 
 # A panic in any thread ends the process, so systemd restarts it. Unwinding would end only the

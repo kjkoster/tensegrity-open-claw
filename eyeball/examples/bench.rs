@@ -3,7 +3,7 @@
 //!
 //! `cargo run --release -p eyeball --example bench -- [MODEL.onnx] [PICTURE]`
 //!
-//! Without a model it times the one compiled in. Without a picture it times a generated 640×480
+//! Without a model it times the one compiled in. Without a picture it times a generated 640×360
 //! frame: the model's run time does not depend on what the picture shows, only its size.
 
 use eyeball::config as cfg;
@@ -20,7 +20,7 @@ fn main() {
     cortex::sched::background();
 
     let mut model = None;
-    let mut picture = RgbImage::from_fn(640, 480, |x, y| {
+    let mut picture = RgbImage::from_fn(640, 360, |x, y| {
         let grey = ((x + y) % 256) as u8;
         Rgb([grey, grey, grey])
     });

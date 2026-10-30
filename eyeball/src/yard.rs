@@ -32,3 +32,12 @@ pub fn furthest(people: &[Person], width: u32) -> Option<&Person> {
 pub fn distance(people: &[Person], width: u32) -> f64 {
     furthest(people, width).map_or(f64::INFINITY, |person| f64::from(foot(person, width)))
 }
+
+/// A distance as it is published and drawn: to a hundredth, or `tombstone`.
+pub fn word(distance: f64) -> String {
+    if distance.is_infinite() {
+        "tombstone".to_string()
+    } else {
+        format!("{distance:.2}")
+    }
+}

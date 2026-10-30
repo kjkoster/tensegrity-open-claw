@@ -69,13 +69,15 @@ macOS.
   point and its clients cannot disagree.
 - **The access point** is `etc/claw-ap.nmconnection`, in NetworkManager's shared mode: the
   Pi at `10.0.10.1`, DHCP for laptops from `.100`–`.199`, DNS relayed, and every client routed
-  out over 4G. Everything that must be found by address sets its own, below `.100`. Every
+  out over 4G. Everything on it that must be found by address sets its own, below `.100`. Every
   deploy installs the profile and brings it up, which drops every WiFi client for a few
   seconds.
 - The **Ethernet port** is the wired segment: a network camera through its PoE injector, and
   a laptop for SSH, with an Ethernet hub in the cabinet when both need it. It is
   `etc/claw-eth0.nmconnection`, in shared mode like the access point: the Pi at `10.0.1.1`,
-  DHCP for a laptop from `.100`–`.199`, routed out over 4G; the camera sets its own address.
+  DHCP for a laptop from `.100`–`.199`, routed out over 4G. The camera's address, `10.0.1.3`,
+  is a reservation for its MAC in `etc/claw-eth0.dnsmasq.conf`, which the deploy installs for
+  NetworkManager's own DHCP server; the file lists every fixed address on the segment.
 
 ### 4G uplink
 
@@ -135,12 +137,12 @@ are in [`SHOW.md`](SHOW.md).
 | The mouth (a USB audio interface) | USB on the hub (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `aplay -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `mouth/src/config.rs`. Reports under `mouth/` through the brain's connection; the topics are in [`SHOW.md`](SHOW.md). |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. Reports under `face/` through the brain's connection. |
-| The eyeball's camera (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.90`; its host, user and password are in `eyeball/src/config.rs` and nowhere else, and the eyeball sets everything else over VAPIX on every start. The annotated feed is at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. Reports under `eyeball/` through the brain's connection; the topics are in [`SHOW.md`](SHOW.md). |
+| The retina (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.3`, reserved for it by the Pi's DHCP server. The retina owns the camera: its user (`root`), password (`pass`, the factory default) and settings are in `retina/src/config.rs`, the retina sets them over VAPIX on every connect, and it reads the picture the eyeball asks for. Reports under `retina/` through the brain's connection. The eyeball only takes the retina's frames: it runs the detector, reports under `eyeball/`, and serves the annotated feed at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. The topics of both are in [`SHOW.md`](SHOW.md). |
 | Ethernet hub | `eth0`, own power supply | Only when a laptop needs the wired segment beside the camera. |
 
-The eyeball runs inside the brain, at normal priority below its real-time threads, so a slow
-model costs the eyeball frames and never a DMX one; why, and what it costs, is in
-[`DESIGN.md`](DESIGN.md) §1.6.
+The retina and the eyeball run inside the brain, at normal priority below its real-time
+threads, so a slow camera or a slow model costs the eyeball frames and never a DMX one; why,
+and what it costs, is in [`DESIGN.md`](DESIGN.md) §1.6.
 
 ## Power
 
