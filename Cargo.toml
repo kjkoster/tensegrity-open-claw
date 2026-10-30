@@ -1,3 +1,12 @@
 [workspace]
-members  = ["brain", "cortex", "cortex-build", "mouth", "mouth-build", "stem"]
+members  = ["brain", "cortex", "cortex-build", "eyeball", "mouth", "mouth-build", "stem"]
 resolver = "3"
+
+# A panic in any thread ends the process, so systemd restarts it. Unwinding would end only the
+# thread that panicked, and the brain would run on without its mouth, its takeover receiver
+# or its telemetry, looking healthy.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

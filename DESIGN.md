@@ -201,16 +201,67 @@ The eyeball is one whose reading would otherwise need a socket between two proce
 same Pi, or a second machine: inside, it is a thread and a seam.
 
 Those run inside the brain, and are written so a dead device costs what it provides: they
-report, retry with backoff, and never block the frame loop. A part that does heavy work drops
+report, retry with backoff, and never block the frame loop; what cannot come back stops the
+brain instead (§1.7). A part that does heavy work drops
 out of the brain's real-time scheduling, so it slows itself and never a frame. Living and
 dying with the brain, they hold no broker connection of their own and publish their subtrees
 through the brain's (§3.1).
+
+Each thread sets its own core and scheduling as its first act, from `cortex::sched`, rather
+than the unit file setting one policy for the whole process. A thread spawned afterwards
+inherits both, which is what puts embassy-time's timer thread beside the frame loop and an
+inference runtime's worker pool on the background cores. A failure to set them is a deploy
+error and stops the start.
+
+| thread | cores | scheduling |
+|---|---|---|
+| the frame loop (the executor, with the face's tasks) and embassy-time's timer thread | 3 | FIFO 50 |
+| the mouth | 2 | FIFO 50, ahead of everything else on that core |
+| the eyeball's detector and its runtime's pool, capture, the feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
+| Stem, in its own unit | 0–2 | `Nice=10` |
+
+No core is isolated on the kernel's command line: with every other thread of the brain and
+Stem pinned off core 3, what is left there is preempted by the frame loop anyway.
 
 What inside costs is the one thing a process boundary bought: a crash in a part is a crash
 of the brain, which systemd restarts in seconds of signal loss. That is a fair price for Rust,
 whose failures are panics the brain is built to end on. It is a real one for native code a
 part links, such as a C++ inference runtime, and it is why a pure-Rust alternative is worth
 its cost in speed when there is one.
+
+### 1.7 Recoverable faults are soft, unrecoverable faults are hard and fast
+
+Recoverable faults may be soft-handled; unrecoverable faults fail hard and fast.
+
+A fault is recoverable when it can go away by itself: a device unplugged and plugged back
+in, a network link that drops and returns, another machine that is down and comes back up.
+Those are reported, retried with backoff, and cost only what they provide while they last.
+The show runs on through them.
+
+Every other fault cannot recover. A missing boot overlay, a serial port that will not take a
+write, an audio interface that opens but refuses the recordings' rate, a port another
+process holds, a thread that cannot be pinned, a library the deploy should have installed:
+retrying any of them only repeats the failure, and logging it and carrying on hides a broken
+rig behind one that seems to run. They panic at the point of failure, preferably at startup,
+so the journal names the cause and systemd's restart loop makes it impossible to miss at
+the bench, long before a show. The workspace builds with `panic = "abort"`, so a panic in any
+thread ends the process; unwinding would end only that thread, and the brain would run on
+without it, looking healthy.
+
+The test is not how much the thing matters to the show, but whether waiting could ever fix
+it.
+
+### 1.8 Everything at its latest, at the start of every show
+
+The first step of every new show is upgrading everything to its newest release and making it
+work again: the Rust toolchain and every crate, the Python packages, GreptimeDB, Grafana,
+QLC+, Raspberry Pi OS on every Pi, the camera's firmware where its maker still ships one, and
+the models the rig runs. Pre-releases count where a dependency has only those.
+An older version stays only for a reason written beside its pin.
+
+Upgrading at the start is when it is cheap: there is a whole build ahead to find what broke,
+where upgrading the week of a show is a risk, and never upgrading is a pile of breaking changes
+that arrives all at once, the day something forces it.
 
 ---
 
@@ -331,7 +382,8 @@ Standard Rust on Trixie Raspbian Linux, `std`.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
 - **ALSA** for audio, in and out.
-- **ONNX Runtime** (`ort`), or `tract` where speed allows, for a sensor's neural model.
+- **`tract`**, pure Rust, for a sensor's neural model: nothing prebuilt downloaded and no C++ in
+  the brain. ONNX Runtime only from Debian's package, should `tract` ever be too slow.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
   producers — sensors, the sACN receiver, audio — on their own OS threads feeding it, or fed
   by it, through a lock-free latest-value seam. A blocking `recv` on the executor's thread
@@ -599,9 +651,15 @@ walks every time, and the show can be driven with nobody in the space.
 
 A person detector, not a pose model: boxes are enough, and a person is the bottom corner of
 their box on the near side of the space — the leading foot, which a box merged over a bunch
-still puts on the one in front. A YOLOX model (Apache-2.0, published as ONNX) runs on the CPU through ONNX
-Runtime, or through `tract`, pure Rust, if it is fast enough; the model is compiled into the
-binary (§2.3).
+still puts on the one in front. A YOLOX-Nano model (Apache-2.0) runs on the CPU through `tract`,
+pure Rust; the model is compiled into the binary (§2.3), with its licence and notice beside it.
+
+**The model's input is the camera's shape, not the square it was published at.** Its work
+scales with the pixels it looks at, so Megvii's weights are exported at 320×256, the 4:3 of the
+camera's frame: twice the frame rate of the published 416×416 on the Pi, and no work spent on
+padding. The cost is the smallest people, under about 25 pixels tall in the model's picture,
+which the yard's geometry keeps clear of. The export is a script beside the model, so another
+shape is one run of it.
 
 **No calibration, only aiming.** The space has two benchmarks, and they are two columns
 fixed in the camera's picture: the camera, square on to the path, is aimed so the benchmarks
@@ -675,7 +733,8 @@ clock, the frame count, with the sound a buffer behind the frame that asked for 
 them together: a sound a process hop late is a cut the audience hears arrive after it sees
 it. So the mouth is a playback thread inside the brain (§1.6), on blocking ALSA writes, and a
 dead or missing interface costs the sound and never a frame: it reopens with backoff and
-reports why it is mute.
+reports why it is mute. An interface that opens but will not play the recordings as they were
+built, at their rate and format, stops the brain instead (§1.7).
 
 **Small buffers, because the cut is the point.** A period of 256 frames and two of them in the
 buffer put the next sound about 11 ms behind the frame that asked for it. A mute zeroes the

@@ -29,7 +29,7 @@ use crate::qlc_plus::Sacn;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 use zihatec_rs_485_dmx::SLOTS;
 
@@ -306,14 +306,11 @@ fn slots_of(pkt: &[u8], count: usize) -> [u8; SLOTS] {
 /// embassy executor without stalling the frame loop, and embassy has no reactor for `std`
 /// sockets. Same shape as any sensor: a blocking producer feeding the frame loop through a
 /// latest-value seam.
-pub fn spawn_receiver(
-    own_cid: [u8; 16],
-    sacn: Sacn,
-    publisher: LatestTx<Takeover>,
-) -> JoinHandle<()> {
+pub fn spawn_receiver(own_cid: [u8; 16], sacn: Sacn, publisher: LatestTx<Takeover>) {
     thread::Builder::new()
         .name("sacn-in".into())
         .spawn(move || {
+            crate::sched::background();
             let mut backoff_s = 1u64;
             loop {
                 let started = clock::now_us();
@@ -335,7 +332,7 @@ pub fn spawn_receiver(
                 backoff_s = (backoff_s * 2).min(cfg::SACN_BIND_RETRY_MAX_S);
             }
         })
-        .expect("failed to spawn sacn-in thread")
+        .expect("failed to spawn sacn-in thread");
 }
 
 /// Binds, joins, and runs the receive loop until an unrecoverable socket error. Only
@@ -345,9 +342,15 @@ fn receive(
     sacn: Sacn,
     publisher: &LatestTx<Takeover>,
 ) -> Result<(), Box<dyn Error>> {
-    // One address, no multicast joins: see `Sacn::address`. A failure here is normally the
-    // tunnel not being up yet, which the caller's backoff handles.
-    let socket = UdpSocket::bind(SocketAddrV4::new(sacn.address, sacn.port))?;
+    // One address, no multicast joins: see `Sacn::address`. The address not being there yet is
+    // the tunnel not being up, which the caller's backoff waits out. Any other bind failure,
+    // such as a second brain holding the port, will not go away by waiting.
+    let address = SocketAddrV4::new(sacn.address, sacn.port);
+    let socket = match UdpSocket::bind(address) {
+        Ok(socket) => socket,
+        Err(e) if e.kind() == ErrorKind::AddrNotAvailable => return Err(e.into()),
+        Err(e) => panic!("sacn: bind {address}: {e}"),
+    };
     eprintln!(
         "sacn: listening on {}:{} universe {} — takeover above priority {}",
         sacn.address,
@@ -360,7 +363,9 @@ fn receive(
     // and a source going quiet is exactly what the expiry check exists to notice. Waking at
     // a quarter of the data-loss timeout bounds detection at 1.25× that timeout while
     // leaving an idle rig essentially asleep.
-    socket.set_read_timeout(Some(Duration::from_micros(cfg::SACN_SOURCE_TIMEOUT_US / 4)))?;
+    socket
+        .set_read_timeout(Some(Duration::from_micros(cfg::SACN_SOURCE_TIMEOUT_US / 4)))
+        .unwrap_or_else(|e| panic!("sacn: read timeout: {e}"));
 
     let mut pkt = [0u8; MAX_PACKET_LEN];
     let mut sources = SourceTable::new();

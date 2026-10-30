@@ -22,6 +22,20 @@ pub const SACN_PRIORITY: u8 = 100;
 // the 2.5 s data-loss timeout.
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
+// ── Cores and priorities ─────────────────────────────────────────────────────
+// The Pi has four cores. The frame loop gets the last to itself; the audio thread and every
+// other thread share the first three, where the audio thread's real-time priority puts it
+// ahead of the rest. Stem's unit pins it to the same three, so nothing outside the brain
+// lands on the frame loop's core either.
+pub const FRAME_LOOP_CORES: &[usize] = &[3];
+pub const AUDIO_CORES: &[usize] = &[2];
+pub const BACKGROUND_CORES: &[usize] = &[0, 1, 2];
+
+// The brain's one real-time priority, shared by the frame loop and the audio thread, which
+// never compete for a core. Any FIFO priority puts them ahead of every ordinary thread; 50 is
+// the one the brain's unit file set before the threads set their own.
+pub const REALTIME_PRIORITY: i32 = 50;
+
 // ── E1.31 receive / external takeover ────────────────────────────────────────
 // The E1.31 network-data-loss timeout: an external source that goes quiet this long loses
 // the universe and the internal engine resumes. This is the backstop only — a clean QLC+
@@ -32,9 +46,9 @@ pub const SACN_SOURCE_TIMEOUT_US: u64 = 2_500_000;
 // unbounded storage, and an expiring entry frees a slot within the timeout above.
 pub const SACN_MAX_SOURCES: usize = 4;
 
-// Rebind backoff cap for the receive socket. Retrying rather than dying means the takeover
-// path comes back the moment whatever held the port lets go, and the sculpture keeps
-// breathing on the internal engine meanwhile.
+// Rebind backoff cap for the receive socket, while the WireGuard address it binds is not up
+// yet. Retrying rather than dying means the takeover path comes back the moment the tunnel
+// does, and the sculpture keeps breathing on the internal engine meanwhile.
 pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
 // Fixture addressing, the universe, the sACN port and the address a console is received on

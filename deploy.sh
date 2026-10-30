@@ -25,7 +25,11 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # reference PDFs, the editor config and the git history all stay on the Mac.
 #
 #   the crates       the members of the cargo workspace; the brain's recordings travel inside
-#                    it, in `brain/sounds/`, as the build compiles them in
+#                    it, in `brain/sounds/`, and the eyeball's model in `eyeball/models/`, as
+#                    the build compiles them in
+#   Cargo.lock       the versions in git, which cover every target, so the Pi builds exactly
+#                    what was checked rather than resolving again against its own crate index;
+#                    they change only with a deliberate `cargo update`
 #   claw.qxw        the claw's patch (what is where) and its presets
 #   fixtures/*.qxf   the definitions (what each fixture's channels mean)
 #   stem/           Stem's daemon and broker configuration, and the `stem` crate, the Rust
@@ -41,8 +45,8 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build brain mouth mouth-build fixtures stem etc)
-FILES=(Cargo.toml claw.qxw)
+DIRECTORIES=(cortex cortex-build brain eyeball mouth mouth-build fixtures stem etc)
+FILES=(Cargo.toml Cargo.lock claw.qxw)
 
 step "rsync sources to $PI:$PI_DIR"
 # --checksum, not the default size+mtime check: git checkouts and editor saves bump source

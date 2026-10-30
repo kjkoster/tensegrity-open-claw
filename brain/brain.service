@@ -10,23 +10,10 @@ After=network.target
 ExecStart=/usr/local/bin/brain
 Restart=always
 RestartSec=5
-# Real-time scheduling so the kernel can't preempt the DMX loop mid-frame and split the
-# back-to-back slot stream (the classic Pi-UART→DMX corruption). The kernel's RT throttle
-# (sched_rt_runtime_us, 95% by default) still guarantees non-RT tasks make progress, so a
-# busy-spin in the break code can't lock the box.
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=50
-# Deliberately no CPUAffinity. It belongs in the code, not here.
-#
-# What the design wants is one core kept clear for the DMX loop — a statement about one thread.
-# A unit-file affinity is a statement about the whole process, and this process runs several
-# threads beside the frame loop: the sACN receiver, telemetry, and whatever parts the rig has,
-# an audio thread among them. Confining all of them to one core, all at the same real-time
-# priority, starves an audio thread of the moments it needs to serve its period, and the
-# interface under- or overruns — an xrun, which on a rig with sound is heard.
-#
-# Pinning only the DMX thread, from inside the process where the thread exists, is the version
-# of this that is worth having.
+# Deliberately no CPUSchedulingPolicy or CPUAffinity: each thread sets its own core and
+# priority from inside the process (cortex's `sched`), because the frame loop and the threads
+# beside it need opposite things, and a unit file can only say one thing about the whole
+# process.
 
 [Install]
 WantedBy=multi-user.target

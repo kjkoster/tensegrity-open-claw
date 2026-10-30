@@ -13,7 +13,7 @@ pub const STREAM_TERMINATED: u8 = 0x40;
 pub fn new_cid() -> [u8; 16] {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("the clock is before 1970")
         .subsec_nanos();
     let pid = std::process::id();
     let mut cid = [0u8; 16];

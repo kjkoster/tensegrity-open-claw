@@ -210,11 +210,10 @@ pub async fn frame_task(
             &slots[..dmx_slots],
         );
         sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
-        // A wire write error is logged, not fatal — a yanked cable must not take the
-        // sculpture down.
-        if let Err(e) = hat.send(&slots) {
-            eprintln!("dmx hat: write error: {e}");
-        }
+        // The HAT is the Pi's own UART: a pulled DMX lead never reaches it, so a write that
+        // fails is the serial setup, and it will fail again.
+        hat.send(&slots)
+            .unwrap_or_else(|e| panic!("dmx hat: {}: {e}", cfg::SERIAL_DEVICE));
         sequence = sequence.wrapping_add(1);
     }
 }

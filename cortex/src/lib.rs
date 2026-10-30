@@ -16,6 +16,7 @@ pub mod estop;
 pub mod latest;
 pub mod moving_head;
 pub mod qlc_plus;
+pub mod sched;
 pub mod telemetry;
 
 mod orchestrator;
@@ -101,41 +102,43 @@ pub(crate) fn frame_width(patch: &[PatchEntry]) -> usize {
 
 /// What the brain runs on, under `sys/brain/`, where every part of the rig publishes its own:
 /// the board as its device tree names it, the cores, the top CPU frequency in MHz, the
-/// installed RAM in KB, and the target triplet the brain was compiled for. A reading the
-/// board does not offer is left out rather than published as a guess.
+/// installed RAM in KB, and the target triplet the brain was compiled for. The brain runs
+/// only on a Pi, where every one of these is there to read.
 fn publish_system(publisher: &telemetry::Publisher) {
-    if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
-        publisher.publish_sys("board", model.trim_end_matches('\0').trim());
-    }
-    if let Some(kb) = installed_ram_kb() {
-        publisher.publish_sys("ram_kb", kb.to_string());
-    }
-    if let Ok(cores) = std::thread::available_parallelism() {
-        publisher.publish_sys("cores", cores.to_string());
-    }
-    let max_khz = "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq";
-    if let Some(khz) = std::fs::read_to_string(max_khz)
-        .ok()
-        .and_then(|text| text.trim().parse::<u64>().ok())
-    {
-        publisher.publish_sys("cpu_frequency_mhz", (khz / 1000).to_string());
-    }
+    let model = read("/proc/device-tree/model");
+    publisher.publish_sys("board", model.trim_end_matches('\0').trim());
+    publisher.publish_sys("ram_kb", installed_ram_kb().to_string());
+    let cores = std::thread::available_parallelism().expect("the number of cores");
+    publisher.publish_sys("cores", cores.to_string());
+    let max_khz: u64 = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+        .trim()
+        .parse()
+        .expect("cpuinfo_max_freq in kHz");
+    publisher.publish_sys("cpu_frequency_mhz", (max_khz / 1000).to_string());
     publisher.publish_sys("triplet", env!("TRIPLET"));
+}
+
+fn read(path: &str) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 /// The RAM fitted to a Raspberry Pi, decoded from the revision code in `/proc/cpuinfo`.
 ///
 /// Not the kernel's `MemTotal`, which is what is left once the GPU and the kernel have taken
-/// their share. A new-style code (bit 23) carries the size in bits 20–22, as 256 MB doubled
-/// that many times; an old-style code does not say, and is left out.
-fn installed_ram_kb() -> Option<u64> {
-    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+/// their share. A new-style code (bit 23), which every Pi since the 2 B has, carries the size
+/// in bits 20–22, as 256 MB doubled that many times.
+fn installed_ram_kb() -> u64 {
+    let cpuinfo = read("/proc/cpuinfo");
     let revision = cpuinfo
         .lines()
-        .find_map(|line| line.strip_prefix("Revision")?.split(':').nth(1))?;
-    let code = u32::from_str_radix(revision.trim(), 16).ok()?;
-    let new_style = code & (1 << 23) != 0;
-    new_style.then(|| (256 * 1024) << ((code >> 20) & 0x7))
+        .find_map(|line| line.strip_prefix("Revision")?.split(':').nth(1))
+        .expect("/proc/cpuinfo has a Revision");
+    let code = u32::from_str_radix(revision.trim(), 16).expect("the Revision in hex");
+    assert!(
+        code & (1 << 23) != 0,
+        "board revision {code:x} is old-style and does not give the RAM"
+    );
+    (256 * 1024) << ((code >> 20) & 0x7)
 }
 
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
@@ -143,6 +146,13 @@ fn installed_ram_kb() -> Option<u64> {
 /// The executor lives here rather than in the rig, so a rig binary is its patch, its presets
 /// and its show, and nothing else — `fn main` is one call.
 pub fn run(mut rig: Rig) -> ! {
+    // This thread becomes the frame loop. The clock is read straight after pinning it, because
+    // the first read starts embassy-time's timer thread, which wakes the frame loop: started
+    // here, it inherits the frame loop's core and priority. Every task that reads the clock
+    // runs on the executor below, so none can start it earlier.
+    sched::realtime(config::FRAME_LOOP_CORES);
+    embassy_time::Instant::now();
+
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
     socket
         .set_multicast_ttl_v4(1)
@@ -154,7 +164,7 @@ pub fn run(mut rig: Rig) -> ! {
     // the frame loop decides once per frame whether one is actually driving.
     let (takeover_tx, takeover_rx) = latest::latest(sacn_in::Takeover::idle());
     let sacn = rig.sacn;
-    let _sacn_in = sacn_in::spawn_receiver(cid, sacn, takeover_tx);
+    sacn_in::spawn_receiver(cid, sacn, takeover_tx);
 
     let group = sacn_out::multicast_addr(sacn.universe);
     let name = rig.name;
@@ -199,13 +209,17 @@ pub fn run(mut rig: Rig) -> ! {
     let shutdown = Arc::new(AtomicBool::new(false));
     let asked = shutdown.clone();
     let mut signals = Signals::new([SIGINT, SIGTERM]).expect("signal registration failed");
-    std::thread::spawn(move || {
-        if let Some(signal) = signals.forever().next() {
-            let signal = signal_name(signal).unwrap_or("signal");
-            eprintln!("{name}: {signal} — shutting down");
-            asked.store(true, Ordering::Relaxed);
-        }
-    });
+    std::thread::Builder::new()
+        .name("signals".into())
+        .spawn(move || {
+            sched::background();
+            if let Some(signal) = signals.forever().next() {
+                let signal = signal_name(signal).expect("a signal registered above");
+                eprintln!("{name}: {signal} — shutting down");
+                asked.store(true, Ordering::Relaxed);
+            }
+        })
+        .expect("failed to spawn the signal thread");
 
     // `Executor::run` needs `&'static mut`, and never returns, so leaking one allocation buys
     // that lifetime honestly — this is what the `#[embassy_executor::main]` macro does with a

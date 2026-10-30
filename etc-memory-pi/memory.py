@@ -50,8 +50,7 @@ def wifi_signal_dbm():
     """How strongly memory-pi hears the access point. Stem reports the same link from claw-pi's
     end, as this Pi's station; the two disagreeing by a lot points at an antenna."""
     output = rig_board.run(["iw", "dev", WIFI_INTERFACE, "link"])
-    if output is None:
-        return None
+    # No signal line while it is not associated, which is the access point being away.
     found = re.search(r"^\s*signal:\s*(-?\d+)", output, re.MULTILINE)
     return int(found.group(1)) if found else None
 

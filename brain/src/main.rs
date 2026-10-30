@@ -34,8 +34,7 @@ fn main() {
     // The face first, so the lamps are dark and the inputs pulled up while everything else
     // starts. It publishes its own `face/…` subtree on the brain's connection, reads its lamps
     // out of the frames the brain sends, and the show reads its state.
-    let (_brain_telemetry, brain_publisher, brain_farewell) =
-        telemetry::spawn(cortex::TELEMETRY_SERVICE);
+    let (brain_publisher, brain_farewell) = telemetry::spawn(cortex::TELEMETRY_SERVICE);
     let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
     let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
     let estop_state = face_state.clone();

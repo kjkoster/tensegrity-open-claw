@@ -110,7 +110,7 @@ impl Show {
 pub fn now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("the clock is before 1970")
         .as_secs_f64()
 }
 

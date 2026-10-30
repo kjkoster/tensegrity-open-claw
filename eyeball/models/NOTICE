@@ -1,0 +1,12 @@
+yolox_nano_320x256.onnx
+
+YOLOX-Nano, Copyright (c) 2021-2022 Megvii Inc., licensed under the Apache License 2.0, a copy
+of which is in LICENSE beside this file. The rest of this repository is under its own licence,
+in the repository's root.
+
+Source: the weights yolox_nano.pth from YOLOX's release 0.1.1rc0,
+https://github.com/Megvii-BaseDetection/YOLOX/releases/tag/0.1.1rc0
+
+Changes: the weights are unchanged. They were exported to ONNX at an input of 320×256 pixels
+(width × height), where Megvii published an ONNX file at 416×416, by export.py beside this file,
+using YOLOX 0.3.0's model code.

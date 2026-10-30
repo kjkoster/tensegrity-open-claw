@@ -5,8 +5,9 @@ Stem reads claw-pi through this and memory's health daemon reads memory-pi, so a
 reading is taken lands on both Pis. What only one Pi has — claw-pi's modem and access point,
 memory-pi's SSD — stays in that Pi's daemon.
 
-Every reader returns None for anything the machine does not have rather than raising, so a
-missing tool or file costs one topic and never the daemon.
+Every file and tool read here is part of every Pi running Raspberry Pi OS, so a reader that
+cannot get its value raises: the install is broken, and the daemon stops and says so rather
+than reporting a board with readings missing.
 """
 
 import os
@@ -26,33 +27,28 @@ THROTTLE_FLAGS = {
 THROTTLE_LATCHED_SHIFT = 16
 
 
-def read(path, default=None):
-    """Reads a small file, returning `default` for anything the machine does not have."""
-    try:
-        with open(path, "r") as handle:
-            return handle.read().strip("\x00").strip()
-    except OSError:
-        return default
+def read(path):
+    """Reads a small file."""
+    with open(path, "r") as handle:
+        return handle.read().strip("\x00").strip()
 
 
 def run(command):
-    """Runs a helper and returns its output, or None. A missing tool is never fatal."""
-    try:
-        finished = subprocess.run(
-            command, capture_output=True, text=True, timeout=5, check=False
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return finished.stdout.strip() if finished.returncode == 0 else None
+    """Runs a helper and returns its output. One that is missing, fails or hangs raises; the
+    caller catches `CalledProcessError` only where the helper fails for a device that can go
+    away."""
+    finished = subprocess.run(command, capture_output=True, text=True, timeout=5, check=True)
+    return finished.stdout.strip()
 
 
 # ── System ───────────────────────────────────────────────────────────────────
 
 
 def cpu_field(name):
-    text = read("/proc/cpuinfo", "")
-    found = re.search(rf"^{name}\s*:\s*(.+)$", text, re.MULTILINE)
-    return found.group(1).strip() if found else None
+    found = re.search(rf"^{name}\s*:\s*(.+)$", read("/proc/cpuinfo"), re.MULTILINE)
+    if not found:
+        raise LookupError(f"/proc/cpuinfo has no {name}")
+    return found.group(1).strip()
 
 
 def system():
@@ -72,24 +68,19 @@ def installed_ram_kb():
     """The RAM fitted, in KB, decoded from the board's revision code.
 
     Not `MemTotal`, which is what is left once the GPU and the kernel have taken their share. A
-    new-style code (bit 23) carries the size in bits 20–22, as 256 MB doubled that many times;
-    an old-style code does not say, and is left out.
+    new-style code (bit 23), which every Pi since the 2 B has, carries the size in bits 20–22,
+    as 256 MB doubled that many times.
     """
-    revision = cpu_field("Revision")
-    try:
-        code = int(revision, 16)
-    except (TypeError, ValueError):
-        return None
+    code = int(cpu_field("Revision"), 16)
     if not code & (1 << 23):
-        return None
+        raise ValueError(f"board revision {code:x} is old-style and does not give the RAM")
     return (256 * 1024) << ((code >> 20) & 0x7)
 
 
 def cpu_frequency_mhz():
     """The top frequency the CPU is allowed to run at, which is what it can sustain when the
     rig is busy, rather than wherever the governor happens to have it at the moment."""
-    khz = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-    return int(khz) // 1000 if khz and khz.isdigit() else None
+    return int(read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")) // 1000
 
 
 # ── Stats ────────────────────────────────────────────────────────────────────
@@ -98,8 +89,7 @@ def cpu_frequency_mhz():
 def temperature_c():
     # From sysfs rather than vcgencmd: one file read against a subprocess, every interval,
     # for the same millidegrees.
-    raw = read("/sys/class/thermal/thermal_zone0/temp")
-    return round(int(raw) / 1000.0, 1) if raw and raw.isdigit() else None
+    return round(int(read("/sys/class/thermal/thermal_zone0/temp")) / 1000.0, 1)
 
 
 def throttling():
@@ -109,13 +99,7 @@ def throttling():
     They are separated because they are answers to genuinely different questions and the raw
     hex answers neither without a table nobody has to hand at the time.
     """
-    output = run(["vcgencmd", "get_throttled"])
-    if not output or "=" not in output:
-        return None
-    try:
-        word = int(output.split("=", 1)[1], 16)
-    except ValueError:
-        return None
+    word = int(run(["vcgencmd", "get_throttled"]).split("=", 1)[1], 16)
     return {
         "raw": f"0x{word:x}",
         "now": {name: bool(word >> bit & 1) for name, bit in THROTTLE_FLAGS.items()},
@@ -127,14 +111,13 @@ def throttling():
 
 
 def memory_mb():
-    text = read("/proc/meminfo", "")
+    text = read("/proc/meminfo")
     fields = {}
     for key in ("MemTotal", "MemAvailable"):
         found = re.search(rf"^{key}:\s+(\d+) kB", text, re.MULTILINE)
-        if found:
-            fields[key] = round(int(found.group(1)) / 1024)
-    if "MemTotal" not in fields or "MemAvailable" not in fields:
-        return None
+        if not found:
+            raise LookupError(f"/proc/meminfo has no {key}")
+        fields[key] = round(int(found.group(1)) / 1024)
     # Available rather than free: free excludes the page cache, reads alarmingly low on a
     # healthy box, and would have somebody hunting a leak that is not there.
     return {
@@ -146,11 +129,8 @@ def memory_mb():
 
 def addresses():
     """Interface → address, so a tree tells you the tunnel is up and the modem has a lease."""
-    output = run(["ip", "-o", "-4", "addr", "show"])
-    if output is None:
-        return None
     found = {}
-    for line in output.splitlines():
+    for line in run(["ip", "-o", "-4", "addr", "show"]).splitlines():
         fields = line.split()
         if len(fields) >= 4:
             found[fields[1]] = fields[3]
@@ -158,10 +138,7 @@ def addresses():
 
 
 def disk_free_mb(path="/"):
-    try:
-        usage = os.statvfs(path)
-    except OSError:
-        return None
+    usage = os.statvfs(path)
     return round(usage.f_bavail * usage.f_frsize / 1024 / 1024)
 
 
@@ -169,7 +146,7 @@ def board_stats():
     """The part of every health daemon's reading that any Pi has."""
     return {
         "at": time.time(),
-        "uptime_s": round(float(read("/proc/uptime", "0").split()[0])),
+        "uptime_s": round(float(read("/proc/uptime").split()[0])),
         "temperature_c": temperature_c(),
         "throttling": throttling(),
         # Named rather than a three-element list, because `load/1m` says what it is and
@@ -188,8 +165,7 @@ def warn_latched(reading, warned, log):
     explains a slow show that nobody would otherwise connect to the power supply. `warned` is
     the caller's set of flags already logged.
     """
-    latched = reading["throttling"]["since_boot"] if reading["throttling"] else {}
-    for name, raised in latched.items():
+    for name, raised in reading["throttling"]["since_boot"].items():
         if raised and name not in warned:
             warned.add(name)
             log(f"{name} has occurred since boot ({reading['throttling']['raw']})")

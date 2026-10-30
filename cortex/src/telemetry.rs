@@ -29,7 +29,7 @@ use std::net::{SocketAddrV4, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// How long a drain waits for the broker. The client never subscribes and has nothing to wait
@@ -74,21 +74,13 @@ enum Command {
 /// frame, and the newest reading is worth more than the backlog behind it anyway.
 #[derive(Clone)]
 pub struct Publisher {
-    outgoing: Option<SyncSender<Command>>,
+    outgoing: SyncSender<Command>,
     /// The part this publisher speaks for, whose name prefixes its topics in place of the
     /// client's; `None` for the client itself.
     part: Option<&'static str>,
 }
 
 impl Publisher {
-    /// A publisher that goes nowhere, for a rig built without telemetry.
-    pub fn disabled() -> Self {
-        Self {
-            outgoing: None,
-            part: None,
-        }
-    }
-
     /// A publisher for a part inside this process, on this client's connection: its topics go
     /// under `<part>/` instead of the client's name.
     pub fn part(&self, part: &'static str) -> Publisher {
@@ -125,9 +117,6 @@ impl Publisher {
     }
 
     fn send(&self, scope: Scope, topic: String, payload: String, retain: bool) {
-        let Some(outgoing) = &self.outgoing else {
-            return;
-        };
         let message = Command::Publish(Message {
             scope,
             topic,
@@ -137,7 +126,7 @@ impl Publisher {
         // A dropped reading is logged nowhere on purpose: the condition that fills this queue
         // is a broker that stopped reading, which the health tree already reports, and a log
         // line per dropped message would be a second failure printed on top of the first.
-        match outgoing.try_send(message) {
+        match self.outgoing.try_send(message) {
             Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
         }
     }
@@ -194,14 +183,15 @@ pub fn farewell(farewells: &[Farewell]) {
 ///
 /// `service` names the health topic, is the client ID, and prefixes every other topic this
 /// client publishes, so the tree says which part of the rig asserted a thing.
-pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
+pub fn spawn(service: &'static str) -> (Publisher, Farewell) {
     let (outgoing, incoming) = sync_channel(cfg::MQTT_QUEUE_DEPTH);
     let said = Arc::new(AtomicBool::new(false));
 
     let thread_said = said.clone();
-    let handle = thread::Builder::new()
+    thread::Builder::new()
         .name(format!("telemetry-{service}"))
         .spawn(move || {
+            crate::sched::background();
             // Every retained topic this client has published, replayed on each connect.
             //
             // Retained state is a promise that a late subscriber sees the live picture, and a
@@ -223,9 +213,8 @@ pub fn spawn(service: &'static str) -> (JoinHandle<()>, Publisher, Farewell) {
         .expect("failed to spawn telemetry thread");
 
     (
-        handle,
         Publisher {
-            outgoing: Some(outgoing.clone()),
+            outgoing: outgoing.clone(),
             part: None,
         },
         Farewell { outgoing, said },

@@ -1,7 +1,7 @@
 //! The mouth's playback, on a dedicated OS thread: blocking ALSA writes pace it, one period at
-//! a time, and every period is mixed from the latest cue. The thread never dies — an underrun
-//! recovers in place, and a lost interface is probed for and reopened with backoff, the show
-//! running on silent in the meantime.
+//! a time, and every period is mixed from the latest cue. An underrun recovers in place, and a
+//! lost interface is probed for and reopened with backoff, the show running on silent in the
+//! meantime. An interface that is there but cannot play the recordings stops the brain.
 
 use crate::config as cfg;
 use crate::{Cue, Sounds};
@@ -32,6 +32,7 @@ pub(crate) fn spawn<const N: usize>(
     thread::Builder::new()
         .name("mouth".into())
         .spawn(move || {
+            cortex::sched::realtime(cortex::config::AUDIO_CORES);
             let mut mixer = Mixer::new(sounds);
             let mut reported = Reported::default();
             telemetry.publish("xruns", "0", true);
@@ -61,8 +62,9 @@ pub(crate) fn spawn<const N: usize>(
         .expect("failed to spawn the mouth's thread");
 }
 
-/// Opens the interface and plays until an error it cannot recover from, which it returns; the
-/// caller reopens with backoff.
+/// Opens the interface and plays until it goes away, returning why; the caller reopens with
+/// backoff. An interface that opens but will not play the recordings as they were built panics:
+/// reopening it would only refuse them again.
 fn play<const N: usize>(
     sounds: &'static Sounds<N>,
     cues: &LatestRx<Cue<N>>,
@@ -72,9 +74,53 @@ fn play<const N: usize>(
 ) -> Result<(), Box<dyn Error>> {
     eprintln!("mouth: opening ALSA device \"{}\"…", cfg::ALSA_DEVICE);
     let pcm = PCM::new(cfg::ALSA_DEVICE, Direction::Playback, false)?;
+    let period = configure(&pcm, sounds, telemetry)
+        .unwrap_or_else(|e| panic!("mouth: ALSA device \"{}\": {e}", cfg::ALSA_DEVICE));
 
+    let io = pcm
+        .io_i16()
+        .unwrap_or_else(|e| panic!("mouth: ALSA device \"{}\": {e}", cfg::ALSA_DEVICE));
+    let mut out = vec![0i16; period * CHANNELS];
+    mixer.open(period, &cues.snapshot());
+    pcm.prepare()?;
+    // An empty retained payload deletes the topic: playing is the absence of an error.
+    telemetry.publish("error", "", true);
+    loop {
+        let cue = cues.snapshot();
+        mixer.fill(&cue, &mut out);
+        report_state(
+            telemetry,
+            reported,
+            if cue.mute { "muted" } else { "playing" },
+        );
+
+        let mut written = 0;
+        while written < period {
+            match io.writei(&out[written * CHANNELS..]) {
+                Ok(frames) => written += frames,
+                Err(e) => {
+                    // An underrun recovers in place; anything else is returned, and the
+                    // interface reopened.
+                    pcm.try_recover(e, true)?;
+                    reported.xruns += 1;
+                    eprintln!("mouth:   xrun ({e}), recovered");
+                    telemetry.publish("xruns", reported.xruns.to_string(), true);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Sets the interface up for the recordings as they were built, and returns the period it
+/// settled on.
+fn configure<const N: usize>(
+    pcm: &PCM,
+    sounds: &'static Sounds<N>,
+    telemetry: &Publisher,
+) -> Result<usize, Box<dyn Error>> {
     {
-        let hwp = HwParams::any(&pcm)?;
+        let hwp = HwParams::any(pcm)?;
         hwp.set_channels(CHANNELS as u32)?;
         // The recordings were resampled to the interface's rate at build time. Without this
         // the plug layer would resample again, silently, for an interface that cannot run at
@@ -114,43 +160,10 @@ fn play<const N: usize>(
     }
 
     // Start only once the buffer is full, so the first period is not already late.
-    {
-        let swp = pcm.sw_params_current()?;
-        swp.set_start_threshold(buffer)?;
-        pcm.sw_params(&swp)?;
-    }
-
-    let io = pcm.io_i16()?;
-    let mut out = vec![0i16; period * CHANNELS];
-    mixer.open(period, &cues.snapshot());
-    pcm.prepare()?;
-    // An empty retained payload deletes the topic: playing is the absence of an error.
-    telemetry.publish("error", "", true);
-    loop {
-        let cue = cues.snapshot();
-        mixer.fill(&cue, &mut out);
-        report_state(
-            telemetry,
-            reported,
-            if cue.mute { "muted" } else { "playing" },
-        );
-
-        let mut written = 0;
-        while written < period {
-            match io.writei(&out[written * CHANNELS..]) {
-                Ok(frames) => written += frames,
-                Err(e) => {
-                    // An underrun recovers in place; anything else is returned, and the
-                    // interface reopened.
-                    pcm.try_recover(e, true)?;
-                    reported.xruns += 1;
-                    eprintln!("mouth:   xrun ({e}), recovered");
-                    telemetry.publish("xruns", reported.xruns.to_string(), true);
-                    break;
-                }
-            }
-        }
-    }
+    let swp = pcm.sw_params_current()?;
+    swp.set_start_threshold(buffer)?;
+    pcm.sw_params(&swp)?;
+    Ok(period)
 }
 
 fn report_state(telemetry: &Publisher, reported: &mut Reported, state: &'static str) {
@@ -270,10 +283,8 @@ fn probe_usb(telemetry: &Publisher) {
                 Default::default()
             }
         },
-        Err(e) => {
-            eprintln!("mouth: USB enumeration failed: {e}");
-            Default::default()
-        }
+        // libusb itself, not the interface: it will not work on the next probe either.
+        Err(e) => panic!("mouth: USB enumeration: {e}"),
     };
     for (topic, value) in USB_TOPICS.iter().zip(values) {
         telemetry.publish(format!("usb/{topic}"), value, true);

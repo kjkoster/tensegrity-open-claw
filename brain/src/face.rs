@@ -95,9 +95,7 @@ struct Lamp {
     gpio: u8,
     name: &'static str,
     channel: Channel,
-    /// `None` when the PWM channel could not be opened. The lamps only tell an operator what
-    /// the show is doing, so the show goes on without them.
-    pwm: Option<Pwm>,
+    pwm: Pwm,
     level: u8,
 }
 
@@ -265,18 +263,12 @@ impl Chord {
 }
 
 impl Lamp {
-    /// Opens the lamp's PWM channel, dark. A channel that will not open is reported and left
-    /// out; the usual cause is the overlay that routes PWM to the lamps' pins missing from
-    /// `config.txt`.
+    /// Opens the lamp's PWM channel, dark. A channel that will not open is a deploy error, so
+    /// it stops the start: the usual cause is the overlay that routes PWM to the lamps' pins
+    /// missing from `config.txt`.
     fn open((gpio, pwm_channel): (u8, pwm::Channel), name: &'static str, channel: Channel) -> Lamp {
-        let pwm = match Pwm::with_frequency(pwm_channel, LAMP_PWM_HZ, 0.0, Polarity::Normal, true)
-        {
-            Ok(pwm) => Some(pwm),
-            Err(e) => {
-                eprintln!("face: GPIO{gpio} {name}: no PWM ({e}), so the lamp stays dark");
-                None
-            }
-        };
+        let pwm = Pwm::with_frequency(pwm_channel, LAMP_PWM_HZ, 0.0, Polarity::Normal, true)
+            .unwrap_or_else(|e| panic!("face: GPIO{gpio} {name}: no PWM ({e})"));
         trace_lamp(gpio, name, 0);
         Lamp {
             gpio,
@@ -295,11 +287,10 @@ impl Lamp {
             return;
         }
         self.level = level;
-        if let Some(pwm) = &self.pwm
-            && let Err(e) = pwm.set_duty_cycle(f64::from(level) / f64::from(u8::MAX))
-        {
-            eprintln!("face: GPIO{} {}: {e}", self.gpio, self.name);
-        }
+        // The PWM is on the board, so a write that fails will fail again.
+        self.pwm
+            .set_duty_cycle(f64::from(level) / f64::from(u8::MAX))
+            .unwrap_or_else(|e| panic!("face: GPIO{} {}: {e}", self.gpio, self.name));
     }
 }
 

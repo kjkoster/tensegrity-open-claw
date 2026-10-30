@@ -30,6 +30,7 @@ claw-pi's alone — the access point's stations and the 4G modem — is read her
 
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -57,12 +58,9 @@ def wifi_stations():
     A wireless fixture that reports its own signal hears the same link from the other end; the
     two disagreeing by a lot points at an antenna rather than at distance.
     """
-    output = rig_board.run(["iw", "dev", AP_INTERFACE, "station", "dump"])
-    if output is None:
-        return None
     stations = {}
     station = None
-    for line in output.splitlines():
+    for line in rig_board.run(["iw", "dev", AP_INTERFACE, "station", "dump"]).splitlines():
         found = re.match(r"Station ([0-9a-f:]{17})", line)
         if found:
             station = found.group(1)
@@ -75,8 +73,11 @@ def wifi_stations():
 
 def mmcli(*arguments):
     """`mmcli … -K` as key → value, with ModemManager's `--` for "nothing" left out."""
-    output = rig_board.run(["mmcli", *arguments, "-K"])
-    if output is None:
+    # The dongle can drop off the bus, or be reset by the 4G watchdog, between the listing
+    # and the query: a modem that is not there reads as nothing, and its topics clear.
+    try:
+        output = rig_board.run(["mmcli", *arguments, "-K"])
+    except subprocess.CalledProcessError:
         return {}
     fields = {}
     for line in output.splitlines():
@@ -141,7 +142,7 @@ def main():
         for name, value in reading.items():
             telemetry.publish(name, value, retain=True)
 
-        present = set(reading["wifi"]["stations"] or {})
+        present = set(reading["wifi"]["stations"])
         for gone in stations - present:
             telemetry.publish(f"wifi/stations/{gone}/signal_dbm", None, retain=True)
         stations = present

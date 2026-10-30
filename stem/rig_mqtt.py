@@ -50,6 +50,10 @@ import os
 import signal
 import sys
 
+# The deploy installs paho into every daemon's venv, so a missing one is a broken deploy, and
+# the import fails the daemon's start rather than leaving it running unreported.
+import paho.mqtt.client as mqtt
+
 HOST = os.environ.get("RIG_MQTT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RIG_MQTT_PORT", "1883"))
 # The same value as `stem::KEEPALIVE_S` on the Rust clients.
@@ -79,9 +83,9 @@ def flatten(topic, value):
     can filter on it, rather than inside a payload it would have to parse first.
 
     A `None` publishes an empty payload, which is MQTT's way of *deleting* a retained topic
-    rather than storing the word "None" in it. A reading the machine cannot supply — no
-    `vcgencmd`, no thermal zone — should leave no value behind, because a stale one is worse
-    than an absent one.
+    rather than storing the word "None" in it. A reading that has gone away — a modem off the
+    bus, a station that left, an SSD unmounted — should leave no value behind, because a stale
+    one is worse than an absent one.
     """
     if isinstance(value, dict):
         for key, inner in value.items():
@@ -102,12 +106,13 @@ def flatten(topic, value):
 class Telemetry:
     """A client, its service name, and the health contract above.
 
-    Always usable, even with no broker and no paho installed: publishing then does nothing.
+    Always usable, even with no broker: publishing then does nothing until it connects, and the
+    retained topics are replayed then.
     Telemetry is observability, and a daemon that refuses to run because nobody is listening
     has turned its reporting into a dependency of the thing it reports on.
     """
 
-    def __init__(self, service, client=None):
+    def __init__(self, service, client):
         self.service = service
         self.client = client
         self.closed = False
@@ -127,12 +132,6 @@ class Telemetry:
 
     @classmethod
     def connect(cls, service, host=HOST, port=PORT):
-        try:
-            import paho.mqtt.client as mqtt
-        except ImportError:
-            print(f"{service}: no paho-mqtt installed, telemetry disabled", file=sys.stderr, flush=True)
-            return cls(service)
-
         # requirements.txt pins paho 2.x, so the current callback API and nothing else.
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=service)
 
@@ -205,8 +204,6 @@ class Telemetry:
         as bytes, and `.retain`, which is set only on a replay of a retained topic and never on
         a live publish.
         """
-        if self.client is None:
-            return
         self.subscriptions.append(topic)
         self.client.message_callback_add(topic, lambda _client, _userdata, message: handler(message))
         # Already connected, the connect callback has been and gone and will not subscribe
@@ -223,8 +220,6 @@ class Telemetry:
         self._publish(sys_topic(self.service), value, retain=True)
 
     def _publish(self, prefix, value, retain):
-        if self.client is None:
-            return
         for full, payload in flatten(prefix, value):
             if retain:
                 self.retained[full] = payload
@@ -232,17 +227,17 @@ class Telemetry:
 
     def close(self):
         """Says goodbye deliberately, so the will is never invoked for an orderly stop."""
-        if self.closed or self.client is None:
+        if self.closed:
             return
         self.closed = True
         message = self.client.publish(health_topic(self.service), DISCONNECTED, retain=True)
         # Waited on rather than fired and forgotten: the disconnect below races the publish,
         # and losing that race is exactly the case this whole contract exists to distinguish.
-        # The timeout keyword postdates paho 1.5, and a goodbye is not worth failing an exit
-        # over on an older one.
+        # paho raises when the goodbye could not be queued, which is a broker that is down at
+        # the time of the stop: the will then speaks for it.
         try:
             message.wait_for_publish(timeout=2)
-        except (TypeError, ValueError, RuntimeError):
+        except (ValueError, RuntimeError):
             pass
         self.client.disconnect()
         self.client.loop_stop()

@@ -1,0 +1,26 @@
+[package]
+edition      = "2024"
+name         = "eyeball"
+rust-version = "1.99"
+version      = "0.1.0"
+
+# The rig's eyeball: a network camera in, the furthest person's distance into the yard out,
+# for a rig crate whose show wants to see. Its person detector is compiled in from `models/`.
+#
+# `tract` runs the detector: pure Rust from crates.io, so nothing prebuilt is downloaded and
+# no C++ runs inside the brain. `tract-onnx` without its default `transformers`, which are
+# operators for language models; `tract-linalg` for `multithread-mm`, which spreads its matrix
+# products over a pool of threads. `image` decodes, letterboxes and re-encodes, with JPEG only,
+# which is all the camera sends and the feed serves: its defaults add every other format, an
+# AV1 encoder among them, and a thread pool.
+[dependencies]
+image        = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+tract-linalg = { version = "0.23.9", features = ["multithread-mm"] }
+tract-onnx   = { version = "0.23.9", default-features = false }
+
+# The annotate example's lettering, a bitmap font with no font file to ship; PNG, which it reads
+# and writes, for the examples only; and `cortex`, whose pinning the bench runs under.
+[dev-dependencies]
+cortex  = { path = "../cortex" }
+font8x8 = "0.3.1"
+image   = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }

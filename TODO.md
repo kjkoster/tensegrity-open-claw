@@ -6,25 +6,27 @@ and what proves it landed. The design decisions behind them are in the first sec
 ones to overturn are overturned before the work starts rather than after.
 
 The rig goes up in the yard only on the day itself: logistics and the weather allow nothing
-earlier. So the work is five chunks, each standing on its own and testable on its own at the
+earlier. So the work is six chunks, each standing on its own and testable on its own at the
 bench — the Pi, the cabinet and, where a chunk needs one, a head and the camera on the table —
 and the rig in the yard comes last:
 
-1. **Clear the decks**: a brain that runs with nothing on it.
-2. **Sound**: the recordings and the mouth.
-3. **The eyeball**: the camera, the detector and the distance, with no show needed.
-4. **The show**: the fixture definitions and the workspace as far as the show needs them, and
-   the show itself.
-5. **The rig**: everything in the yard, on the day.
+- **Upgrade everything**, and make it work again (`DESIGN.md` §1.8). Every show's first chunk.
+- **The eyeball**: the camera, the detector and the distance, with no show needed. Early,
+  because it has the most left to do.
+- **Clear the decks**: the Pis' power, `memory-pi`, and loose ends.
+- **Sound**: the recordings and the mouth.
+- **The show**: the fixture definitions and the workspace as far as the show needs them, and
+  the show itself.
+- **The rig**: everything in the yard, on the day.
 
 Each ends in a brain that runs, so every evening ends on something working. The scare can be
-rehearsed from the cabinet door in test mode from chunk 4 on; the heart's pace needs the
+rehearsed from the cabinet door in test mode once the show is in; the heart's pace needs the
 eyeball, or the reference footage replayed into it. Halloween is Saturday the 31st, six days
 from the date of this file.
 
 ---
 
-## 0. Decisions taken here
+## Decisions taken here
 
 Each is a choice, written down so it can be changed on purpose.
 
@@ -33,7 +35,7 @@ Each is a choice, written down so it can be changed on purpose.
 | How inputs reach the show | Each sensor hands the show its own snapshot over its own latest-value seam, the way the face already does: the face's `FaceState`, and the eyeball's distance with the time it was seen. The show closure holds both readers. The lamps stay driven from the outgoing frame. A sensor on another machine later would arrive through an OSC receiver publishing on the same kind of seam, and nothing after it would change. | One door, `inputs::inject`, with an `Input` enum over every kind: `cortex` would have to learn the face's shape, which lives in the brain, and the frame loop would unpack the enum back into the snapshots it started as. |
 | What a silent face means | Nothing: there is no face-staleness rule. The face is a task on the frame loop's own executor, so it cannot stop while frames go on going out; a panic in either ends the process. The e-stop is already read in `face::claim`, before the first frame. | A `FACE_STALE_MS` e-stop: it guards against a failure that cannot happen. |
 | Where the eyeball runs | Inside the brain, on the Pi: its own crate, `eyeball/`, a workspace member the brain depends on, running as threads beside the frame loop. One machine, no network hop between the camera's reading and the show, and nothing to deploy but the brain. | A second machine, `eyeson`, sending OSC: a machine to set up, power, reach and deploy to, for headroom the Pi may turn out to have. A process of its own on the Pi: a socket between two processes that would otherwise share a seam. |
-| How the eyeball shares the Pi | Its threads drop out of the brain's real-time scheduling to `SCHED_OTHER` before they start the model, so the threads ONNX Runtime spawns inherit that too, and the model gets at most three cores. A detector that eats every cycle then slows itself, never a DMX frame, Stem or `sshd`. | Inheriting `brain.service`'s `SCHED_FIFO`: a CPU-bound thread at the frame loop's own priority, starving everything below it up to the kernel's real-time throttle. |
+| How the eyeball shares the Pi | Its threads drop out of the brain's real-time scheduling to `SCHED_OTHER` before they start the model, so the threads the model's runtime spawns inherit that too, and the model gets at most three cores. A detector that eats every cycle then slows itself, never a DMX frame, Stem or `sshd`. | Inheriting the frame loop's `SCHED_FIFO`: a CPU-bound thread at the frame loop's own priority, starving everything below it up to the kernel's real-time throttle. |
 | Where the model lives | Compiled into the brain with `include_bytes!`, as the recordings are, and loaded from memory. The binary on the Pi is the whole show. | A file beside the binary: one more thing to ship, and to be missing. |
 | What presence is | One float: the furthest person's distance to the trigger line in paths — 1 at the yard entry, 0 at the line — or the tombstone. Two benchmarks define the yard; no polygon, no count, no metres. | A count and a normalised progress: more than the show reads. Metres: a tape measure and a number to keep right, for a show that only ever compares distances to each other. |
 | The tombstone | `+∞`. An empty yard is infinitely far; every comparison then falls the safe way, and there is no magic number. | `NaN`: compares false both ways, which is a footgun; a sentinel like `-1`: collides with a real negative distance past the line. |
@@ -51,7 +53,7 @@ Each is a choice, written down so it can be changed on purpose.
 | Which heads strobe | Heads 2 and 3, the inner pair; 1 and 4 steady. | Any pair. A constant. |
 | Wash mode | 3-channel RGB. | 5-channel: strobe and macros the show does not use and the e-stop must mask. |
 | Where the camera connects | Its PoE injector's data port straight into the Pi's `eth0`, the camera re-addressed to `10.0.1.90`. The Ethernet hub goes in only when a laptop needs the wire as well. | The camera on the Pi's WiFi: every video frame over 2.4 GHz. |
-| The eyeball's model | A person detector, not a pose model — boxes are enough. **YOLOX-Nano**, `yolox_nano.onnx` from Megvii's own `0.1.1rc0` release of YOLOX, unmodified: Apache-2.0, 416×416 input, 1.1 GFLOPs, input `images`, output `output`, opset 11. Committed to `eyeball/models/`. Expected 150–300 ms a frame on the Pi 3B+, 60–120 ms on a Pi 4, through ONNX Runtime (`ort`, pinned at `=2.0.0-rc.10`). Only class 0, *person*, is read. At this picture — people three to six metres off, boxes over a hundred pixels tall — the accuracy between small detectors is noise next to their run time. | YOLOX-Tiny: 6.5 GFLOPs, too slow on the Pi's A53 cores beside the DMX loop; the step up on a Pi 4 with room, same code. YOLOv8/11-nano: AGPL. A CrowdHuman-trained detector: better on a dense bunch, but no clean first-party export, and the show reads only the front of the group. |
+| The eyeball's model | A person detector, not a pose model — boxes are enough. **YOLOX-Nano**, Megvii's own weights from YOLOX's `0.1.1rc0` release (Apache-2.0), exported at **320×256** by `eyeball/models/export.py` and committed beside it: 190 ms a frame on `claw-pi` with the brain running, 5.2 frames a second, where Megvii's published 416×416 file takes 400. Run by **`tract`**, pure Rust from crates.io: no prebuilt library downloaded, no C++ in the brain. The smaller input loses people under about 25 pixels tall in the model's picture; in the yard the smallest child at the far end is about 38. Only class 0, *person*, is read. | Megvii's 416×416 file as published: 2.5 frames a second. ONNX Runtime: four times faster than `tract` on the Mac, but `ort` downloads a prebuilt library; only Debian's package would do, at 1.21, and not before `tract` falls short. YOLOX-Tiny: 6.5 GFLOPs, too slow on the Pi's A53 cores beside the DMX loop; the step up on a Pi 4 with room, same code. YOLOv8/11-nano: AGPL. A CrowdHuman-trained detector: better on a dense bunch, but no clean first-party export, and the show reads only the front of the group. |
 | How the eyeball reaches the picture | MJPEG over HTTP (`/axis-cgi/mjpg/video.cgi`), with Digest authentication, which is what an Axis camera asks for. Each part's `Content-Length` is read and exactly that many bytes taken. Decoded, letterboxed and re-encoded for the feed with `image` (whose JPEG decoder is `zune-jpeg`), so one crate does all the picture work. | RTSP/H.264: a video decoder in the brain's build. Scanning for JPEG markers instead of reading `Content-Length`: works until a frame contains the byte pair by chance. Allowing Basic authentication on the camera: a setting made by hand, lost on a factory reset. |
 | Who debounces presence | The show. The eyeball reports the distance it saw in each frame; hysteresis is the show's policy. | The eyeball tracking people: more code where it is hardest to test. |
 | The annotated feed | Wanted, as the operator's view of what the rig sees. Encoded on its own thread and only while a browser is connected, so an idle feed costs the detector nothing. Bound to the WireGuard address, `10.8.0.3:8080`, like the sACN receiver, so the Mac opens it directly. | Always-on encoding: a JPEG encode a frame on the Pi whether or not anyone is looking. The wildcard: the 4G uplink's public address would show the yard, and the children in it, to the internet. |
@@ -70,29 +72,109 @@ Each needs a choice before the step that uses it.
 
 | question | why it matters | recommendation |
 |---|---|---|
+| The model's shape against the camera's | 320×256 is the 4:3 of a 640×480 frame. If the camera sends 16:9, a 320×192 export fills the model's input with no padding and runs at 6.5 frames a second on `claw-pi`. | Once the camera lists its resolutions: 16:9 at 640×360 and a 320×192 export (`export.py … 192 320`) if it offers one, else stay at 4:3. |
+| Phantoms at the smaller input | At 320×256 a post on a street photo scored 0.39 as a person; `CONFIDENCE` is 0.3. A phantom between the marks quickens the heart. | Judge on the reference footage; raise `CONFIDENCE` to 0.4 if phantoms show there. |
+| The eyeball's threads | Your rule is Embassy on std too. Nothing in the eyeball runs on a timer: capture is paced by the camera, detection by itself, the preview by its client. | OS threads with latest seams between them, like the brain's other blocking producers, and nothing on the frame loop's executor. |
+| Does the show's light blind the camera | The camera sees by its own 850 nm illuminator, with its IR-cut filter out and exposure fixed. But with the filter out the sensor sees visible light too: the lightning's full white, the strobes and the amber wash all land on it, and a frame washed out by a flash is a frame with nobody in it. The heads are LEDs and give off almost no infrared, so their visible light is all the harm they can do. | Record reference footage with a head flashing at full in view. If the flash blanks frames, an 850 nm long-pass filter over the lens blocks visible light optically; otherwise nothing. |
+| Is the door in the picture | `respite` holds while anyone is seen. If the camera does not see the doorstep, a group collecting sweets is the tombstone and the rose returns while they stand there. | Frame the door in, or make `LEAVE_SECS` long enough to cover a doorstep visit. |
 | The strobe's rate | `STROBE_RATE` is "fast", which is no value, and the strobe band is unmeasured. A fast strobe aimed at children's faces sits in the 3–30 flashes a second that photosensitive-epilepsy guidance warns against. | `STROBE_RATE` in flashes a second, at most 3, read off the measured band; or no strobe, and let the hops carry the lightning. |
 | `bLnd` on the heads | `SHOW.md` §12 says `bLAc`; `README.md`'s e-stop section says every fixture holds its last values. The manual gives `bLAc` as "return to zero", which may send the head home, and `HoLd` keeps it lit wherever it was — mid-thunderclap included, for the five seconds a brain restart takes. | Find out on one head what `bLAc` does. If it darkens and stays put, use it and make the README's rule "dark and still"; if it homes, decide between a homing head and a lit one. |
-| Is the door in the picture | `respite` holds while anyone is seen. If the camera does not see the doorstep, a group collecting sweets is the tombstone and the rose returns while they stand there. | Frame the door in, or make `LEAVE_SECS` long enough to cover a doorstep visit. |
 | A second group during `respite` | Respite ends only on an empty yard, so a group arriving behind the first is not scared. | Accept it: a scare re-armed under people still in the yard would hit them a second time. |
 | The heartbeat's length | It must be shorter than one beat at `SCARE_BPM`: 0.46 s at 130. The recording in `audio/` is 0.76 s. | Let beats overlap: the mixer mixes voices anyway, and the rose takes the loudest of the envelopes playing. The check becomes "shorter than a beat at rest". |
-| The eyeball's threads | Your rule is Embassy on std too. Nothing in the eyeball runs on a timer: capture is paced by the camera, detection by itself, the preview by its client. | OS threads with latest seams between them, like the brain's other blocking producers, and nothing on the frame loop's executor. |
-| Whether the Pi keeps up | YOLOX-Nano is expected at 150–300 ms a frame on the Pi 3B+ — three to six frames a second — and 60–120 ms on a Pi 4. The debounces and the staleness window were written for ten: `SCARE_CONFIRM_SECS` is "two frames", `EYEBALL_STALE_SECS` "twenty". A spare Pi 4 runs the same software unchanged. | Measure first (chunk 3). Then set the two constants from the measured rate, and swap in the Pi 4 if the 3B+ cannot hold about five frames a second. |
-| ONNX Runtime inside the brain | It is C++. A crash in it ends the brain, which systemd restarts in seconds of signal loss. Its prebuilt binaries exist for 64-bit ARM, which is what the Pi runs (`aarch64`, Debian 13, glibc 2.41), and are downloaded by the Pi's first build of the brain, over 4G, once. `tract-onnx` is pure Rust, cannot crash that way, needs no download and runs YOLOX's operators, at some cost in speed. | `ort` while it holds the frame rate; `tract` if the speed allows it. |
 
 ---
 
-## 1. Clear the decks
+## Upgrade everything
 
-A brain that runs with nothing on it. Done: a placeholder show that keeps the rig in
-`blackout` with test mode on the door; the ear gone (on the `last-version-with-ear` tag, whose
-capture thread is the mouth's starting point in chunk 2); the `stem` crate holding Stem's Rust
-half; one broker connection, with the face publishing through it; and the workspace patching
-this show's fixtures, with no scenes yet. The previous show is the `2026-10-23-ADE-Amsterdam`
-tag.
+Every crate, the toolchain and the packages on `claw-pi` and paho-mqtt are at their newest
+already, and the repo pins GreptimeDB v1.3.0. What is left:
+
+- [ ] `memory-pi`: `sudo apt full-upgrade`, then a reboot, which also brings
+      Grafana and Mosquitto up to date.
+- [ ] `memory-pi`: `./deploy-memory-pi.sh` installs GreptimeDB v1.3.0. Its scans are now
+      capped at 25% of RAM, so a Grafana query too big for the Pi fails rather than swapping.
+- [ ] QLC+ on `riverrain` at its newest, and the camera's firmware at the newest Axis ships
+      for the M3105-LVE, both before anything is set in them.
+
+## The eyeball, in the brain
+
+A new crate, `eyeball/`, a workspace member the brain depends on, built on the Pi with the
+rest of the brain and running as threads inside it. Nothing from the old code is reused but
+the camera's VAPIX settings; `DESIGN.md` §3.6 describes it. All of it is tested at the bench,
+with the camera on the table plugged into the Pi; nothing here needs a show.
+
+- [ ] **Frame timing under load**: the brain's threads land where `DESIGN.md` §1.6 says on
+      `claw-pi`; what is left to see is the journal's frame timing holding with the mouth
+      playing and the detector running.
+- [ ] **The show's two timing constants from the measured rate**, 5.2 frames a second:
+      `SCARE_CONFIRM_SECS` was "two frames" at ten, so 0.4 s; `EYEBALL_STALE_SECS`, "twenty",
+      so 4 s.
+- [ ] **A long UTP lead for the camera**: from the PoE injector by the cabinet to the
+      camera's mount in the yard, with a spare. Outdoor-rated if it lies in the wet.
+- [ ] **The camera once**: factory-reset it (control button held while powering up); it then
+      takes a DHCP lease on `claw-eth0`, in `/var/lib/NetworkManager/dnsmasq-eth0.leases`. Set
+      the `root` password (`pwdgrp.cgi?action=add`, which a fresh camera takes without
+      authentication), list `Properties.Image` and `ImageSource` over `param.cgi` for the
+      resolutions, the rotation and this firmware's names for the infrared settings, and
+      re-address it to `10.0.1.90` (`Network.BootProto=none`, gateway `10.0.1.1`). The
+      password is hardcoded in `eyeball/src/config.rs`: the camera is on the Pi's private
+      wired segment.
+- [ ] **Reference footage, the poor man's test set**: after dark and under the camera's own
+      infrared, record the MJPEG stream (`curl` on `/axis-cgi/mjpg/video.cgi` into a file)
+      of yourself walking past the camera — walking up to a line and stopping, walking on
+      past it, coming back, standing still, walking past behind, and a few people at once if
+      you can get them. The yard's path if a dry evening allows a camera on a stand there;
+      any walk across its view otherwise, since the model does not care where it is, and
+      only the marks need the real yard. `capture.rs` takes a file in place of the camera,
+      so the model, the confidence and the two marks are judged against the same walks, and
+      again after every change; and a recording played into the brain is how the heart is
+      heard quickening without anyone on the path.
+- [ ] `eyeball/src/capture.rs`: the MJPEG stream over HTTP (`ureq`, with `digest_auth` to
+      answer the camera's `401`), `video.cgi?resolution=640x480&fps=<rate>`, the rate a
+      little above what the detector manages. The body is `multipart/x-mixed-replace`: read
+      header lines to the blank one, parse `Content-Length`, read exactly that many bytes of
+      JPEG; reconnect with backoff on any error. The reader decodes nothing: it puts each
+      JPEG into a one-slot mailbox, replacing what is there, and the detector *takes* it — a
+      take, not a latest-value read, which would run the model on the same frame twice. On
+      every start, set the camera over VAPIX to see by infrared only: IR-cut filter off and
+      the illuminator on, so it never switches to a day profile; colour off; exposure and
+      gain fixed rather than automatic, at most 10 ms, so a flash does not make the exposure
+      pump; 640×480 and the image rotation for the new mount. Read it back and publish any
+      disagreement. The parameter names, the sequence and the read-back are in the old
+      eyeball on the `last-version-with-eyeball` tag (`eyeball/eyeball.py`), in Python; port
+      them, checked against the camera's own listing, they are the part that took finding out.
+- [ ] The detector's thread: `cortex::sched::background()` first, then `Detector::new()`,
+      so the model's thread pool inherits the background cores; then take a frame, detect, and
+      `yard::distance` it, for as long as the brain runs.
+- [ ] The seam: once per processed frame, the distance and the time it was seen go out on
+      the eyeball's own latest-value seam, and never otherwise; the brain's show closure
+      holds the reader beside the face's, and a quiet eyeball goes stale. It is the seam an
+      OSC receiver would publish on, should a sensor ever move to another machine.
+- [ ] `eyeball/src/preview.rs`: the annotated MJPEG feed (`tiny_http`), bound to
+      `10.8.0.3:8080`, the WireGuard address, retrying the bind with backoff like the sACN
+      receiver: boxes, each box's leading foot, the two marks labelled `rose` and `entry`,
+      the distance, the frame rate. Drawn into a copy of the latest frame on its own thread,
+      encoded with `image`, and only while at least one client is connected — no viewer, no
+      encode.
+- [ ] MQTT through the brain's connection: `eyeball/distance` (what it saw, each frame, in
+      paths rounded to a hundredth, or `tombstone`), `eyeball/fps`, `eyeball/people`
+      (telemetry only), `eyeball/camera`.
+- [ ] `eyeball/src/config.rs`, beside the detector's settings already there: the camera's
+      host, user and password, or a footage file in its place; the camera's frame rate; the
+      feed's address. `TRIGGER_COLUMN` and `ENTRY_COLUMN` from aiming in the yard.
+- [ ] Presence from the eyeball, in `brain/src/presence.rs`: its distance in place of the
+      tombstone outside test mode, stale after `EYEBALL_STALE_SECS` → the tombstone.
+
+**Landed when** the feed at `http://10.8.0.3:8080/` shows you walking across the camera's
+view with a box and a leading foot, `eyeball/distance` falls as you cross from the entry mark
+to the trigger mark, replayed footage gives the same numbers on every run, and the journal's
+frame timing does not move while the detector runs.
+
+## Clear the decks
 
 - [ ] **The Pis' power.** `get_throttled` reports under-voltage and throttling since boot
-      (`0x50000`) on `claw-pi` nearly idle, and the eyeball's three cores of detector in
-      chunk 3 will draw more. `claw-pi` and `memory-pi` both move off the USB hub's charge
+      (`0x50000`) on `claw-pi` nearly idle, and the eyeball's three cores of detector
+      will draw more. `claw-pi` and `memory-pi` both move off the USB hub's charge
       port onto the Durata multiport charger (5 V, 4.4 A across its ports), each on a short,
       thick lead; the SSD stays on `memory-pi`'s USB. Its 5.0 V leaves less margin above the
       Pis' 4.63 V under-voltage threshold than an official 5.1 V supply, so the leads matter.
@@ -130,17 +212,7 @@ tag.
 - [ ] The `stem` crate does without `alloc` wherever it can, for the firmware to come: the
       packets written into a caller's buffer rather than returned as a `Vec`.
 
-**Landed when** `./deploy.sh` deploys clean, the e-stop holds and releases, the chord lights
-the lamps, `face/…` and `brain/…` report under one connection, and `ps -T` on the brain shows
-no `ear` and one telemetry thread.
-
-## 2. Sound
-
-The recordings, compiled in from `brain/sounds/` as they were found, and the mouth that plays
-them. Done and running: `mouth/`, `mouth-build/` and `brain/sounds.rs`. A bench test that
-played every recording in turn showed them playing cleanly and in step with the left lamp;
-the show itself plays them now, through `brain/src/mouth_show.rs`. The lamps' PWM is at
-20 kHz, above what leaked into the audio at 1 kHz.
+## Sound
 
 - [ ] The 4G dongle's transmit bursts, a "ticka-ticka-ticka" under the sound that stops with
       the dongle out. Cable management: the dongle on a shielded USB extension, out of the
@@ -160,125 +232,19 @@ the show itself plays them now, through `brain/src/mouth_show.rs`. The lamps' PW
 speakers in step with the left lamp, the e-stop cuts the sound within a buffer, and pulling the
 io|2's USB shows in `mouth/state` and nothing in the journal's frame timing.
 
-## 3. The eyeball, in the brain
-
-A new crate, `eyeball/`, a workspace member the brain depends on, built on the Pi with the
-rest of the brain and running as threads inside it. Nothing from the old code is reused but
-the camera's VAPIX settings; `DESIGN.md` §3.6 describes it. All of it is tested at the bench,
-with the camera on the table plugged into the Pi; nothing here needs a show.
-
-- [ ] **What the Pi manages.** The Pi is a 3B+ on 64-bit Trixie, so `ort`'s prebuilt
-      ONNX Runtime fits; 905 MB of RAM and 1.8 GB free on the root partition. Download
-      `yolox_nano.onnx` from the YOLOX `0.1.1rc0` release assets and commit it to
-      `eyeball/models/`. Then a one-file crate on the Pi that loads it and times a frame with
-      three threads, with `brain` running, watching `vcgencmd get_throttled` and the
-      temperature while it runs; `tract-onnx` gets the same test. That settles the runtime and
-      the open question on whether the Pi keeps up, before anything else is built. If
-      compiling `ort` and `image` runs the Pi out of memory, build with `-j2`.
-- [ ] **Core pinning**: sit down with which thread runs where — the frame loop, the
-      detector and ONNX Runtime's pool, the mouth, Stem (pinned to cores 0–2 today) — and
-      decide what pins where, from the code (`sched_setaffinity` per thread) or the units.
-      Today the brain has five threads, every one `SCHED_FIFO` 50 and free to run on any
-      core: the main thread (the Embassy executor: the frame loop and the face), two unnamed
-      ones (most likely `embassy-time`'s timer driver, which wakes the frame loop, and the
-      signal thread `cortex::run` spawns), `sacn-in` and `telemetry-brain`. The mouth and the
-      eyeball's threads are still to come. Only the frame loop, its timer driver and the
-      mouth need real-time scheduling; the rest could drop to `SCHED_OTHER` as the eyeball's
-      do. No core is isolated in `cmdline.txt`, and `/etc/systemd/system.conf` changes
-      nothing, so there is nothing on the Pi to pull in yet. Whatever the session adds to
-      either goes into `etc/` and git, installed by the deploy like `config-claw.txt` —
-      `cmdline.txt` carries the SD card's `PARTUUID`, so the repo's copy cannot simply
-      overwrite it.
-- [ ] **The camera once**: if the `root` password really is lost, factory-reset it (control
-      button held while powering up) and set one; re-address it to `10.0.1.90`; put the
-      password in the eyeball's configuration only. Its PoE injector's data port into the
-      Pi's `eth0`.
-- [ ] **Reference footage, the poor man's test set**: after dark and under the camera's own
-      infrared, record the MJPEG stream (`curl` on `/axis-cgi/mjpg/video.cgi` into a file)
-      of yourself walking past the camera — walking up to a line and stopping, walking on
-      past it, coming back, standing still, walking past behind, and a few people at once if
-      you can get them. The yard's path if a dry evening allows a camera on a stand there;
-      any walk across its view otherwise, since the model does not care where it is, and
-      only the marks need the real yard. `capture.rs` takes a file in place of the camera, so the model, the confidence
-      and the two marks are judged against the same walks, and again after every change; and
-      a recording played into the brain is how the heart is heard quickening without anyone
-      on the path.
-- [ ] `eyeball/src/capture.rs`: the MJPEG stream over HTTP (`ureq`, with `digest_auth` to
-      answer the camera's `401`), `video.cgi?resolution=640x480&fps=<rate>`, the rate a
-      little above what the detector manages. The body is `multipart/x-mixed-replace`: read
-      header lines to the blank one, parse `Content-Length`, read exactly that many bytes of
-      JPEG; reconnect with backoff on any error. The reader decodes nothing: it puts each
-      JPEG into a one-slot mailbox, replacing what is there, and the detector *takes* it — a
-      take, not a latest-value read, which would run the model on the same frame twice. On
-      every start, set the camera over VAPIX: 640×480, IR-cut filter off, exposure ≤ 10 ms,
-      and the image rotation for the new mount; read it back and publish any disagreement.
-      The parameter names, the sequence and the read-back are in the old eyeball on the
-      `last-version-with-eyeball` tag (`eyeball/eyeball.py`), in Python; port them, they are the
-      part that took finding out.
-- [ ] `eyeball/src/detect.rs`: the thread drops to `SCHED_OTHER` first, then builds the
-      session from the model compiled in with `include_bytes!` (`commit_from_memory`),
-      optimisation level 3, three intra-op threads, one inter-op. Per frame:
-  - **letterbox** with `image`: decode, resize to fit 416×416 keeping the aspect ratio, pad
-    with grey **114** at the **bottom and right** (not centred), channels in **BGR** order,
-    values **as they are, 0–255**, no normalisation (the export scales inside its graph),
-    NCHW `f32`. Keep the scale `r` for the way back;
-  - **run** it: input `images` `[1, 3, 416, 416]`, output `output` `[1, 3549, 85]`;
-  - **decode**: 3549 rows = 52² + 26² + 13², one grid per stride 8, 16, 32 in that order,
-    row-major; each row `[cx, cy, w, h, objectness, class_0 … class_79]`, and the box is
-    **undecoded**: `x = (cx + grid_x) · stride`, `y = (cy + grid_y) · stride`,
-    `w = exp(w) · stride`, `h = exp(h) · stride`; score = **objectness × class_0**; keep
-    above `CONFIDENCE`; divide by `r` for frame pixels;
-  - **non-maximum suppression** at IoU 0.6: sort by score, keep a box, drop those that
-    overlap it more, repeat — ten lines, no crate.
-
-  The ways it goes quietly wrong: centred padding shifts every box; 0–1 input makes the model
-  see black and find nothing, with no error; skipping the `+grid` and `exp` puts tiny boxes
-  in the top-left corner; objectness or class alone is not the score.
-- [ ] `eyeball/src/yard.rs`: a box's point is its trigger-side bottom corner, the leading
-      foot; distance = where its x falls between `TRIGGER_COLUMN` (0) and `ENTRY_COLUMN` (1),
-      both fractions of the frame width, negative past the trigger column; boxes past the
-      entry column are the street and are dropped; the furthest person is the smallest
-      distance; no box between the columns is `+∞`.
-- [ ] The seam: once per processed frame, the distance and the time it was seen go out on
-      the eyeball's own latest-value seam, and never otherwise; the brain's show closure
-      holds the reader beside the face's, and a quiet eyeball goes stale. It is the seam an
-      OSC receiver would publish on, should a sensor ever move to another machine.
-- [ ] `eyeball/src/preview.rs`: the annotated MJPEG feed (`tiny_http`), bound to
-      `10.8.0.3:8080`, the WireGuard address, retrying the bind with backoff like the sACN
-      receiver: boxes, each box's leading foot, the two marks labelled `rose` and `entry`,
-      the distance, the frame rate. Drawn into a copy of the latest frame on its own thread,
-      encoded with `image`, and only while at least one client is connected — no viewer, no
-      encode.
-- [ ] MQTT through the brain's connection: `eyeball/distance` (what it saw, each frame, in
-      paths rounded to a hundredth, or `tombstone`), `eyeball/fps`, `eyeball/people`
-      (telemetry only), `eyeball/camera`.
-- [ ] `eyeball/src/config.rs`: camera host, user, password, or a footage file in its place;
-      `TRIGGER_COLUMN` and `ENTRY_COLUMN` as fractions of the frame width; `CONFIDENCE` (0.3)
-      and the suppression's IoU (0.6); the camera's frame rate; the feed's address.
-
-**Landed when** the feed at `http://10.8.0.3:8080/` shows you walking across the camera's
-view with a box and a leading foot, `eyeball/distance` falls as you cross from the entry mark
-to the trigger mark, replayed footage gives the same numbers on every run, and the journal's
-frame timing does not move while the detector runs.
-
-## 4. The show
+## The show
 
 The fixture definitions and the workspace, as far as the show needs them to compile and to be
 seen working, then the show. Tested at the bench with one head and the wash on the HAT's DMX
-line, the speaker, and the camera or the reference footage; aiming for real waits for the yard
-(chunk 5).
+line, the speaker, and the camera or the reference footage; aiming for real waits for the yard,
+on the day.
 
-### 4.1 Fixture definitions
+### Fixture definitions
 
-Both are already in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf` is ours, both
-modes from the datasheet, and needs nothing. `UKing-ZQ02015.qxf` came from QLC+'s library and
-has been partly measured: the strobe channel's open band at 0, the motor speed's fast-to-slow
-polarity, `NoFunction` bands on `Automatic Mode`, `Reset` and `Light Strips` (now in the
-Effect group) are in, as are the dimmer's dark band and every gobo band, and its colour bands
-match the manual. The band constants the show asks for are generated already, on the model's
-struct as `<CHANNEL>_<BAND>`; a label used twice within the model is left unnamed, so every
-name below must be unique, and a name the code uses that the definition lacks is a compile
-error at the use site.
+The band constants the show asks for are generated on the model's struct as
+`<CHANNEL>_<BAND>`; a label used twice within the model is left unnamed, so every name below
+must be unique, and a name the code uses that the definition lacks is a compile error at the
+use site.
 
 - [ ] With one head on the bench, find out what `bLnd` → `bLAc` does when the DMX lead is
       pulled (the open question on it).
@@ -290,14 +256,12 @@ error at the use site.
 - [ ] Install both into QLC+ and relaunch it; both must appear in *Add fixture…*.
       Absence is the error signal: QLC+ 5 skips a definition that fails to parse silently.
 
-### 4.2 The QLC+ workspace (`claw.qxw`, QLC+ 5.2.1 on `riverrain`)
+### The QLC+ workspace (`claw.qxw`, QLC+ 5.2.1 on `riverrain`)
 
 Do this in QLC+, not in a text editor: the build ingests whatever QLC+ writes, and a
 hand-edited file is a second author. Keep `claw.qxw` open in a text editor beside it to check
 each save, because QLC+ does not show you everything it stores.
 
-The patch is in, named by role: `patch::ROSE_HEAD`, `patch::LEFT_STROBE_HEAD`,
-`patch::RIGHT_STROBE_HEAD`, `patch::MIDDLE_WASH_HEAD`, `patch::DOOR_WASH` and `patch::FACE`.
 The build fails on any scene `brain/presets.rs` does not list.
 
 In *Function Manager*:
@@ -322,27 +286,17 @@ In *Function Manager*:
       `UniverseChannels` recounts itself.
 
 The names become `presets::ROSE` and `presets::THUNDERCLAP`; aiming them for real is
-chunk 5.
+for the day.
 
-### 4.3 Tables
+### Tables
 
 - [ ] `brain/presets.rs`: `"Rose"`, `"Thunderclap"`.
-- [ ] `eyeball/` joins `deploy.sh`'s list.
 
-### 4.4 The show's code
+### The show's code
 
-*The show is where everything meets: it needs chunks 2 and 3, and 4.1–4.3.*
+*The show is where everything meets: it needs the eyeball, the sound, and the fixture
+definitions, workspace and tables above.*
 
-Done and running, tried at the bench from the door: the Director in `brain/src/show.rs` with
-its seven states, the timers,
-the owl, test mode and the constants; the heart in `heart.rs`; presence in `presence.rs`, its
-debounces and arming, with the yard empty outside test mode and the left button stepping it
-inside; the show's sounds in `mouth_show.rs`; the face's left lamp as the rose and its right
-lamp as test mode; `brain/show`, `brain/testmode`, `brain/presence` and the `show: a → b —
-why` lines.
-
-- [ ] Presence from the eyeball once chunk 3 lands: its distance in place of the tombstone
-      outside test mode, stale after `EYEBALL_STALE_SECS` → the tombstone.
 - [ ] The thunderclap's hops: from `cortex::draw::Draw`, keyed on the state's start, the
       head and the hop's number, so each head has its own stream. A hop is uniform over the
       disc (radius `√u · R`, not `u · R`, or they cluster at the centre), added to the
@@ -370,14 +324,14 @@ lights white, the wash lights amber, the speaker plays each sound on its cue, an
 `show: a → b — why` lines say why. Replayed footage quickens the heart, and the scare fires
 on the crossing.
 
-## 5. The rig, on the day
+## The rig, on the day
 
 Everything that can only happen in the yard. The software is finished before this starts;
 what is left is hanging, wiring, aiming and two numbers. Stem needs nothing: it keeps no list
 of services.
 
-- [ ] Two Ethernet leads and a spare: the PoE injector's data port to the Pi's `eth0`, and the
-      injector to the camera. The Ethernet hub, on its own supply, only if a laptop needs the
+- [ ] Ethernet: a short lead from the PoE injector's data port to the Pi's `eth0`, and the
+      long UTP lead from the injector to the camera. The Ethernet hub, on its own supply, only if a laptop needs the
       wire as well. The annotated feed is at `http://10.8.0.3:8080/` from the Mac.
 - [ ] Speakers under the balcony, the io|2's outs to them, mix knob to the computer side.
 - [ ] Heads on the balcony, left to right as named; DMX daisy-chained from the HAT through

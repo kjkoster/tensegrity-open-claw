@@ -181,8 +181,8 @@ these at startup and panics with the remediation if they're wrong.
 
 The two green lamps in the cabinet door's buttons dim through the Pi's two hardware PWM
 channels, which the boot configuration routes to GPIO12 and GPIO13. Confirm with
-`ls /sys/class/pwm/pwmchip0`. Without it `brain` still runs, logs `no PWM` for each lamp at
-startup, and leaves the lamps dark.
+`ls /sys/class/pwm/pwmchip0`. Without it `brain` stops at startup with `no PWM` and the lamp
+it could not open.
 
 ### DMX timing hardening
 
@@ -194,9 +194,10 @@ insurance:
   showing a healthy "DMX detected" — is in [`DESIGN.md`](DESIGN.md) §2.2.
 - **`disable_pvt=1`** in the boot configuration — removes Broadcom firmware voltage/temperature timing
   jitter. Cheap, keep it.
-- **Real-time scheduling** — `brain.service` sets `CPUSchedulingPolicy=fifo` /
-  `CPUSchedulingPriority=50` so the kernel can't preempt the DMX loop mid-frame. The RT
-  throttle still guarantees non-RT tasks progress. Confirm with `chrt -p $(pgrep -x brain)`.
+- **Real-time scheduling** — the frame loop puts itself on core 3 at `SCHED_FIFO` 50, so the
+  kernel can't preempt it mid-frame, and every other thread of the brain sets its own core
+  and priority (`DESIGN.md` §1.6). The RT throttle still guarantees non-RT tasks progress.
+  Confirm with `ps -L -o tid,psr,cls,rtprio,comm -p $(pgrep -x brain)`.
 - **`force_turbo=1`** *(optional)* — pins the CPU clock to remove frequency-scaling jitter.
   Added during debugging; since the 512-frame turned out to be the real fix, this can be
   removed to cut heat/power on a deployed unit. Confirm with `vcgencmd get_config force_turbo`.
