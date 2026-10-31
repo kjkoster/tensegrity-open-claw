@@ -2,8 +2,10 @@
 //! line, in paths — 1 at the yard entry, 0 at the line, negative past it — or the tombstone when
 //! nobody is in the yard.
 //!
-//! The eyeball is not built yet, so outside test mode the yard is empty. In test mode the left
-//! button steps through a few distances in its place, so the heart can be heard quickening.
+//! Outside test mode the distance is the eyeball's latest sighting. No sighting yet, or one
+//! older than `EYEBALL_STALE_SECS`, is the tombstone, so an eyeball that has lost its camera or
+//! wedged idles the show. In test mode the left button steps through a few distances in its
+//! place, so the heart can be heard quickening with nobody on the path.
 //!
 //! Debouncing is the show's, here: the scare needs the distance at or past the line for
 //! `SCARE_CONFIRM_SECS`, and the yard counts as empty once it has been for `LEAVE_SECS`, so a
@@ -12,8 +14,9 @@
 //! Published on `brain/presence` when it changes, as the distance rounded to a hundredth, or
 //! `tombstone`.
 
-use crate::show::{LEAVE_SECS, SCARE_CONFIRM_SECS, frames};
+use crate::show::{EYEBALL_STALE_SECS, LEAVE_SECS, SCARE_CONFIRM_SECS, frames};
 use cortex::telemetry::Publisher;
+use eyeball::Sighting;
 
 /// Nobody in the yard. Infinitely far is what an empty yard means, so every comparison the show
 /// makes falls the safe way without a special case.
@@ -72,11 +75,16 @@ impl Presence {
         self.test_step = 0;
     }
 
-    pub fn step(&mut self, testing: bool) -> Reading {
+    pub fn step(&mut self, testing: bool, sighting: Option<&Sighting>) -> Reading {
         let distance = if testing {
             TEST_STEPS[self.test_step]
         } else {
-            TOMBSTONE
+            match sighting {
+                Some(sighting) if sighting.seen.elapsed().as_secs_f64() < EYEBALL_STALE_SECS => {
+                    sighting.distance
+                }
+                _ => TOMBSTONE,
+            }
         };
 
         self.past_line = match self.past_line {

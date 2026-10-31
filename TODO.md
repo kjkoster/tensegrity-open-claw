@@ -21,7 +21,7 @@ and the rig in the yard comes last:
 
 Each ends in a brain that runs, so every evening ends on something working. The scare can be
 rehearsed from the cabinet door in test mode once the show is in; the heart's pace needs the
-eyeball, or the reference footage replayed into it. Halloween is Saturday the 31st, six days
+eyeball, or test mode's left button in its place. Halloween is Saturday the 31st, six days
 from the date of this file.
 
 ---
@@ -47,7 +47,7 @@ Each is a choice, written down so it can be changed on purpose.
 | What arms the scare | Only a crossing: the distance at or past the line after a positive value, held for `SCARE_CONFIRM_SECS`. Someone appearing past the line from the tombstone — back from the door, out of the house — is not scared. | Any distance at or past the line: scares people on their way out. |
 | Test mode from `blackout` | Enters `idle`, so the rose and the heart can be looked at without a scare first. | Staying dark until the right button is pressed. |
 | The flash before the thunderclap | A state of its own, `lightning`: two frames at full, silent, and the thunderclap cued on the frame after, so the light leads the crack. `LIGHTNING_SECS` is 50 ms, rounded to whole frames, at least one; two frames chosen at the bench. | The flash as the first frames of `thunderclap`: the recording and its envelope would no longer start together. |
-| Presence before the eyeball | The yard is empty outside test mode. In test mode the left button steps it: nobody, 0.5, 0.1. 0.1, not 0, so it races the heart and never scares; the right button scares. | A fake distance that wanders by itself: a heart nobody asked to quicken. |
+| Presence in test mode | Outside test mode it is the eyeball's distance. In test mode the left button steps it in the eyeball's place: nobody, 0.5, 0.1. 0.1, not 0, so it races the heart and never scares; the right button scares. | A fake distance that wanders by itself: a heart nobody asked to quicken. |
 | The face's lamps during the show | The left lamp is the rose's level in every mode, so the show can be watched against the sound from the door; the right lamp is test mode. | Both lamps for test mode only, as before: nothing to see of the show until the heads are driven. |
 | Telemetry clients inside the brain | One connection, the brain's. The face, the mouth and the eyeball publish their subtrees, `face/…`, `mouth/…` and `eyeball/…`, through it, and have no `health/` topic of their own. A client and a will are for a process that can die on its own: the brain, the ball, Stem. | A client each, as the face and the ear had: none can die without the brain, so their wills only repeat `health/brain`, at the cost of a connection, a thread and a farewell apiece. |
 | `rig-mqtt` is renamed `stem` | The crate is the Rust programs' view of Stem, the process they report to, so it is named for it and lives in `stem/` beside the daemon, the broker configuration and `rig_mqtt.py`, its Python half. It stays purely `no_std`, for firmware; the brain's client, which needs sockets and threads, stays in `cortex` as `cortex::telemetry`. | A directory of its own: Stem split across two places. The client inside the crate behind a `std` feature: std in a crate kept `no_std` for firmware. |
@@ -73,10 +73,10 @@ Each needs a choice before the step that uses it.
 
 | question | why it matters | recommendation |
 |---|---|---|
-| The smallest people at 320×192 | 640×360 has 360 rows across the camera's 64° of height where 640×480 has 480, so at half scale a 1.2 m child at 6 m is about 29 pixels tall in the model's picture against 38 at 320×256. The street photos started losing people below about 25. | Judge on the reference footage. If the far children drop out, a 416×224 export keeps the full width at about 36 pixels, for roughly 320×256's frame rate. |
-| Phantoms at the low threshold | `CONFIDENCE` is 0.09, well below the 0.39 a post on a street photo once scored as a person. The empty bench yard scored nothing above 0.02, but that is one frame. A phantom between the marks quickens the heart. | Judge on the reference footage, the yard at night with nobody in it among it; raise `CONFIDENCE` until the phantoms go, as long as the far children stay. |
-| The camera's exposure under the lightning | `Sensor.Exposure=auto` under the 10 ms ceiling re-meters after every flash, so the frames right after the lightning come out dark while it recovers. `Sensor.Exposure=hold` locks it, but locks whatever it was metering the moment it is set: at start-up in the dark, a lock onto a dark field. | Keep `auto` with the ceiling, as the old eyeball did, and see on footage with a head flashing how many frames a flash costs; `hold` only if that is more than the scare's debounce can absorb, set once the yard is lit as it will be. |
-| Does the show's light blind the camera | The camera sees by its own 850 nm illuminator, with its IR-cut filter out and exposure fixed. But with the filter out the sensor sees visible light too: the lightning's full white, the strobes and the amber wash all land on it, and a frame washed out by a flash is a frame with nobody in it. The heads are LEDs and give off almost no infrared, so their visible light is all the harm they can do. | Record reference footage with a head flashing at full in view. If the flash blanks frames, an 850 nm long-pass filter over the lens blocks visible light optically; otherwise nothing. |
+| The smallest people at 320×192 | 640×360 has 360 rows across the camera's 64° of height where 640×480 has 480, so at half scale a 1.2 m child at 6 m is about 29 pixels tall in the model's picture against 38 at 320×256. The street photos started losing people below about 25. | Judge on the feed, someone walking the far side of the path. If the far children drop out, a 416×224 export keeps the full width at about 36 pixels, for roughly 320×256's frame rate. |
+| Phantoms at the low threshold | `CONFIDENCE` is 0.09, well below the 0.39 a post on a street photo once scored as a person. The empty bench yard scored nothing above 0.02, but that is one frame. A phantom between the marks quickens the heart. | Judge on the feed, the yard at night with nobody in it, watching `eyeball/people`; raise `CONFIDENCE` until the phantoms go, as long as the far children stay. |
+| The camera's exposure under the lightning | `Sensor.Exposure=auto` under the 10 ms ceiling re-meters after every flash, so the frames right after the lightning come out dark while it recovers. `Sensor.Exposure=hold` locks it, but locks whatever it was metering the moment it is set: at start-up in the dark, a lock onto a dark field. | Keep `auto` with the ceiling, as the old eyeball did, and see on the feed with a head flashing how many frames a flash costs; `hold` only if that is more than the scare's debounce can absorb, set once the yard is lit as it will be. |
+| Does the show's light blind the camera | The camera sees by its own 850 nm illuminator, with its IR-cut filter out and exposure fixed. But with the filter out the sensor sees visible light too: the lightning's full white, the strobes and the amber wash all land on it, and a frame washed out by a flash is a frame with nobody in it. The heads are LEDs and give off almost no infrared, so their visible light is all the harm they can do. | Watch the feed with a head flashing at full in view. If the flash blanks frames, an 850 nm long-pass filter over the lens blocks visible light optically; otherwise nothing. |
 | Is the door in the picture | `respite` holds while anyone is seen. If the camera does not see the doorstep, a group collecting sweets is the tombstone and the rose returns while they stand there. | Frame the door in, or make `LEAVE_SECS` long enough to cover a doorstep visit. |
 | The strobe's rate | `STROBE_RATE` is "fast", which is no value, and the strobe band is unmeasured. A fast strobe aimed at children's faces sits in the 3–30 flashes a second that photosensitive-epilepsy guidance warns against. | `STROBE_RATE` in flashes a second, at most 3, read off the measured band; or no strobe, and let the hops carry the lightning. |
 | `bLnd` on the heads | `SHOW.md` §12 says `bLAc`; `README.md`'s e-stop section says every fixture holds its last values. The manual gives `bLAc` as "return to zero", which may send the head home, and `HoLd` keeps it lit wherever it was — mid-thunderclap included, for the five seconds a brain restart takes. | Find out on one head what `bLAc` does. If it darkens and stays put, use it and make the README's rule "dark and still"; if it homes, decide between a homing head and a lit one. |
@@ -94,8 +94,6 @@ already, and the repo pins GreptimeDB v1.3.0. What is left:
       Grafana and Mosquitto up to date.
 - [ ] `memory-pi`: `./deploy-memory-pi.sh` installs GreptimeDB v1.3.0. Its scans are now
       capped at 25% of RAM, so a Grafana query too big for the Pi fails rather than swapping.
-- [ ] QLC+ on `riverrain` at its newest, and the camera's firmware at the newest Axis ships
-      for the M3105-LVE, both before anything is set in them.
 
 ## The eyeball, in the brain
 
@@ -105,9 +103,8 @@ detector and the distance from those frames. Nothing from the old code is reused
 camera's VAPIX settings; `DESIGN.md` §3.6 describes it. All of it is tested at the bench, with
 the camera on the table plugged into the Pi; nothing here needs a show.
 
-- [ ] **Frame timing under load**: the brain's threads land where `DESIGN.md` §1.6 says on
-      `claw-pi`; what is left to see is the journal's frame timing holding with the mouth
-      playing and the detector running.
+- [ ] **Frame timing under load**: the journal's frame timing holding on `claw-pi` with the
+      mouth playing and the detector running.
 - [ ] **The show's two timing constants from the measured rate**, 6.5 frames a second:
       `SCARE_CONFIRM_SECS` was "two frames" at ten, so 0.3 s; `EYEBALL_STALE_SECS`, "twenty",
       so 3 s.
@@ -116,26 +113,11 @@ the camera on the table plugged into the Pi; nothing here needs a show.
 - [ ] **The camera's light control**: it reports `Properties.LightControl` available, which
       `param.cgi` does not show: VAPIX's separate light-control API, likely the IR
       illuminator's intensity, worth a look.
-- [ ] **Reference footage, the poor man's test set**: after dark and under the camera's own
-      infrared, record the MJPEG stream (`curl` on `/axis-cgi/mjpg/video.cgi` into a file)
-      of yourself walking past the camera — walking up to a line and stopping, walking on
-      past it, coming back, standing still, walking past behind, and a few people at once if
-      you can get them. The yard's path if a dry evening allows a camera on a stand there;
-      any walk across its view otherwise, since the model does not care where it is, and
-      only the marks need the real yard. The retina plays a recorded file in place of the
-      camera (`watch -- FILE`), so the model, the confidence and the two marks are judged
-      against the same walks, and again after every change; and a recording played into the
-      brain is how the heart is heard quickening without anyone on the path.
-- [ ] **The brain runs them**: a camera that refuses the login stops the brain. `brain/src/main.rs` calls
-      `eyeball::spawn(Source::Camera, brain_publisher.clone())`, which starts the retina with
-      the eyeball's view, and the show closure holds the eyeball's reader beside the face's. Presence, in
-      `brain/src/presence.rs`, takes its distance in place of the tombstone outside test
-      mode; `None`, or a sighting older than `EYEBALL_STALE_SECS`, is the tombstone.
 
 **Landed when** the feed at `http://10.8.0.3:8080/` shows you walking across the camera's
 view with a box and a leading foot, `eyeball/distance` falls as you cross from the entry mark
-to the trigger mark, replayed footage gives the same numbers on every run, and the journal's
-frame timing does not move while the detector runs, while `retina/camera` reads `ok`.
+to the trigger mark, and the journal's frame timing does not move while the detector runs,
+while `retina/camera` reads `ok`.
 
 ## Clear the decks
 
@@ -203,7 +185,7 @@ io|2's USB shows in `mouth/state` and nothing in the journal's frame timing.
 
 The fixture definitions and the workspace, as far as the show needs them to compile and to be
 seen working, then the show. Tested at the bench with one head and the wash on the HAT's DMX
-line, the speaker, and the camera or the reference footage; aiming for real waits for the yard,
+line, the speaker, and the camera; aiming for real waits for the yard,
 on the day.
 
 ### Fixture definitions
@@ -223,7 +205,7 @@ use site.
 - [ ] Install both into QLC+ and relaunch it; both must appear in *Add fixture…*.
       Absence is the error signal: QLC+ 5 skips a definition that fails to parse silently.
 
-### The QLC+ workspace (`claw.qxw`, QLC+ 5.2.1 on `riverrain`)
+### The QLC+ workspace (`claw.qxw`, QLC+ 5.3.0 on `riverrain`)
 
 Do this in QLC+, not in a text editor: the build ingests whatever QLC+ writes, and a
 hand-edited file is a second author. Keep `claw.qxw` open in a text editor beside it to check
@@ -271,25 +253,17 @@ definitions, workspace and tables above.*
       disc in pan and tilt is an ellipse in the yard, narrower in pan the more steeply a head
       looks down; the old dance's `on_ball` corrected for that, and nothing here needs it
       exact. The head constants of [`SHOW.md`](SHOW.md) §10 with their reasons.
-- [ ] Per state, what goes into the frame for the heads and the wash — asking the patch for the rose, white, open and
-      strobe bands, never a byte. "Dark" is dimmer 0 with the strobe channel open. Every
-      head's `Light Strips`, `Automatic Mode` and `Reset` are parked in every state.
-
-  | state | heads | wash | mouth |
-  |---|---|---|---|
-  | `blackout` | dark, on "Rose"; `ROSE_HEAD` on gobo Rose in `ROSE_COLOUR`, others white and open | off | silent |
-  | `idle` | `ROSE_HEAD`: "Rose", gobo Rose, `ROSE_COLOUR`, dimmer = heart envelope paced by the distance, held dark for the first `BUILDUP_SECS` after `respite` while the heads travel; others dark, white and open | off | heartbeat on each beat; owls |
-  | `cut` | dark; still on "Rose", wheels as in `idle` | off | mute |
-  | `buildup` | "Thunderclap", gobo Open, colour White, motor speed fastest, dark | off | mute |
-  | `lightning` | dimmer full, open, still | white, full | silent |
-  | `thunderclap` | dimmer = the thunderclap's envelope, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, others open; each head hops every `THUNDER_HOP_SECS` to a fresh uniform point inside `THUNDER_RADIUS_DEG` of its "Thunderclap" pose, motor speed fastest | R = G = B = the thunderclap's envelope | thunderclap |
-  | `respite` | dark, white and open, held where the last hop left them | `DOOR_AMBER`, faded up over `DOOR_FADE_SECS` | silent |
+- [ ] What is left of the heads per state, asking the patch for bands, never a byte:
+  - pan and tilt on "Rose" in `blackout`, `idle` and `cut`, on "Thunderclap" from
+    `buildup`, and held where the last hop left them in `respite`;
+  - motor speed fastest in `buildup` and `thunderclap`;
+  - in `thunderclap`, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, the others open.
 
 **Landed when**, at the bench, the scare runs from the cabinet door in test mode from every
 state, as [`SHOW.md`](SHOW.md) §16 step 6: the bench head shows the rose, cuts, moves and
 lights white, the wash lights amber, the speaker plays each sound on its cue, and the
-`show: a → b — why` lines say why. Replayed footage quickens the heart, and the scare fires
-on the crossing.
+`show: a → b — why` lines say why. Walking up to the camera quickens the heart, and the scare
+fires on the crossing.
 
 ## The rig, on the day
 

@@ -39,6 +39,7 @@ use cortex::config::FRAME_RATE_HZ;
 use cortex::draw::Draw;
 use cortex::qlc_plus::Capability;
 use cortex::telemetry::Publisher;
+use eyeball::Sighting;
 use std::time::{Duration, Instant};
 
 /// The resting heart, and the heart at the trigger line.
@@ -66,6 +67,9 @@ pub const SCARE_CONFIRM_SECS: f64 = 0.2;
 /// How long the yard must be empty before `respite` ends, so a detector that loses the group
 /// for a frame does not reset the show on them.
 pub const LEAVE_SECS: f64 = 3.0;
+/// After how long without a new sighting the eyeball counts as blind and the yard as empty:
+/// many of its frames, so only a camera or detector that has stopped trips it.
+pub const EYEBALL_STALE_SECS: f64 = 2.0;
 /// The darkness and silence of the cut, hard.
 const CUT_SECS: f64 = 1.0;
 /// Still dark and silent while the heads move to "Thunderclap": the longest move plus a margin,
@@ -197,8 +201,8 @@ impl Show {
         }
     }
 
-    /// Fills this frame's slots, given what the door says.
-    pub fn fill(&mut self, slots: &mut [u8], face: &FaceState) {
+    /// Fills this frame's slots, given what the door says and the eyeball last saw.
+    pub fn fill(&mut self, slots: &mut [u8], face: &FaceState, sighting: Option<&Sighting>) {
         let chords = face.chords.wrapping_sub(self.seen.chords);
         let left_presses = face.left_presses.wrapping_sub(self.seen.left_presses);
         let right_presses = face.right_presses.wrapping_sub(self.seen.right_presses);
@@ -223,7 +227,7 @@ impl Show {
             }
         }
 
-        let reading = self.presence.step(testing);
+        let reading = self.presence.step(testing, sighting);
         if let Some((next, why)) = self.next(testing, testing && right_presses > 0, &reading) {
             self.enter(next, why);
         }

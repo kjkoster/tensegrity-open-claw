@@ -175,8 +175,8 @@ tombstone, once per camera frame it has processed — a few a second on the Pi, 
 stands for several of the rig's frames, and the heart's glide is what turns those steps into
 a pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: an eyeball that has lost its
 camera idles the show on the rose, which is the safe default, and `retina/camera` says why.
-Recorded footage played into the eyeball in place of the camera is how the heart is heard
-quickening with nobody on the path.
+Test mode's left button stands in for the eyeball, so the heart can be heard quickening with
+nobody on the path.
 
 The distance and the face's buttons each reach the show as their own snapshot; what the
 eyeball does is in [§14](#14-the-eyeball).

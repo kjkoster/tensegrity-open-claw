@@ -12,7 +12,14 @@ mouth-build  = { path = "../mouth-build" }
 cortex   = { path = "../cortex" }
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.1",  features = ["std"] }
+eyeball          = { path = "../eyeball" }
 mouth            = { path = "../mouth" }
 stem             = { path = "../stem" }
+# The annotated feed: `tiny_http` serves it, `font8x8` letters it, a bitmap font with no font
+# file to ship, and `image` encodes it, JPEG only: its defaults add every other format, an
+# AV1 encoder among them, and a thread pool.
+font8x8          = "0.3.1"
+image            = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+tiny_http        = "0.12.0"
 # The face, the cabinet door's buttons and lamps.
 rppal            = "0.22.1"

@@ -11,8 +11,10 @@ use mouth_show::MouthShow;
 use show::Show;
 
 mod door_show;
+mod draw;
 mod face;
 mod face_show;
+mod feed;
 mod heads_show;
 mod heart;
 mod mouth_show;
@@ -39,6 +41,10 @@ fn main() {
     let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
     let estop_state = face_state.clone();
     let mouth = mouth::spawn(&sounds::SOUNDS, brain_publisher.part("mouth"));
+    // The eyeball and its retina publish `eyeball/…` and `retina/…` on the brain's connection.
+    // A camera that refuses the login stops the brain; one that is away only goes stale.
+    let sightings = eyeball::spawn(brain_publisher.clone());
+    feed::spawn(sightings.clone());
     let mut show = Show::new(
         brain_publisher.clone(),
         &shows::CALENDAR,
@@ -55,7 +61,7 @@ fn main() {
         // Every fixture named here comes from the QLC+ patch, so this closure is also the
         // record of which patched fixtures the daemon actually drives.
         show: Box::new(move |_dt: f64, slots: &mut [u8]| {
-            show.fill(slots, &face_state.snapshot());
+            show.fill(slots, &face_state.snapshot(), sightings.snapshot().as_deref());
         }),
         tasks: Box::new(move |spawner| {
             face::spawn(spawner, face);

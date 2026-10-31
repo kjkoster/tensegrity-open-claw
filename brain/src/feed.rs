@@ -5,11 +5,8 @@
 //! whoever is in it to the 4G uplink's public address. A frame is drawn and encoded only on a
 //! connected viewer's own thread, so with nobody watching the feed costs the detector nothing.
 
-use crate::config as cfg;
-use crate::detect::Person;
 use crate::draw;
-use cortex::latest::LatestRx;
-use image::RgbImage;
+use eyeball::{Sighting, Sightings};
 use image::codecs::jpeg::JpegEncoder;
 use std::io::{self, Cursor, Read};
 use std::sync::Arc;
@@ -17,16 +14,8 @@ use std::thread;
 use std::time::Duration;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
-/// One frame as the eyeball saw it, handed to the feed.
-pub struct Look {
-    pub picture: RgbImage,
-    pub people: Vec<Person>,
-    /// The eyeball's latest frame rate, once it has one.
-    pub fps: Option<f64>,
-}
-
-/// The latest look, or none before the first frame.
-pub type Looks = LatestRx<Option<Arc<Look>>>;
+/// The brain's WireGuard address, which the Mac reaches.
+const ADDRESS: &str = "10.8.0.3:8080";
 
 const BOUNDARY: &str = "eyeball";
 
@@ -40,17 +29,17 @@ const QUALITY: u8 = 70;
 /// The cap on the backoff between attempts to bind the feed's address.
 const RETRY_MAX_S: u64 = 30;
 
-/// Starts the feed's thread, serving `looks`.
-pub fn spawn(looks: Looks) {
+/// Starts the feed's thread, serving `sightings`.
+pub fn spawn(sightings: Sightings) {
     thread::Builder::new()
         .name("feed".into())
         .spawn(move || {
             // Before the server exists, so its threads, and every viewer's, inherit it.
             cortex::sched::background();
             let server = bind();
-            eprintln!("feed: serving http://{}/", cfg::FEED_ADDRESS);
+            eprintln!("feed: serving http://{ADDRESS}/");
             for request in server.incoming_requests() {
-                serve(request, &looks);
+                serve(request, &sightings);
             }
         })
         .expect("failed to spawn the feed's thread");
@@ -61,25 +50,22 @@ pub fn spawn(looks: Looks) {
 fn bind() -> Server {
     let mut backoff_s = 1u64;
     loop {
-        match Server::http(cfg::FEED_ADDRESS) {
+        match Server::http(ADDRESS) {
             Ok(server) => return server,
             Err(e)
                 if e.downcast_ref::<io::Error>()
                     .is_some_and(|e| e.kind() == io::ErrorKind::AddrNotAvailable) =>
             {
-                eprintln!(
-                    "feed: {}: {e}; binding again in {backoff_s}s",
-                    cfg::FEED_ADDRESS
-                );
+                eprintln!("feed: {ADDRESS}: {e}; binding again in {backoff_s}s");
                 thread::sleep(Duration::from_secs(backoff_s));
                 backoff_s = (backoff_s * 2).min(RETRY_MAX_S);
             }
-            Err(e) => panic!("feed: bind {}: {e}", cfg::FEED_ADDRESS),
+            Err(e) => panic!("feed: bind {ADDRESS}: {e}"),
         }
     }
 }
 
-fn serve(request: Request, looks: &Looks) {
+fn serve(request: Request, sightings: &Sightings) {
     let url = request.url().to_string();
     let answered = match url.as_str() {
         "/" => {
@@ -90,7 +76,7 @@ fn serve(request: Request, looks: &Looks) {
             request.respond(Response::from_string(page).with_header(html))
         }
         "/stream.mjpg" => {
-            let looks = looks.clone();
+            let sightings = sightings.clone();
             let viewer = request
                 .remote_addr()
                 .map(ToString::to_string)
@@ -105,7 +91,7 @@ fn serve(request: Request, looks: &Looks) {
                         Header::from_bytes("Cache-Control", "no-cache").unwrap(),
                     ];
                     let frames = Frames {
-                        looks,
+                        sightings,
                         last: None,
                         pending: Cursor::new(Vec::new()),
                     };
@@ -126,36 +112,30 @@ fn serve(request: Request, looks: &Looks) {
     }
 }
 
-/// The stream one viewer reads: each newer look, annotated and encoded, as one MJPEG part.
+/// The stream one viewer reads: each newer sighting, annotated and encoded, as one MJPEG part.
 struct Frames {
-    looks: Looks,
-    last: Option<Arc<Look>>,
+    sightings: Sightings,
+    last: Option<Arc<Sighting>>,
     pending: Cursor<Vec<u8>>,
 }
 
 impl Frames {
-    /// Waits for a look newer than the last one sent, and makes it the pending part.
+    /// Waits for a sighting newer than the last one sent, and makes it the pending part.
     fn next_part(&mut self) {
-        let look = loop {
-            if let Some(look) = self.looks.snapshot()
+        let sighting = loop {
+            if let Some(sighting) = self.sightings.snapshot()
                 && !self
                     .last
                     .as_ref()
-                    .is_some_and(|last| Arc::ptr_eq(last, &look))
+                    .is_some_and(|last| Arc::ptr_eq(last, &sighting))
             {
-                break look;
+                break sighting;
             }
             thread::sleep(POLL);
         };
-        let mut picture = look.picture.clone();
-        let more = look
-            .fps
-            .map_or(String::new(), |fps| format!("{fps:.1} fps"));
-        draw::annotate(&mut picture, &look.people, &more);
-
         let mut jpeg = Vec::new();
         JpegEncoder::new_with_quality(&mut jpeg, QUALITY)
-            .encode_image(&picture)
+            .encode_image(&draw::annotate(&sighting))
             .expect("feed: a picture the JPEG encoder takes");
         let mut part = format!(
             "--{BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
@@ -165,7 +145,7 @@ impl Frames {
         part.extend(jpeg);
         part.extend(b"\r\n");
         self.pending = Cursor::new(part);
-        self.last = Some(look);
+        self.last = Some(sighting);
     }
 }
 

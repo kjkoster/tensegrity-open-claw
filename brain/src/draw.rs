@@ -2,9 +2,9 @@
 //! person, a dot on every leading foot and a larger one on the furthest, the two columns, and
 //! the distance. For aiming the camera, and for judging the detector against the yard.
 
-use crate::config as cfg;
-use crate::detect::Person;
-use crate::yard;
+use eyeball::Sighting;
+use eyeball::config as cfg;
+use eyeball::yard;
 use font8x8::UnicodeFonts;
 use image::{Rgb, RgbImage};
 
@@ -15,17 +15,19 @@ const MAGENTA: Rgb<u8> = Rgb([255, 0, 255]);
 const WHITE: Rgb<u8> = Rgb([255, 255, 255]);
 const BLACK: Rgb<u8> = Rgb([0, 0, 0]);
 
-/// Draws `people` and the yard onto `picture`, with a heading of the distance, the count, and
-/// `more` after them.
-pub fn annotate(picture: &mut RgbImage, people: &[Person], more: &str) {
+/// The sighting's picture with its people and the yard drawn on, under a heading of the
+/// distance, the count and the frame rate.
+pub fn annotate(sighting: &Sighting) -> RgbImage {
+    let mut annotated = sighting.picture.clone();
+    let picture = &mut annotated;
     let (width, height) = picture.dimensions();
     for (column, label) in [(cfg::TRIGGER_COLUMN, "rose"), (cfg::ENTRY_COLUMN, "entry")] {
         let x = (column * width as f32) as i32;
         rectangle(picture, x - 1, 0, x, height as i32 - 1, YELLOW);
         text(picture, x + 4, height as i32 - 20, label, 2, YELLOW);
     }
-    let furthest = yard::furthest(people, width);
-    for person in people {
+    let furthest = yard::furthest(&sighting.people, width);
+    for person in &sighting.people {
         let (left, top) = (person.left as i32, person.top as i32);
         let (right, bottom) = (person.right as i32, person.bottom as i32);
         for inset in 0..2 {
@@ -50,9 +52,16 @@ pub fn annotate(picture: &mut RgbImage, people: &[Person], more: &str) {
         let (colour, radius) = if is_furthest { (MAGENTA, 8) } else { (RED, 5) };
         disc(picture, left, bottom, radius, colour);
     }
-    let distance = yard::word(yard::distance(people, width));
-    let heading = format!("distance {distance}   {} people   {more}", people.len());
+    let fps = sighting
+        .fps
+        .map_or(String::new(), |fps| format!("{fps:.1} fps"));
+    let heading = format!(
+        "distance {}   {} people   {fps}",
+        yard::word(sighting.distance),
+        sighting.people.len()
+    );
     text(picture, 8, 8, heading.trim_end(), 2, WHITE);
+    annotated
 }
 
 fn put(picture: &mut RgbImage, x: i32, y: i32, colour: Rgb<u8>) {

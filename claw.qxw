@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Workspace>
-<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FIXANDFUNC">
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="SDESK">
  <Creator>
   <Name>Q Light Controller Plus</Name>
-  <Version>5.2.1</Version>
+  <Version>5.3.0</Version>
   <Author>Kees Jan Koster</Author>
  </Creator>
  <Engine>
@@ -11,7 +11,7 @@
    <BeatGenerator BeatType="Internal" BPM="120"/>
    <NetworkServer Type="Native" AutoStart="False" Name="QLC+_C0A8B26D" Password=""/>
    <Universe Name="Universe 1" ID="0">
-    <Output Plugin="E1.31" UID="10.8.0.4" Line="0">
+    <Output Plugin="E1.31" Name="10.8.0.4" UID="" Line="0">
      <PluginParameters UniverseChannels="53" mcastFullIP="239.255.0.1" multicast="0" priority="200" transmitMode="Full" ucastIP="10.8.0.3" ucastPort="5568" universe="1"/>
     </Output>
    </Universe>

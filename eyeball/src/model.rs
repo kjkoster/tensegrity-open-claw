@@ -15,8 +15,8 @@
 //! demo tagged `0.1.1rc0` in YOLOX's repository still normalises: it predates the retrain, and
 //! is not the reference for these weights. YOLOX's later code is.
 //!
-//! One input, `images`, `[1, 3, 192, 320]`; one output, `output`, `[1, 1260, 85]`. The
-//! detector reads the size from the model, so an export at another size runs unchanged.
+//! One input, `images`, `[1, 3, 192, 320]`; one output, `output`, `[1, 1260, 85]`. An
+//! export at another size is a change to `INPUT` with it.
 //!
 //! **What it gives out.** One row per cell of three grids, strides 8, 16 and 32 in that order,
 //! each grid row-major: `[cx, cy, w, h, objectness, class_0 … class_79]`. Objectness and the

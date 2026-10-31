@@ -39,9 +39,5 @@ pub const TRIGGER_COLUMN: f32 = 0.40;
 /// `TRIGGER_COLUMN`: the leading foot is whichever bottom corner of a box faces the trigger.
 pub const ENTRY_COLUMN: f32 = 0.85;
 
-/// Where the annotated feed is served: the WireGuard address alone, so the Mac reaches it and
-/// the 4G uplink's public address never shows the yard.
-pub const FEED_ADDRESS: &str = "10.8.0.3:8080";
-
 /// The detector's threads for its matrix products, one per background core.
 pub const MODEL_THREADS: usize = 3;

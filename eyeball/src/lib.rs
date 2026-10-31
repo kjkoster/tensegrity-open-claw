@@ -2,53 +2,51 @@
 //! out, for the show to read.
 //!
 //! A thread of its own in the brain, on the background cores, taking each newest frame from the
-//! retina, finding the people in it and measuring the yard from them. The reading goes out once
-//! per frame on a latest-value seam, with the time the frame was seen, so a camera or detector
-//! that stops is a reading going stale, which the show turns into an empty yard.
+//! retina, finding the people in it and measuring the yard from them. Each frame's sighting goes
+//! out on a latest-value seam with the time the frame was seen, so a camera or detector that
+//! stops is a sighting going stale, which the show turns into an empty yard. The sighting
+//! carries the picture and the boxes too, for the rig's annotated feed to draw.
 //!
 //! It is a part on the broker, publishing through the brain's connection under `eyeball/`:
 //! `distance`, in paths to a hundredth or `tombstone`, and `people`, each when they change, and
-//! `fps`, the frames a second it gets through. What it sees, drawn over, is the annotated feed,
-//! at `config::FEED_ADDRESS`.
+//! `fps`, the frames a second it gets through.
 
 pub mod config;
 pub mod detect;
-pub mod draw;
-pub mod model;
 pub mod yard;
 
-mod feed;
+mod model;
 
 use cortex::latest::{LatestRx, latest};
 use cortex::rate::Rate;
 use cortex::telemetry::Publisher;
-use detect::Detector;
-use feed::Look;
-use image::ImageFormat;
-use retina::Source;
+use detect::{Detector, Person};
+use image::{ImageFormat, RgbImage};
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
 /// What the eyeball saw in one frame.
-#[derive(Clone, Copy, Debug)]
 pub struct Sighting {
     /// The furthest person's distance into the yard, in paths, or `+∞` for nobody.
     pub distance: f64,
-    /// When the frame was seen, so the show can tell a reading from a stale one.
+    /// When the frame was seen, so the show can tell a sighting from a stale one.
     pub seen: Instant,
+    pub picture: RgbImage,
+    pub people: Vec<Person>,
+    /// The eyeball's latest frame rate, once it has one.
+    pub fps: Option<f64>,
 }
 
-/// Starts the retina on `source`, set up for the eyeball's `config::VIEW`, the eyeball's thread
-/// on its frames, and the annotated feed beside it, and returns the seam the eyeball's readings
-/// go out on: `None` until the first frame has been through the detector. Both publish through
-/// `telemetry`'s connection, under `retina/` and `eyeball/`.
-pub fn spawn(source: Source, telemetry: Publisher) -> LatestRx<Option<Sighting>> {
-    let frames = retina::spawn(source, config::VIEW, telemetry.part("retina"));
+/// The newest sighting, or none before the first frame has been through the detector.
+pub type Sightings = LatestRx<Option<Arc<Sighting>>>;
+
+/// Starts the retina, set up for the eyeball's `config::VIEW`, and the eyeball's thread on its
+/// frames. Both publish through `telemetry`'s connection, under `retina/` and `eyeball/`.
+pub fn spawn(telemetry: Publisher) -> Sightings {
+    let frames = retina::spawn(config::VIEW, telemetry.part("retina"));
     let telemetry = telemetry.part("eyeball");
     let (sightings, reader) = latest(None);
-    let (looks, feed_looks) = latest(None);
-    feed::spawn(feed_looks);
     thread::Builder::new()
         .name("eyeball".into())
         .spawn(move || {
@@ -74,10 +72,6 @@ pub fn spawn(source: Source, telemetry: Publisher) -> LatestRx<Option<Sighting>>
                     };
                 let people = detector.detect(&picture);
                 let distance = yard::distance(&people, picture.width());
-                sightings.publish(Some(Sighting {
-                    distance,
-                    seen: frame.seen,
-                }));
 
                 let word = yard::word(distance);
                 if word != published_distance {
@@ -92,7 +86,9 @@ pub fn spawn(source: Source, telemetry: Publisher) -> LatestRx<Option<Sighting>>
                     telemetry.publish("fps", format!("{rate:.1}"), true);
                     fps = Some(rate);
                 }
-                looks.publish(Some(Arc::new(Look {
+                sightings.publish(Some(Arc::new(Sighting {
+                    distance,
+                    seen: frame.seen,
                     picture,
                     people,
                     fps,

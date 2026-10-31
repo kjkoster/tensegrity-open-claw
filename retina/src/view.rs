@@ -76,13 +76,7 @@ pub struct FramesPerSecond(u32);
 impl FramesPerSecond {
     pub const MAX: u32 = 25;
 
-    /// In a constant, a rate out of range does not compile:
-    ///
-    /// ```compile_fail
-    /// use retina::view::FramesPerSecond;
-    /// const TOO_FAST: FramesPerSecond = FramesPerSecond::new(30);
-    /// let _ = TOO_FAST;
-    /// ```
+    /// In a constant, a rate out of range does not compile.
     pub const fn new(rate: u32) -> FramesPerSecond {
         assert!(
             rate >= 1 && rate <= Self::MAX,

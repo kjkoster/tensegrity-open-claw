@@ -217,7 +217,7 @@ error and stops the start.
 |---|---|---|
 | the frame loop (the executor, with the face's tasks) and embassy-time's timer thread | 3 | FIFO 50 |
 | the mouth | 2 | FIFO 50, ahead of everything else on that core |
-| the retina, the eyeball's detector and its model's thread pool, the feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
+| the retina, the eyeball's detector and its model's thread pool, the brain's annotated feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
 | Stem, in its own unit | 0–2 | `Nice=10` |
 
 No core is isolated on the kernel's command line: with every other thread of the brain and
@@ -329,7 +329,7 @@ frame rate sits under.
 | `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
 | `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
 | `mouth-build/` | the mouth's recordings compiled in, a build-dependency of a rig crate that has a mouth |
-| `eyeball/` | the eyeball (§3.6): the retina's frames in, one reading of the scene out, for a rig crate that wants to see |
+| `eyeball/` | the eyeball (§3.6): the retina's frames in, one sighting of the scene out, for a rig crate that wants to see; the rig crate draws and serves its annotated feed |
 | `retina/` | the retina (§3.6): a network camera set up over VAPIX and read as MJPEG, its newest frame handed to the eyeball |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
 
@@ -617,10 +617,16 @@ infrared or colour, and which way up the camera hangs — and the retina sets th
 it, so a consumer with other needs takes no change in the retina; the bounds are types,
 checked where the view is written. What belongs to the camera rather than to whoever looks,
 the mains' 50 Hz and the exposure for people walking, stays the retina's own. The eyeball
-starts its own retina with its view, so whoever runs the eyeball only says where the picture
-comes from: the camera, or footage. A different camera is a different retina and the same eyeball; a recorded stream stands in for the camera inside the retina,
-and stills stand in for the retina at the eyeball. Each reports its own half on the broker,
+starts its own retina with its view, so whoever runs the eyeball only starts it. A different
+camera is a different retina and the same eyeball. Each reports its own half on the broker,
 `retina/…` and `eyeball/…`, so a dead camera and a slow detector never look alike.
+
+**The rig draws, the eyeball sees.** The eyeball hands out one sighting per frame: the
+distance and when it was seen, with the picture and the boxes it came from. The show reads
+the distance; the annotated feed, which is the rig's and lives in the brain, draws the rest.
+What the feed draws — the two columns, a dot on the leading foot — is this show's yard, and an
+HTTP server is the rig's choice of how an operator looks, so neither belongs in the crate that
+finds people.
 
 **Inside the brain (§1.6).** One machine and no hop: the reading crosses a latest-value seam
 to the show, the same kind of seam an OSC receiver would publish on if a sensor ever moved to
@@ -663,11 +669,7 @@ shows as a lower frame rate on the broker rather than as a show that reacts late
 
 **The feed costs nothing unwatched.** Drawing on a frame is cheap; compressing it to JPEG
 again is not, on a Pi already running a detector. So the feed is encoded on its own thread,
-from the latest annotated frame, and only while a browser is connected.
-
-**Footage in place of the camera.** The retina takes a recorded MJPEG file as readily as the
-camera's stream, so the model, its threshold and the aiming are judged against the same
-walks every time, and the show can be driven with nobody in the space.
+from the latest sighting, and only while a browser is connected.
 
 #### In the brain: one distance
 
