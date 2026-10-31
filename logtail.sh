@@ -9,7 +9,8 @@ set -euo pipefail
 
 PI="claw-pi"               # ssh alias (key-based)
 
-# -o cat drops journald's own timestamp and host prefix, so the lines read as the brain
-# wrote them; pass -o short-precise to get the timestamps back. -t gives the remote journalctl a terminal, so Ctrl-C stops it instead of leaving it
-# running on the Pi.
-exec ssh -t "$PI" journalctl -u brain -f -o cat "$@"
+# Timestamped to the millisecond, in the rig's local time: the Pi's clock is UTC, and an hour
+# off from every time the show is written in reads wrong. Pass -o cat for the bare lines.
+# -t gives the remote journalctl a terminal, so Ctrl-C stops it instead of leaving it running
+# on the Pi.
+exec ssh -t "$PI" TZ=Europe/Amsterdam journalctl -u brain -f -o short-precise "$@"

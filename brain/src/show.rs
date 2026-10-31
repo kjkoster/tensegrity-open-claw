@@ -251,10 +251,7 @@ impl Show {
         reading: &Reading,
     ) -> Option<(State, Option<String>)> {
         let now = calendar::now();
-        let dark = self
-            .calendar
-            .current(now)
-            .is_some_and(|show| show.dark_stretch(now).is_some());
+        let dark = self.calendar.current(now).is_some();
         if !testing && !dark {
             return (self.state != State::Blackout).then(|| {
                 (
