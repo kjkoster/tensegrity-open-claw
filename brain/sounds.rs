@@ -7,7 +7,7 @@
 // and a gain above it fails the build; the speakers' own knobs set the level of the whole.
 
 const SOUNDS: &[(&str, f64)] = &[
-    ("heartbeat.m4a", 0.0),
-    ("owl.mp3", 0.0),
+    ("heartbeat.m4a", -7.4),
+    ("owl.mp3", -10.5),
     ("thunderclap.m4a", 0.0),
 ];

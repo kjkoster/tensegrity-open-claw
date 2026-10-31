@@ -3,7 +3,5 @@
 // constant in `presets`: "Rose" becomes `presets::ROSE`.
 //
 // Each is a scene holding only Pan, Pan Fine, Tilt and Tilt Fine for every head.
-//
-// Empty while the placeholder show stands in: the workspace holds no scenes yet.
 
-const PRESETS: &[&str] = &[];
+const PRESETS: &[&str] = &["Rose", "Thunderclap"];

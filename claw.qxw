@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Workspace>
-<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="SDESK">
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FIXANDFUNC">
  <Creator>
   <Name>Q Light Controller Plus</Name>
   <Version>5.3.0</Version>
@@ -79,6 +79,20 @@
    <Address>0</Address>
    <Channels>2</Channels>
   </Fixture>
+  <Function ID="0" Type="Scene" Name="Rose">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,0,1,0,2,240,3,0</FixtureVal>
+   <FixtureVal ID="2">0,0,1,0,2,0,3,0</FixtureVal>
+   <FixtureVal ID="3">0,0,1,0,2,0,3,0</FixtureVal>
+   <FixtureVal ID="4">0,0,1,0,2,0,3,0</FixtureVal>
+  </Function>
+  <Function ID="1" Type="Scene" Name="Thunderclap">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="1">0,0,1,0,2,220,3,0</FixtureVal>
+   <FixtureVal ID="2">0,14,1,0,2,187,3,19</FixtureVal>
+   <FixtureVal ID="3">0,22,1,0,2,205,3,0</FixtureVal>
+   <FixtureVal ID="4">0,21,1,0,2,208,3,0</FixtureVal>
+  </Function>
   <Monitor DisplayMode="0" ShowLabels="0">
    <Font>Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1</Font>
    <ChannelStyle>0</ChannelStyle>

@@ -237,10 +237,6 @@ In *Function Manager*:
 The names become `presets::ROSE` and `presets::THUNDERCLAP`; aiming them for real is
 for the day.
 
-### Tables
-
-- [ ] `brain/presets.rs`: `"Rose"`, `"Thunderclap"`.
-
 ### The show's code
 
 *The show is where everything meets: it needs the eyeball, the sound, and the fixture
@@ -254,9 +250,6 @@ definitions, workspace and tables above.*
       looks down; the old dance's `on_ball` corrected for that, and nothing here needs it
       exact. The head constants of [`SHOW.md`](SHOW.md) §10 with their reasons.
 - [ ] What is left of the heads per state, asking the patch for bands, never a byte:
-  - pan and tilt on "Rose" in `blackout`, `idle` and `cut`, on "Thunderclap" from
-    `buildup`, and held where the last hop left them in `respite`;
-  - motor speed fastest in `buildup` and `thunderclap`;
   - in `thunderclap`, `STROBE_HEADS` on the strobe band at `STROBE_RATE`, the others open.
 
 **Landed when**, at the bench, the scare runs from the cabinet door in test mode from every

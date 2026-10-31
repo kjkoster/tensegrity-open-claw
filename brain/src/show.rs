@@ -32,6 +32,7 @@ use crate::face_show;
 use crate::heads_show::{self, Heads, Wheels};
 use crate::heart::Heart;
 use crate::patch::Zq02015;
+use crate::presets;
 use crate::mouth_show::MouthShow;
 use crate::presence::{Presence, Reading};
 use cortex::calendar::{self, Calendar};
@@ -43,7 +44,7 @@ use eyeball::Sighting;
 use std::time::{Duration, Instant};
 
 /// The resting heart, and the heart at the trigger line.
-pub const REST_BPM: f64 = 55.0;
+pub const REST_BPM: f64 = 35.0;
 pub const SCARE_BPM: f64 = 130.0;
 /// The distance, in paths, over which the heart goes from rest to the scare rate: the whole
 /// walk from the yard entry. Less leaves the first steps at rest.
@@ -330,6 +331,7 @@ impl Show {
                 }
                 Look {
                     heads: Heads {
+                        preset: &presets::ROSE,
                         wheels: Wheels::Rose,
                         rose,
                         others: 0.0,
@@ -339,6 +341,7 @@ impl Show {
             }
             State::Blackout | State::Cut => Look {
                 heads: Heads {
+                    preset: &presets::ROSE,
                     wheels: Wheels::Rose,
                     rose: 0.0,
                     others: 0.0,
@@ -347,6 +350,7 @@ impl Show {
             },
             State::Buildup => Look {
                 heads: Heads {
+                    preset: &presets::THUNDERCLAP,
                     wheels: Wheels::White,
                     rose: 0.0,
                     others: 0.0,
@@ -355,6 +359,7 @@ impl Show {
             },
             State::Lightning => Look {
                 heads: Heads {
+                    preset: &presets::THUNDERCLAP,
                     wheels: Wheels::White,
                     rose: 1.0,
                     others: 1.0,
@@ -371,6 +376,7 @@ impl Show {
                 let unit = f64::from(level) / f64::from(u8::MAX);
                 Look {
                     heads: Heads {
+                        preset: &presets::THUNDERCLAP,
                         wheels: Wheels::White,
                         rose: unit,
                         others: unit,
@@ -384,6 +390,7 @@ impl Show {
                     (f64::from(self.frames + 1) / f64::from(frames(DOOR_FADE_SECS))).min(1.0);
                 Look {
                     heads: Heads {
+                        preset: &presets::THUNDERCLAP,
                         wheels: Wheels::White,
                         rose: 0.0,
                         others: 0.0,

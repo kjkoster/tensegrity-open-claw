@@ -243,7 +243,7 @@ the sound table is `brain/sounds.rs`. The starting values:
 
 | constant | value | |
 |---|---|---|
-| `REST_BPM`, `SCARE_BPM` | 55, 130 | resting heart; the heart at the trigger line |
+| `REST_BPM`, `SCARE_BPM` | 35, 130 | resting heart; the heart at the trigger line |
 | `HEART_RANGE` | 1.0 | the distance, in paths, over which the heart goes from rest to the scare rate: the whole walk from the entry; less to leave the first steps at rest |
 | `RATE_TAU` | 1.5 s | how fast the heart changes pace: the time constant of the glide, so the rate closes 63 % of the gap to its target in 1.5 s and 95 % in 4.5 s |
 | `ROSE_FLOOR` | 25 % | the rose at the quietest point of the envelope; full at its loudest |
