@@ -112,8 +112,8 @@ brain's **own CID at its own priority**, on its own continuous sequence counter:
 payload changes, so a takeover is invisible to anything downstream watching the stream's
 identity.
 
-The engine keeps running while overridden — its noise fields, breath phase and slews stay
-continuous — so handback resumes mid-stride rather than springing out of a frozen frame.
+The show keeps running while overridden, its timers and slews continuous, so handback
+resumes mid-stride rather than springing out of a frozen frame.
 
 The cabinet's e-stop comes **after** the arbitration: it acts on the frame as it goes out,
 so it stops a console's frame as surely as the show's. A stop button that a laptop on the
@@ -270,8 +270,7 @@ that arrives all at once, the day something forces it.
 ### 2.1 System overview
 
 The rig is a **Raspberry Pi driving one DMX-512 universe of fixtures**. The Pi runs a Rust
-program on Linux (`brain`) that reads the rig's sensors, runs a generative engine over them,
-and clocks the resulting universe out of an RS-485 HAT at 40 Hz to the wired fixtures. The
+program on Linux (`brain`) that reads the rig's sensors, runs the show over them, and clocks the resulting universe out of an RS-485 HAT at 40 Hz to the wired fixtures. The
 same universe also goes out as E1.31 sACN over the network — wireless fixtures listen to it,
 it is what a monitor or a console works against, and it is the path an external override
 arrives on.
@@ -290,7 +289,7 @@ Pi on that access point, Memory (§3.9), so the Pi that drives the show carries 
     ┌── Raspberry Pi ──────────────┴──────────────────┐
     │  (builds brain; reads the rig's sensors)        │
     │  ◄── GPIO, network camera                       │
-    │  Generative engine                              │
+    │  The show                                       │
     │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
     │  ├── sACN sender ──────────── network           │
     │  └── USB audio ────────────── speakers          │
@@ -337,8 +336,10 @@ frame rate sits under.
 its broker configuration and the Python modules every health daemon shares; `etc/` is what
 `claw-pi`'s deploy installs that belongs to no crate — its network profiles, the rig's WiFi
 in `claw-wifi.env`, the 4G watchdog, the boot configuration; `etc-memory-pi/` is everything
-`memory-pi` runs (§3.9). Each Pi has its own deploy script, `deploy.sh` and
-`deploy-memory-pi.sh`, sharing `etc/deploy-lib.sh`, and either deploys while the other is down.
+`memory-pi` runs (§3.9). A daemon's systemd unit lives in that daemon's directory
+(`brain/brain.service`, `stem/stem.service`). Each Pi has its own deploy script, `deploy.sh`
+and `deploy-memory-pi.sh`, sharing `etc/deploy-lib.sh`, and either deploys while the other is
+down.
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`, the show table; its
 `main.rs` includes the generated patch and calendar, wires in the components it uses, and
@@ -368,11 +369,6 @@ to the build script of every crate that depends on it, through cargo's `links` m
 rig crate's build reads the one number the frame loop runs at and a change to it rebuilds
 every such table.
 
-Beside the crates, a daemon's systemd unit lives in that daemon's directory
-(`brain/brain.service`, `stem/stem.service`), and what gets installed onto the Pi without
-belonging to a daemon lives in `etc/`: the access point's configuration, the 4G watchdog and
-`remote-deploy.sh` itself.
-
 ### 2.4 Software stack
 
 Standard Rust on Trixie Raspbian Linux, `std`.
@@ -382,7 +378,7 @@ Standard Rust on Trixie Raspbian Linux, `std`.
   costs less than working around them.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
-- **ALSA** for audio, in and out.
+- **ALSA** for audio.
 - **`tract`**, pure Rust, for a sensor's neural model: nothing prebuilt downloaded and no C++ in
   the brain. ONNX Runtime only from Debian's package, should `tract` ever be too slow.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
@@ -416,8 +412,8 @@ returned to, and neither needs a special case anywhere else.
 ### 2.6 The Pi controller
 
 The deployed unit is a **Raspberry Pi 3B+** running standard 64-bit Debian / Raspberry Pi OS. A Pi 4
-has more headroom and runs the same software unchanged, if thermals or CPU ever justify it —
-a neural model in the brain is the first thing likely to.
+has more headroom and runs the same software unchanged; the eyeball's detector is what will
+justify it.
 
 The Pi runs in **AP mode** (NetworkManager) so fixtures and laptops join its own network
 rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
@@ -496,7 +492,7 @@ The cabinet door — e-stop, two buttons, a green lamp in each — is wired to t
 it is treated like any fixture in both directions rather than as a side channel.
 
 **Its lamps are patched.** `fixtures/face.qxf` gives them two dimmable channels, and the
-workspace patches them like the ball. The show writes them into the frame; the face drives
+workspace patches them like any fixture. The show writes them into the frame; the face drives
 the pins from the frame that actually went out, after arbitration. So a console that takes the
 rig over drives the lamps too, and the e-stop darkens them with everything else, with
 no special case in either. They dim through the Pi's two hardware PWM channels, because the
@@ -604,7 +600,7 @@ no rule of its own.
 A network camera in — an Axis M3105-LVE — one small reading of the scene out to the show, and
 an annotated feed for humans. It has had two lives. First a Python process beside the brain,
 reading a person's arms for the mage rig, removed with it; that code is on the
-`last-version-with-eyeball` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now two Rust
+`last-version-with-eyeball-for-pose-estimation` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now two Rust
 crates, running as threads inside the brain and handing the show how far into a space the
 furthest person has come.
 
@@ -624,7 +620,7 @@ camera is a different retina and the same eyeball. Each reports its own half on 
 **The rig draws, the eyeball sees.** The eyeball hands out one sighting per frame: the
 distance and when it was seen, with the picture and the boxes it came from. The show reads
 the distance; the annotated feed, which is the rig's and lives in the brain, draws the rest.
-What the feed draws — the two columns, a dot on the leading foot — is this show's yard, and an
+What the feed draws — the two columns, a dot on the leading foot — is the show's space, and an
 HTTP server is the rig's choice of how an operator looks, so neither belongs in the crate that
 finds people.
 
@@ -679,16 +675,21 @@ still puts on the one in front. A YOLOX-Nano model (Apache-2.0) runs on the CPU 
 pure Rust; the model is compiled into the binary (§2.3), with its licence and notice beside it.
 
 **The model's input is the camera's shape, not the square it was published at.** Its work
-scales with the pixels it looks at, so Megvii's weights are exported at 320×256, the 4:3 of the
-camera's frame: twice the frame rate of the published 416×416 on the Pi, and no work spent on
-padding. The cost is the smallest people, under about 25 pixels tall in the model's picture,
-which the yard's geometry keeps clear of. The export is a script beside the model, so another
-shape is one run of it.
+scales with the pixels it looks at, so Megvii's weights are exported at the camera's aspect
+ratio and well under the published 416×416: several times the frame rate on the Pi, and no
+work spent on padding. The cost is the smallest people, under about 25 pixels tall in the
+model's picture. The export is a script beside the model, so another shape is one run of it.
+
+**The models not taken.** YOLOX-Tiny is the step up, too slow on a Pi 3B+'s cores beside the
+frame loop and the same code on a Pi 4. YOLOv8 and YOLO11 are AGPL. A detector trained on
+crowds would separate a bunch of children better, but has no clean first-party export, and the
+show reads only the front of a group. ONNX Runtime runs the model four times faster than
+`tract` on a Mac, but its crate downloads a prebuilt library; only Debian's package would do.
 
 **No calibration, only aiming.** The space has two benchmarks, and they are two columns
-fixed in the camera's picture: the camera, square on to the path, is aimed so the benchmarks
-in the yard land on the columns, watching the feed, which draws them. A distance is where a
-person's feet fall between the two columns, linear in the picture, so in the yard only as
+fixed in the camera's picture: the camera, square on to the space, is aimed so the benchmarks
+in the space land on the columns, watching the feed, which draws them. A distance is where a
+person's feet fall between the two columns, linear in the picture, so in the space only as
 linear as the camera is square — which the feed shows at a glance, and which nothing in a
 show that compares distances needs to be exact. The alternative, a ground-plane homography
 from four measured marks, is right at any angle and is four points to measure and a matrix to

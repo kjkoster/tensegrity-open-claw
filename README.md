@@ -134,15 +134,37 @@ are in [`SHOW.md`](SHOW.md).
 
 | Device | Interface | Notes |
 |---|---|---|
-| The mouth (a USB audio interface) | USB on the hub (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `aplay -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `mouth/src/config.rs`. Reports under `mouth/` through the brain's connection; the topics are in [`SHOW.md`](SHOW.md). |
+| The mouth (a USB audio interface) | USB on the hub (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `aplay -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `mouth/src/config.rs`. Reports under `mouth/` through the brain's connection; see [The mouth's and the eyeball's topics](#the-mouths-and-the-eyeballs-topics). |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. Reports under `face/` through the brain's connection. |
-| The retina (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.3`, reserved for it by the Pi's DHCP server. The retina owns the camera: its user (`root`), password (`pass`, the factory default) and settings are in `retina/src/config.rs`, the retina sets them over VAPIX on every connect, and it reads the picture the eyeball asks for. Reports under `retina/` through the brain's connection. The eyeball only takes the retina's frames: it runs the detector and reports under `eyeball/`. The brain draws what it saw and serves that as the annotated feed at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. The topics of both are in [`SHOW.md`](SHOW.md). |
+| The retina (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.3`, reserved for it by the Pi's DHCP server. The retina owns the camera: its user (`root`), password (`pass`, the factory default) and settings are in `retina/src/config.rs`, the retina sets them over VAPIX on every connect, and it reads the picture the eyeball asks for. Reports under `retina/` through the brain's connection. The eyeball only takes the retina's frames: it runs the detector and reports under `eyeball/`. The brain draws what it saw and serves that as the annotated feed at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. See [The mouth's and the eyeball's topics](#the-mouths-and-the-eyeballs-topics). |
 | Ethernet hub | `eth0`, own power supply | Only when a laptop needs the wired segment beside the camera. |
 
 The retina and the eyeball run inside the brain, at normal priority below its real-time
 threads, so a slow camera or a slow model costs the eyeball frames and never a DMX one; why,
 and what it costs, is in [`DESIGN.md`](DESIGN.md) §1.6.
+
+### The mouth's and the eyeball's topics
+
+Both live and die with the brain, so `health/brain` covers them and they have no `health/`
+topic of their own.
+
+| topic | |
+|---|---|
+| `mouth/state` | `playing`, `muted` by the show, or `down` when the interface failed |
+| `mouth/error` | why the interface is down, present only while it is |
+| `mouth/xruns` | buffer underruns since the brain started: make the buffer bigger or the Pi quieter |
+| `mouth/usb/vid_pid`, `mouth/usb/bus`, `mouth/usb/address`, `mouth/usb/speed` | the interface as the kernel sees it; a `full`-speed enumeration of a high-speed device is a bad cable or hub port |
+| `mouth/usb/sysfs`, `mouth/usb/serial`, `mouth/usb/product` | its `/sys` path and identity, for reading `lsusb -t` and the journal against |
+| `mouth/alsa/card`, `mouth/alsa/rate_hz`, `mouth/alsa/period`, `mouth/alsa/buffer` | what the stream was actually opened at, which is not always what was asked for |
+| `retina/camera` | `ok`, or why not |
+| `retina/fps` | frames received a second |
+| `eyeball/fps` | frames detected a second; below `retina/fps` by the frames dropped for the newest |
+| `eyeball/distance` | what it saw, in the space's own unit, or `tombstone` |
+| `eyeball/people` | boxes found; telemetry only, the show never sees a count |
+
+The `usb/` topics changing under a running brain are a re-enumeration: a flaky hub port, not a
+software fault.
 
 ## Power
 

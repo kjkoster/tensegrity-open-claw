@@ -6,15 +6,13 @@ and what proves it landed. The design decisions behind them are in the first sec
 ones to overturn are overturned before the work starts rather than after.
 
 The rig goes up in the yard only on the day itself: logistics and the weather allow nothing
-earlier. So the work is six chunks, each standing on its own and testable on its own at the
+earlier. So the work is four chunks, each standing on its own and testable on its own at the
 bench — the Pi, the cabinet and, where a chunk needs one, a head and the camera on the table —
 and the rig in the yard comes last:
 
-- **Upgrade everything**, and make it work again (`DESIGN.md` §1.8). Every show's first chunk.
 - **The eyeball**: the camera, the detector and the distance, with no show needed. Early,
   because it has the most left to do.
 - **Clear the decks**: the Pis' power, `memory-pi`, and loose ends.
-- **Sound**: the recordings and the mouth.
 - **The show**: the fixture definitions and the workspace as far as the show needs them, and
   the show itself.
 - **The rig**: everything in the yard, on the day.
@@ -81,19 +79,8 @@ Each needs a choice before the step that uses it.
 | The strobe's rate | `STROBE_RATE` is "fast", which is no value, and the strobe band is unmeasured. A fast strobe aimed at children's faces sits in the 3–30 flashes a second that photosensitive-epilepsy guidance warns against. | `STROBE_RATE` in flashes a second, at most 3, read off the measured band; or no strobe, and let the hops carry the lightning. |
 | `bLnd` on the heads | `SHOW.md` §12 says `bLAc`; `README.md`'s e-stop section says every fixture holds its last values. The manual gives `bLAc` as "return to zero", which may send the head home, and `HoLd` keeps it lit wherever it was — mid-thunderclap included, for the five seconds a brain restart takes. | Find out on one head what `bLAc` does. If it darkens and stays put, use it and make the README's rule "dark and still"; if it homes, decide between a homing head and a lit one. |
 | A second group during `respite` | Respite ends only on an empty yard, so a group arriving behind the first is not scared. | Accept it: a scare re-armed under people still in the yard would hit them a second time. |
-| The heartbeat's length | It must be shorter than one beat at `SCARE_BPM`: 0.46 s at 130. The recording in `audio/` is 0.76 s. | Let beats overlap: the mixer mixes voices anyway, and the rose takes the loudest of the envelopes playing. The check becomes "shorter than a beat at rest". |
 
 ---
-
-## Upgrade everything
-
-Every crate, the toolchain and the packages on `claw-pi` and paho-mqtt are at their newest
-already, and the repo pins GreptimeDB v1.3.0. What is left:
-
-- [ ] `memory-pi`: `sudo apt full-upgrade`, then a reboot, which also brings
-      Grafana and Mosquitto up to date.
-- [ ] `memory-pi`: `./deploy-memory-pi.sh` installs GreptimeDB v1.3.0. Its scans are now
-      capped at 25% of RAM, so a Grafana query too big for the Pi fails rather than swapping.
 
 ## The eyeball, in the brain
 
@@ -105,11 +92,6 @@ the camera on the table plugged into the Pi; nothing here needs a show.
 
 - [ ] **Frame timing under load**: the journal's frame timing holding on `claw-pi` with the
       mouth playing and the detector running.
-- [ ] **The show's two timing constants from the measured rate**, 6.5 frames a second:
-      `SCARE_CONFIRM_SECS` was "two frames" at ten, so 0.3 s; `EYEBALL_STALE_SECS`, "twenty",
-      so 3 s.
-- [ ] **A long UTP lead for the camera**: from the PoE injector by the cabinet to the
-      camera's mount in the yard, with a spare. Outdoor-rated if it lies in the wet.
 - [ ] **The camera's light control**: it reports `Properties.LightControl` available, which
       `param.cgi` does not show: VAPIX's separate light-control API, likely the IR
       illuminator's intensity, worth a look.
@@ -161,30 +143,10 @@ while `retina/camera` reads `ok`.
 - [ ] The `stem` crate does without `alloc` wherever it can, for the firmware to come: the
       packets written into a caller's buffer rather than returned as a `Vec`.
 
-## Sound
-
-- [ ] The 4G dongle's transmit bursts, a "ticka-ticka-ticka" under the sound that stops with
-      the dongle out. Cable management: the dongle on a shielded USB extension, out of the
-      cabinet, somewhere with good reception so it transmits quietly; a short USB lead for
-      the io|2 with a ferrite at each end, its excess not coiled, on a hub port away from the
-      dongle; power, data and audio in separate bundles, crossing at right angles; shielded,
-      balanced leads to the speakers; the face's leads twisted with their grounds, shortened,
-      and a ferrite at the GPIO header.
-- [ ] Choose the final recordings by ear on the speakers; the ones in `brain/sounds/` are
-      not final. Once they are, the heartbeat's trimmed length against the open question on
-      it, and the check that it is shorter than a beat into the show, as a `const` assertion
-      on `HEARTBEAT.envelope.len()`, since it is the show's rule and not the mouth's.
-- [ ] The gains in `brain/sounds.rs`, by ear on the speakers, once their knobs are set by the
-      thunderclap.
-
-**Landed when** the bench test plays the heartbeat, the owl and the thunderclap through both
-speakers in step with the left lamp, the e-stop cuts the sound within a buffer, and pulling the
-io|2's USB shows in `mouth/state` and nothing in the journal's frame timing.
-
 ## The show
 
-The fixture definitions and the workspace, as far as the show needs them to compile and to be
-seen working, then the show. Tested at the bench with one head and the wash on the HAT's DMX
+The fixture definitions, as far as the show needs them to compile and to be seen working,
+then the show. Tested at the bench with one head and the wash on the HAT's DMX
 line, the speaker, and the camera; aiming for real waits for the yard,
 on the day.
 
@@ -202,45 +164,11 @@ use site.
     is fast; a closed band only if the head has one;
   - the real pan and tilt travel: the definition says 540° and 180°, from the library,
     unmeasured.
-- [ ] Install both into QLC+ and relaunch it; both must appear in *Add fixture…*.
-      Absence is the error signal: QLC+ 5 skips a definition that fails to parse silently.
-
-### The QLC+ workspace (`claw.qxw`, QLC+ 5.3.0 on `riverrain`)
-
-Do this in QLC+, not in a text editor: the build ingests whatever QLC+ writes, and a
-hand-edited file is a second author. Keep `claw.qxw` open in a text editor beside it to check
-each save, because QLC+ does not show you everything it stores.
-
-The build fails on any scene `brain/presets.rs` does not list.
-
-In *Function Manager*:
-
-- [ ] Create a Scene named exactly **`Rose`**. In the *Scene Editor* add the four heads and
-      set **only** Pan, Pan Fine, Tilt and Tilt Fine for each — placeholders for now, aimed
-      in the yard on the day: the rose head pointing down, the other three tilted up. Untick
-      every other channel; add neither `Wash door` nor `Face`.
-- [ ] Create **`Thunderclap`** the same way, all four heads roughly level, and far enough
-      from "Rose" that the bench head's move between them is seen.
-- [ ] Save. In the file each scene must have exactly **four** `<FixtureVal>` lines, IDs
-      matching the four heads, each holding exactly four channel/value pairs on the mode's
-      pan, pan-fine, tilt and tilt-fine channel indices, e.g.
-
-      ```
-      <FixtureVal ID="11">0,128,1,0,2,40,3,0</FixtureVal>
-      ```
-
-      A fifth pair, or a line for the wash, is what the build will refuse, naming the
-      preset, the fixture and the channel.
-- [ ] Leave the E1.31 output as it is: unicast `10.8.0.3:5568`, priority 200, universe 1.
-      `UniverseChannels` recounts itself.
-
-The names become `presets::ROSE` and `presets::THUNDERCLAP`; aiming them for real is
-for the day.
 
 ### The show's code
 
 *The show is where everything meets: it needs the eyeball, the sound, and the fixture
-definitions, workspace and tables above.*
+definitions above.*
 
 - [ ] The thunderclap's hops: from `cortex::draw::Draw`, keyed on the state's start, the
       head and the hop's number, so each head has its own stream. A hop is uniform over the
@@ -264,13 +192,6 @@ Everything that can only happen in the yard. The software is finished before thi
 what is left is hanging, wiring, aiming and two numbers. Stem needs nothing: it keeps no list
 of services.
 
-- [ ] Ethernet: a short lead from the PoE injector's data port to the Pi's `eth0`, and the
-      long UTP lead from the injector to the camera. The Ethernet hub, on its own supply, only if a laptop needs the
-      wire as well. The annotated feed is at `http://10.8.0.3:8080/` from the Mac.
-- [ ] Speakers under the balcony, the io|2's outs to them, mix knob to the computer side.
-- [ ] Heads on the balcony, left to right as named; DMX daisy-chained from the HAT through
-      the four heads to the wash; 120 Ω terminator in the wash's DMX out. Set each head's
-      address, mode and `bLnd` as the open question settles it; the wash's DIPs.
 - [ ] Commissioning: [`SHOW.md`](SHOW.md) §16, in its order — addresses, the e-stop, aiming
       "Rose" and "Thunderclap", `BUILDUP_SECS`, levels, the camera and its marks, then the
       show by walking it. `BUILDUP_SECS` and the speaker levels are the last edits.

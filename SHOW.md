@@ -259,13 +259,13 @@ the sound table is `brain/sounds.rs`. The starting values:
 | `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone; with `SCARE_CONFIRM_SECS`, set from the frame rate measured on the Pi |
 
 The sound table names each recording and its gain; everything else about a recording the
-build reads from the file. The gains are set by ear at the bench, and are 0 dB, the loudest a
-recording plays, until then.
+build reads from the file. The gains are set by ear on the speakers, against the thunderclap at
+0 dB, the loudest a recording plays.
 
 | sound | file in `brain/sounds/` | gain | |
 |---|---|---|---|
-| heartbeat | `heartbeat.m4a` | 0 dB | one lub-dub; must be shorter than the fastest beat, which the build checks; its envelope is the rose's pulse |
-| owl | `owl.mp3` | 0 dB | far off |
+| heartbeat | `heartbeat.m4a` | −7.4 dB | one lub-dub; longer than a beat at the fast end, so near the line the beats overlap, which the mixer handles; its envelope is the rose's pulse |
+| owl | `owl.mp3` | −10.5 dB | far off |
 | thunderclap | `thunderclap.m4a` | 0 dB | its length is the length of the state |
 
 ---
@@ -332,8 +332,7 @@ two Monkey Banana powered speakers, in stereo. Nothing captures any more.
   inaudible at either end, brought to full scale, and stored with their envelope, one byte per
   DMX frame. Nothing is read from disk at startup or during a show, there is no decoder in
   the running program, and the binary on the Pi is the whole show. A file the build cannot
-  read is a build error naming it; the show adds that the heartbeat is shorter than the
-  fastest beat.
+  read is a build error naming it.
 - **On MQTT**, through the brain's client — the mouth is a thread in the brain, so it lives
   and dies with it and `health/brain` covers it:
 

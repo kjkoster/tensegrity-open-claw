@@ -23,7 +23,7 @@ pub const VIEW: View = View {
 /// camera's infrared picture than in a photograph: grey and soft, it scores people far below
 /// what the model gives them in daylight. At the bench a half-hidden person scored 0.12 and
 /// the empty yard nothing above 0.02.
-pub const CONFIDENCE: f32 = 0.09;
+pub const CONFIDENCE: f32 = 0.101;
 
 /// The overlap above which two boxes are taken for one person. Loose on purpose: children seen
 /// from the side overlap, and the usual 0.45 would merge two of them into one box, losing the

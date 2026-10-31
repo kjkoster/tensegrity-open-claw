@@ -17,7 +17,7 @@ pub const PASSWORD: &str = "pass";
 
 /// Set over VAPIX on every connect, whatever is asked, and read back, so a factory reset or a
 /// replacement camera comes up the same. Verified on firmware 6.15.2; the reasons for each are
-/// on the `last-version-with-eyeball` tag, beside the old eyeball's copy of this list.
+/// on the `last-version-with-eyeball-for-pose-estimation` tag, beside the old eyeball's copy of this list.
 pub const SETTINGS: &[(&str, &str)] = &[
     // The mains here; 60 Hz buys banding.
     ("ImageSource.I0.CaptureFrequency", "50Hz"),
