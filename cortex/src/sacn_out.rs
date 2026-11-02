@@ -9,6 +9,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// 2.5 s network-data-loss timeout.
 pub const STREAM_TERMINATED: u8 = 0x40;
 
+/// The headers before the first slot: root, framing and DMP layers, and the start code.
+const HEADER_LEN: usize = 126;
+
+/// One encoded packet, sized for a full universe and carrying as many slots as the rig
+/// spans, so encoding a frame never allocates.
+pub struct Packet {
+    bytes: [u8; HEADER_LEN + BLACKOUT.len()],
+    len: usize,
+}
+
+impl Packet {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
 /// Generates a CID that is stable for the lifetime of the process.
 pub fn new_cid() -> [u8; 16] {
     let nanos = SystemTime::now()
@@ -32,10 +48,14 @@ pub fn encode(
     options: u8,
     cid: &[u8; 16],
     slots: &[u8],
-) -> Vec<u8> {
+) -> Packet {
     let n = slots.len();
-    let total = 126 + n;
-    let mut p = vec![0u8; total];
+    let total = HEADER_LEN + n;
+    let mut packet = Packet {
+        bytes: [0; HEADER_LEN + BLACKOUT.len()],
+        len: total,
+    };
+    let p = &mut packet.bytes;
 
     // Preamble
     p[1] = 0x10;
@@ -67,9 +87,9 @@ pub fn encode(
     p[121..123].copy_from_slice(&0x0001u16.to_be_bytes());
     p[123..125].copy_from_slice(&((n as u16) + 1).to_be_bytes());
     // p[125] = 0x00  (DMX start code, already zero)
-    p[126..126 + n].copy_from_slice(slots);
+    p[HEADER_LEN..total].copy_from_slice(slots);
 
-    p
+    packet
 }
 
 /// Encodes a stream-terminated frame for `universe`: a normal data packet carrying
@@ -86,7 +106,7 @@ pub fn encode_release(
     priority: u8,
     cid: &[u8; 16],
     dmx_slots: usize,
-) -> Vec<u8> {
+) -> Packet {
     encode(universe, sequence, priority, STREAM_TERMINATED, cid, &BLACKOUT[..dmx_slots])
 }
 

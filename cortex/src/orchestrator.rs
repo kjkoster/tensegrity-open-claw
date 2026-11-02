@@ -37,7 +37,6 @@ use crate::estop;
 use crate::sacn_out;
 use crate::latest::LatestRx;
 use crate::sacn_in::Takeover;
-use crate::telemetry;
 use embassy_time::{Duration, Ticker};
 use std::net::UdpSocket;
 use std::sync::Arc;
@@ -187,14 +186,19 @@ pub async fn frame_task(
                         &cid,
                         dmx_slots,
                     );
-                    sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
+                    sacn_out::send_multicast(
+                        &socket,
+                        rig.sacn.universe,
+                        rig.sacn.port,
+                        packet.as_bytes(),
+                    );
                     sequence = sequence.wrapping_add(1);
                 }
                 // After the fixtures are handed back, because they are what the delay would
                 // cost. Without this every ordinary restart would look like a crash: the will
                 // fires whenever the connection dies without a goodbye, and `systemctl
                 // restart` is the most common way for that to happen.
-                telemetry::farewell(&rig.farewells);
+                rig.farewell.say();
                 std::process::exit(0);
             }
         }
@@ -209,7 +213,7 @@ pub async fn frame_task(
             &cid,
             &slots[..dmx_slots],
         );
-        sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, &packet);
+        sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, packet.as_bytes());
         // The HAT is the Pi's own UART: a pulled DMX lead never reaches it, so a write that
         // fails is the serial setup, and it will fail again.
         hat.send(&slots)

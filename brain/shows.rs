@@ -10,8 +10,6 @@
 const CITY: &str = "Delft";
 
 const SHOWS: &[(&str, &str)] = &[
-    // Test day.
-    ("2026-10-27 09:00", "2026-10-27 22:00"),
-    // Halloween.
-    ("2026-10-31 18:15", "2026-10-31 22:00"),
+    // Headless Hug PoC: a test day.
+    ("2026-11-02 09:00", "2026-11-02 23:00"),
 ];

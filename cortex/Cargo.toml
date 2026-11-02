@@ -3,9 +3,6 @@ edition      = "2024"
 name         = "cortex"
 rust-version = "1.99"
 version      = "0.1.0"
-# Not a native library: `links` is how cargo lets a build script hand values to the build
-# scripts of the crates that depend on it. See `build.rs`.
-links        = "cortex"
 
 # What every rig shares under its show: the sACN transports, the frame loop, the show calendar,
 # the latest-value seam.

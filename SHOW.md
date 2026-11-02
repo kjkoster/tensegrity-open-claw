@@ -1,475 +1,263 @@
-# Tensegrity Open Claw — The Show: Front Yard, Halloween 2026
+# Headless Hug — Proof of Concept
 
-**What this file is for.** This show: what the audience sees and why each look is the way it
-is, and how its rig is set up — the fixtures chosen, how each is configured, and the operation
-that comes with them. Anything that would change with a different show belongs here. Where
-the code behind it lives, and why, is [`DESIGN.md`](DESIGN.md); the Pi, the cabinet, the
-network and the general build-and-deploy workflow, which stay the same from show to show, are
-[`README.md`](README.md). What we own is [`OWNED-DEVICES.md`](OWNED-DEVICES.md); this is a
-private project, so it is also what the show is built from. The steps to get from the
-previous show to this one are [`TODO.md`](TODO.md).
+**What this file is for.** The show file for the proof of concept: what the rig does, why, the
+fixtures it uses and how each is set up. The audience is us. The show is a set of experiments
+the rig runs on a one-metre model of the *Headless Hug* sculpture, stepped through from the
+cabinet door and watched live in Grafana on `memory-pi`. Its results go in
+[`POC-RESULTS.md`](POC-RESULTS.md). How to get from here to a running PoC is in
+[`TODO.md`](TODO.md). The components it introduces — Wrist, Dendrite, the inner ear — are
+described in [`DESIGN.md`](DESIGN.md), not here; this file says only how this show uses them.
+
+The previous show's components are on their tags: `last-version-with-eyeball-for-group-detection`
+and `last-version-with-mouth`.
 
 ---
 
-# What the audience sees
+## 1. What the PoC is for
 
-## 1. The premise
+The full-scale piece is a nine-metre tensegrity mast that must sway back and forth, in a
+controlled manner, unattended, with an audience present, driven through a guy wire by a crank
+at the structure's own first natural frequency. Three assumptions in that plan are measured
+here, on the model, with the drive chain in miniature:
 
-A front yard, a path from the street to the front door, a balcony above it with four moving
-heads in a line. The street hears a slow heartbeat. On the path near the house, one head
-projects a rose that pulses with it; now and then an owl calls somewhere far off. Someone
-who walks up the path quickens the heart. Someone who gets too close to the rose is cut off
-in darkness and silence, hears the heads turn above them in the dark, and is caught in white
-light and a thunderclap. Then the heads go out, the front door glows amber until they leave,
-and the rose and the heartbeat return for the next group.
+1. **Dendrite senses the sway** — frequency, amplitude and phase — and there is a placement on
+   the structure where it does so best.
+2. **Wrist moves the structure controllably** — amplitude follows the crank, the motion stays
+   in one plane, and the drive stops when told.
+3. **The brain finds the resonance by itself**, repeatably, from its own sensor and actuator.
 
-## 2. Show times and show states
+A fourth question rides along: **which regime the drive is in.** A stiff line makes the model
+follow the crank (amplitude equals stroke; resonance only lowers the load); a compliant line
+makes the crank pump a resonance (amplitude grows over cycles; phase is the control). Every
+experiment is run with both, by putting an elastic section into the line or leaving it out,
+because the full-scale design branches on it.
 
-The rig runs to a fixed list of shows in local time (`brain/shows.rs`), in one show state at
-a time, chosen each frame by the show state machine — the brain's Director: test mode first,
-then the calendar, then, inside a show, presence and the timers. Outside a show, and inside one
-until civil dusk, the state is `blackout`: dark and silent. From dusk to the show's end it is
-one of the six below. A show is listed from the morning, so the rig is up and reporting all
-day and the show proper starts by itself when it is dark enough.
+What does not scale — the amplitude bound, the guy tension, the servo — is out of scope. What
+does scale is the code, the fixture definitions, the measurement method and the decisions.
 
-The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
-and runs on unchanged underneath a stop.
+## 2. What the audience sees
 
-| state | what the audience sees | leaves when |
-|---|---|---|
-| `idle` | the rose on the path, pulsing with a heartbeat that quickens as someone comes up the path; owls | someone reaches the trigger line |
-| `cut` | nothing: blackout and silence, hard | `CUT_SECS` have passed |
-| `buildup` | still nothing, but the heads are heard turning | `BUILDUP_SECS` have passed |
-| `lightning` | a flash, before anything is heard | `LIGHTNING_SECS` have passed: two frames |
-| `thunderclap` | the heads white, two strobing, two steady; the front door flashing white with it; the thunderclap | the recording ends |
-| `respite` | the heads dark; the front door amber | the yard is empty |
+The model on its wooden base; a line from a node on it down over a screw-eye to a crank on a
+motor beside the base; the cabinet; a laptop on the access point showing the Grafana
+dashboard. On the cabinet door the left lamp says what the rig is doing, the two buttons drive
+the programme, the e-stop lets the crank go limp. The right lamp and the chord keep their
+meaning from the code: test mode.
 
-There is no state for "someone is in the yard": the heart's pace is a function of the
-distance, and an empty yard is simply the distance at which it rests. A state boundary there
-would need a debounce of its own and would say nothing the distance does not.
+### 2.1 The calendar
 
-`cut` → `buildup` → `lightning` → `thunderclap` → `respite` is one sequence, the scare; it is
-several states rather than one because every consumer matches them exhaustively, test mode can
-watch each, and `brain/show` says which is running. From `respite` the show returns to `idle`.
+The calendar stays, as in every show: `brain/shows.rs` lists a window per experiment day
+(09:00–23:00, Amsterdam), and outside a window the Director is in blackout — lamps off, Wrist
+in Free. Test mode, by the chord, is the code's way to run outside a window for a while, and
+is kept unchanged for that purpose.
 
-The state is published retained on every change:
+### 2.2 The programme
 
-| topic | values |
-|---|---|
-| `brain/show` | `blackout`, `idle`, `cut`, `buildup`, `lightning`, `thunderclap` or `respite` |
-| `brain/testmode` | whether test mode is on |
-| `brain/presence` | the distance the show decided on this frame, in paths, or `tombstone` — see [§6](#6-presence-one-distance) |
-
-The log has a `show: …` line for each change of the show state, with what caused it.
+Five experiments, always one of them *armed*. The **left button selects**, the **right button
+runs**, and while an experiment runs the right button **aborts** it. Nothing starts on a single
+press of the button that selects, so a pluck can be set up with one hand on the model.
 
 ```
-show: idle → cut — the furthest at -0.02, past the trigger line
-show: cut → buildup
-show: buildup → lightning
-show: lightning → thunderclap
-show: thunderclap → respite — the recording ended
-show: respite → idle — the yard has been empty for 3.0 s
+                 left                 left                 left
+   armed Listen ──────▶ armed Kick ──────▶ armed Run ──────▶ armed Sweep ──────▶ armed Lock
+        ▲  │               │  ▲              │  ▲               │  ▲               │   │
+        │  │ right         │  │ right        │  │ right         │  │ right         │   │ right
+        │  ▼               ▼  │              ▼  │               ▼  │               ▼   │
+        │ Listen          Kick              Run               Sweep              Lock  │
+        │  │ done/abort    │ done/abort      │ done/abort       │ done/abort       │    │
+        └──┴───────────────┴────────────────┴──────────────────┴──────────────────┴────┘
+                              (back to the same experiment, armed)          left from Lock ──▶ armed Listen
 ```
 
-## 3. Idle: the rose and the heart
+- At boot, and after blackout, the Director is in **armed Listen**, Wrist in Park.
+- **Running** an experiment returns to the same experiment armed when it finishes or is
+  aborted, so the right button repeats it. The left button is ignored while one runs.
+- Every state is published as `brain/show`, retained, as the code already does
+  (`armed-listen`, `listen`, `armed-kick`, `kick`, `run`, `sweep`, `lock`, `blackout`). Each
+  start increments `brain/run`, retained — a run counter, not a second state topic — so a
+  Grafana annotation and a line in `POC-RESULTS.md` name the same run.
+- The line's state, stiff or compliant, is not something the brain can know. The operator
+  publishes it from the Mac as `operator/line` (`stiff` or `compliant`, retained) before a
+  run; the recorder stores it with the time, Grafana shows it as an annotation, the brain
+  never reads it.
 
-One head, `ROSE_HEAD`, projects the rose gobo in `ROSE_COLOUR` on the path near the house, on the "Rose"
-preset. The other three are dark on the same preset, parked tilted into the balcony — not at
-their thunderclap positions, so that all four are heard turning when the time comes, and not
-pointing anywhere a stray flash would matter.
+The experiments, each with what it is for:
 
-The heart is one oscillator the light and the sound both follow, so the rose and the lub-dub
-never drift apart. Each beat triggers the heartbeat recording once, and the rose's dimmer
-follows **the recording's own loudness**: the build runs an analyser over the heartbeat file
-and emits its envelope as one value per DMX frame, so at 40 Hz the rose simply plays that
-table from the beat, scaled between `ROSE_FLOOR` and full — the lub and the dub land where
-the recording puts them, and a different recording brings its own pulse with it. Nothing
-about the recording's shape is written into the show.
-
-**The pace is the distance.** The target rate is `REST_BPM` at `HEART_RANGE` and beyond,
-`SCARE_BPM` at the trigger line, linear between; the tombstone — nobody in the yard — is the
-one exception, and rests. The actual rate glides toward the target with time constant
-`RATE_TAU`: detection jitter must not make the heart stutter, and a heart changes pace
-gradually anyway. Someone walking up the path quickens it; someone leaving lets it settle; a
-detector that loses someone for a frame moves the target for a frame, which the glide
-swallows. The rate is set once per beat, at the beat, so a lub-dub is never cut short by a
-change of pace; between beats the show only decides what the next period will be.
-
-The owl calls at random, a gap drawn uniformly between `OWL_MIN_SECS` and `OWL_MAX_SECS`
-after the last call, in `idle` only. A scare interrupts one, and the next is drawn afresh
-from the return to `idle`.
-
-## 4. The scare
-
-When the distance reaches zero — the furthest person at or past the trigger line — and stays
-there for `SCARE_CONFIRM_SECS`, two of the eyeball's frames rather than one bad box, the scare
-starts.
-
-**`cut`, `CUT_SECS`.** Every head's dimmer to zero, the door wash off, the
-mouth muted, all in one frame. There is no fade anywhere: the point is the cut. The audio
-mute is a hard zero in the next buffer the mouth fills, within a few milliseconds of the frame;
-how the mouth keeps that latency low is in [`DESIGN.md`](DESIGN.md).
-
-**`buildup`, `BUILDUP_SECS`.** Still dark and silent. The heads move to "Thunderclap", their
-gobo wheels to open and their colour wheels to white, at full movement speed. There is no
-feedback from a head, so the state is a timer: `BUILDUP_SECS` is measured on the rig, the longest
-move from "Rose" to "Thunderclap" plus a margin, and the two presets are aimed so that move is
-one a cheap head completes in it. Which is why the parked heads in "Rose" tilt into the
-balcony rather than away from it.
-
-**`lightning`, two frames.** Everything at full for `LIGHTNING_SECS`, the heads and the door
-wash white, still silent. The
-thunderclap is cued on the frame after
-and is heard a buffer later, so the flash leads the crack by about 60 ms, the way lightning
-does.
-
-**`thunderclap`, the length of the recording.** The heads light white: `STROBE_HEADS` strobe
-at `STROBE_RATE` through their shutter channel, the other two are steady. The
-thunderclap plays from its first sample, and every head's dimmer follows its loudness. The
-door wash flashes with it: red, green and blue
-all at the recording's loudness, frame by frame, so the door is as bright as the crack is
-loud and dies away with it. The state lasts exactly as long as the recording,
-which the show knows from the file at build time, so a different recording changes nothing
-else.
-
-The heads do not hold still while they are lit. Each one hops, at full speed, between random
-points inside a circle of `THUNDER_RADIUS_DEG` around its own "Thunderclap" pose, picking a
-fresh point every `THUNDER_HOP_SECS`, each head on its own draws so the four never move in
-step. The preset is the centre and comes from the workspace like any other; the circle's
-size and the pace of the hops are the show's choice. The points are drawn uniformly over the
-circle, not around its edge, so the beams sweep across the people rather than orbit them, and
-a hop is a snap left to the head's own motors, lit — beams lurching in the lightning are the
-look, and nothing here is smoothed. A head needs a tenth of a second or more to land a hop,
-so `THUNDER_HOP_SECS` stays well above that, or the heads never arrive anywhere and only
-shudder.
-
-## 5. Respite: the door
-
-The heads go dark where they stand, in one frame; the door wash fades up to `DOOR_AMBER`, at
-full, over `DOOR_FADE_SECS`. The state holds while anyone is in the
-yard, and ends when the distance has been the tombstone for `LEAVE_SECS`, so a detector that
-loses the group for a frame does not reset the show on them.
-
-**The reset.** The door goes dark at once. The heads move dark to "Rose", and after
-`BUILDUP_SECS` the rose lights and the heart starts, at rest. A show opens the same way.
-
-## 6. Presence: one distance
-
-The show has one input besides the clock: **the distance from the person who has come
-furthest into the yard to the trigger line** — positive on the street side of the line, zero
-on it, negative past it — or the **tombstone** when nobody is in the yard. The yard has two
-benchmarks and nothing else: the yard entry, where the street ends, and the trigger line, in
-front of the rose. **The unit is the path**: the entry is at 1, the trigger line at 0, and
-nothing is ever measured in metres. The camera looks at the path from the side, so both
-benchmarks are simply two places in its fixed picture, and a distance is where a person's feet
-fall between them. Someone beyond the entry is on the street and is not in the yard; someone
-between the two is, at their distance; someone past the line is at a negative one.
-
-The tombstone is `+∞`: infinitely far is what an empty yard means, every comparison in the
-show then falls the safe way without a special case, and there is no magic number to
-remember.
-
-The distance comes from one place: **the eyeball**, inside the brain, watching the camera.
-It hands the show the distance of the furthest person it sees between the benchmarks, or the
-tombstone, once per camera frame it has processed — a few a second on the Pi, so a value
-stands for several of the rig's frames, and the heart's glide is what turns those steps into
-a pace. Stale for `EYEBALL_STALE_SECS` is the tombstone too: an eyeball that has lost its
-camera idles the show on the rose, which is the safe default, and `retina/camera` says why.
-Test mode's left button stands in for the eyeball, so the heart can be heard quickening with
-nobody on the path.
-
-The distance and the face's buttons each reach the show as their own snapshot; what the
-eyeball does is in [§14](#14-the-eyeball).
-
-## 7. The lamps
-
-The two green lamps in the door's buttons are patched as the `Face` fixture and follow the
-frame like any other, so a takeover and the e-stop reach them with no special case.
-
-| | left lamp | right lamp |
+| experiment | what the rig does | what it answers |
 |---|---|---|
-| normally | the rose | dark |
-| test mode | the rose | lit |
+| **Listen** | Wrist stays in Park. The brain waits up to 60 s for a transient on Dendrite above the pluck threshold — the operator plucks the model by hand — then takes the next ten seconds as free decay, estimates f₁ and Q, publishes `brain/sway/f1_hz` and `brain/sway/q` retained, and finishes. | 1, and 3 by hand: the estimator on a human pluck, before the motor exists |
+| **Kick** | Listen, with Wrist's Kick as the pluck: the brain bumps Wrist's Kick counter, Wrist makes one quarter-turn out and back, the decay is taken from the moment the crank is back in Park. | 3, method A: resonance by free decay, no hands |
+| **Run** | Speed mode at `f1_hz` for sixty seconds, ramped up over the first five, then Park. | 2: the structure follows the crank at resonance |
+| **Sweep** | Speed mode from 0.5 f₁ to 1.5 f₁ over 120 s; the brain publishes amplitude and the lag between crank angle and sway phase as it goes (`brain/sway/amp`, `brain/sway/lag_deg`); then Park. | 3, method B: the amplitude peak and the lag crossing 90° — visible only with compliance in the line |
+| **Lock** | Lock mode: thirty seconds pumping at +90°, thirty holding at 0°, then braking at −90° until `brain/sway/amp` is below the lock floor; then Park. | the phase lock over the frame, pumping and braking — meaningful only with compliance |
 
-The left lamp is the rose's level, whether or not the heads are driven: the heartbeat's pulse
-in `idle`, the flash and the thunderclap's envelope in the scare, dark otherwise. So the show
-can be watched against the sound from the door. The right lamp lit means test mode, and so
-that the rig is not on the calendar; outside test mode the buttons do nothing but enter it.
+Artist sessions and commissioning use QLC+'s takeover from any state, as on every show; the
+Director does not know and does not need a state for it.
 
-## 8. Test mode is on the door, not on a console
+### 2.3 The lamps
 
-Testing a show state should not wait for the show's hours or for a visitor, so the face's two
-buttons can take the show over:
+The left lamp is the show's only light. The right lamp is test mode's, as the code has it.
 
-| | |
+| situation | left lamp |
 |---|---|
-| hold both buttons for 2 s | test mode on, in the current show state, or `idle` from `blackout`; the right lamp lights |
-| right button, on press | the scare, from wherever the show is: `cut` → `buildup` → `lightning` → `thunderclap` → `respite` |
-| left button, on press | presence, in turn: nobody, someone halfway up the path (0.5), someone just short of the trigger line (0.1) |
-| hold both buttons for 2 s again | test mode off; the calendar has the show again, and the yard is empty |
+| blackout | off |
+| armed, experiment *k* of 5 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating |
+| Listen or Kick, waiting for the transient | steady 40% |
+| any experiment, PLL locked | brightness follows the sway: (1 + sin φ)/2, so the lamp breathes with the model |
+| any experiment, PLL not locked | steady 100% |
+| Kick, the kick itself | 300 ms at full |
+| finished | two 1 s fades up and down, then the armed pattern |
+| aborted | three 100 ms flashes, then the armed pattern |
 
-The right button fires the scare the moment it goes down, whatever state the show is in —
-mid-scare included, which restarts it from `cut`. The left button stands in for the eyeball,
-which is not built yet: outside test mode the yard is empty. Its nearest step is short of the
-line, so it quickens the heart to nearly the scare rate and never scares by itself. Nothing
-else changes in test mode: the states end the way they always do, `respite` on an empty yard,
-`idle` on the trigger line, and the heart follows presence. The e-stop still wins, as it wins
-over everything.
+### 2.4 The e-stop, signal loss, and what the crank does
 
-One consequence of acting on press: a chord counts a press of the button it was begun with.
-Begin it with the left button, which only steps presence, or accept one last scare on the way
-out.
+The e-stop is the rig's show-stop, as the README has it, and the show runs on underneath it.
+What is specific to this show is what Wrist does — set by this show's `.qxf` and Wrist's
+firmware, described in `DESIGN.md`, used here:
 
-Test mode ends itself after fifteen minutes without a chord, because a rig left in it would
-ignore the calendar unattended.
+- **Pressed:** the mask puts Wrist's Mode in its no-function band, **Free**: the driver is
+  disabled and the crank goes limp, as if the motor's power had been removed. Nothing turns
+  under power while the stop is pressed. The same happens when Wrist loses the universe.
+- **Released:** the live frame returns. Wrist comes out of Free **unhomed** — it cannot have
+  seen the crank being turned while limp — and accepts only Hold, Home and Park until it has
+  been parked again; a Run or Lock in the frame is refused and reported, not resumed. So the
+  operator releases the stop, presses the right button to abort to Park, and Wrist homes and
+  parks; then the experiment can be run again. The show never sees the stop; Wrist's rule is
+  what stops motion from resuming on its own.
+- **Boot with the stop pressed:** nothing goes out, Wrist stays Free, as every fixture does.
 
-## 9. The presets
+## 3. The fixtures
 
-The show is written against two pointing presets, aimed on the rig in QLC+:
+The workspace patches two fixtures: `Face` as the code has it, and `Wrist`.
 
-| preset | used for |
-|---|---|
-| "Rose" | `ROSE_HEAD` on the path near the house; the other three dark, tilted into the balcony |
-| "Thunderclap" | the centre of each head's circle in the thunderclap: all four at the people on the path, at the trigger line, beam at head height |
+### 3.1 Wrist
 
-Each holds Pan, Pan Fine, Tilt and Tilt Fine for every head and nothing else, as the build
-requires. The rose head's gobo and colour are not in the preset: the show asks the fixture
-definition for the band of the rose gobo and of white, by name, and sets them itself.
+A JD57 integrated closed-loop stepper (NEMA 23) with a crank disc on its shaft, controlled by a
+Waveshare ESP32-S3-RS485-CAN that follows the universe over the access point, and — for this
+show — the Bluetooth central that relays Dendrite's samples to the brain as OSC. What it is and
+why is `DESIGN.md`'s. How this show sets it up:
 
-## 10. The numbers
+**Patch.** `fixtures/wrist.qxf`, mode "8 Channel", at the top of the universe, address 500.
 
-Everything above that is a choice lives in `brain/src/show.rs`, with the reason beside each;
-the sound table is `brain/sounds.rs`. The starting values:
-
-| constant | value | |
-|---|---|---|
-| `REST_BPM`, `SCARE_BPM` | 35, 130 | resting heart; the heart at the trigger line |
-| `HEART_RANGE` | 1.0 | the distance, in paths, over which the heart goes from rest to the scare rate: the whole walk from the entry; less to leave the first steps at rest |
-| `RATE_TAU` | 1.5 s | how fast the heart changes pace: the time constant of the glide, so the rate closes 63 % of the gap to its target in 1.5 s and 95 % in 4.5 s |
-| `ROSE_FLOOR` | 25 % | the rose at the quietest point of the envelope; full at its loudest |
-| `ROSE_COLOUR` | red | the rose's colour, a band of the colour wheel, until `buildup` turns the heads white |
-| `OWL_MIN_SECS`, `OWL_MAX_SECS` | 45 s, 120 s | the gap between owls |
-| `SCARE_CONFIRM_SECS`, `LEAVE_SECS` | 0.2 s, 3 s | the two debounces on presence: into the scare, out of respite |
-| `CUT_SECS`, `BUILDUP_SECS` | 1 s, 1 s | the two dark seconds; `BUILDUP_SECS` is measured, see [§16](#16-commissioning) |
-| `LIGHTNING_SECS` | 50 ms | the flash before the thunderclap: two frames |
-| `STROBE_HEADS`, `STROBE_RATE` | heads 2 and 3, fast | which heads strobe in the thunderclap |
-| `THUNDER_RADIUS_DEG`, `THUNDER_HOP_SECS` | 15°, 0.4 s | the circle each head hops around in the thunderclap, and how often it hops |
-| `DOOR_AMBER` | (255, 110, 0) | the door, as R, G, B on the wash |
-| `DOOR_FADE_SECS` | 1 s | the door's fade up to amber at the start of `respite` |
-| `EYEBALL_STALE_SECS` | 2 s | after which the eyeball's silence is the tombstone; with `SCARE_CONFIRM_SECS`, set from the frame rate measured on the Pi |
-
-The sound table names each recording and its gain; everything else about a recording the
-build reads from the file. The gains are set by ear on the speakers, against the thunderclap at
-0 dB, the loudest a recording plays.
-
-| sound | file in `brain/sounds/` | gain | |
+| ch | name | group | this show's use |
 |---|---|---|---|
-| heartbeat | `heartbeat.m4a` | −7.4 dB | one lub-dub; longer than a beat at the fast end, so near the line the beats overlap, which the mixer handles; its envelope is the rose's pulse |
-| owl | `owl.mp3` | −10.5 dB | far off |
-| thunderclap | `thunderclap.m4a` | 0 dB | its length is the length of the state |
+| 1 | Mode | Maintenance; no-function band **Free** | Free · Hold · Home · Park · Speed · Lock |
+| 2–3 | Frequency coarse/fine | — | mHz; crank revolutions per second in Speed, sway Hz in Lock (one revolution per sway cycle, so the same number); allowed 100–5000 |
+| 4–5 | Phase coarse/fine | — | 0–65535 → 0–360°; Lock only |
+| 6 | Offset | — | 0–255 → −90° … +90°, 128 = 0°; Lock only |
+| 7 | Ramp | — | value × 0.02 rev/s² (0 reads as 1); limits every change of frequency and of mode |
+| 8 | Kick | Maintenance; no-function band 0 | a counter 1–255; a change seen while Parked and homed is one kick |
 
----
+**Motor.** Labelled "JD57 Series Closed Stepper Motor", **24–36 V DC**; the label is what
+counts, over the seller's listing and over the manual, which is for a sibling revision.
+Current is set at the factory, 4 A, with no switch for it. One 12-way 2.5 mm XH header, left
+to right: AL− AL+ EN− EN+ DR− DR+ PU− PU+ V− V− V+ V+, the power pins doubled. Six DIP
+switches:
 
-# Setting up the rig
-
-## 11. Fixtures
-
-**Addresses and modes are deliberately not listed here.** `claw.qxw` is the source of truth
-and it changes; read them out of QLC+ and set each fixture to match. What this table records
-is *how* you set them on each model, which does not change.
-
-| Device | Interface | Notes |
+| switch | setting | why |
 |---|---|---|
-| 4× U\`King ZQ02015 moving head (the heads) | DMX off the HAT, 3-pin | Named `Head 1` to `Head 4`, left to right as seen from the street. Address (`Addr`) and mode (`CHnd`) from the display menu; `12CH`, the mode that carries Pan Fine and Tilt Fine, which the presets require. See [§12](#12-front-panel-settings-on-the-heads). |
-| 1× HQ Power VDPLPS36B2 LED par (the door wash) | DMX off the HAT, 3-pin | Named `Wash door`. HQ Power sells it as a pinspot; it is a wash. Mode and address are DIP switches: set the binary pattern from the datasheet. 3-channel RGB mode — the 5-channel mode adds a strobe and macros the show does not use and the e-stop would have to mask. |
-| The face | GPIO | Unchanged in the cabinet. |
-| The mouth (the Alesis io\|2 and two Monkey Banana powered speakers) | USB on the hub; TRS to the speakers, left and right | See [§13](#13-sound). |
-| The eyeball's camera (the Axis M3105-LVE) | Ethernet, through its PoE injector, into the Pi's `eth0` | See [§14](#14-the-eyeball). |
+| SW1–SW4 | ON, OFF, ON, ON | 1600 pulses per revolution, per the table on the body; 5 rev/s is 8 kHz of pulses |
+| SW5 | as set at commissioning | the motor's direction (off counter-clockwise, on clockwise), which is Wrist's positive direction |
+| SW6 | off, always | "internal debugging, do not switch on" |
 
-Not in this show: the ball, the laser, and anything rented. The deploy builds no wireless
-firmware when the workspace patches no wireless fixture.
+What the sibling's manual says and the PoC relies on: the inputs take 5–24 V at 7–16 mA; a
+pulse is at least 2.5 µs high and 2.5 µs low; direction must be steady 5 µs before the pulse
+edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it
+latches, and resets only when the pulses stop or the power is cycled, and a reset while
+pulses continue restarts the motor abruptly, so Wrist stops pulsing before it clears an
+alarm. The alarm line is the motor's only feedback: no encoder output, no in-position output,
+no serial port.
 
-Both definitions are in `fixtures/`. `HQ-Power-VDPLPS36B2-LED-Pinspot-PAR36.qxf` is ours,
-from the datasheet. `UKing-ZQ02015.qxf` came from QLC+'s library and is partly measured: the
-strobe channel's open band, the motor speed's polarity, the no-function bands of
-`Automatic Mode`, `Reset` and `Light Strips` (in the Effect group, so the e-stop turns the
-strips off), colour bands that match the manual, the dimmer's dark band (0–43), and the whole gobo
-channel: nine fixed gobos with the rose at 48–55, eight shaking ones and automatic rotation.
-Still to measure: the strobe band, and the real travel — the definition says 540° pan and
-180° tilt, and the manual gives no figures. The show asks the definition for all of these; a
-guess in the file is a guess on the night.
+Supply: a **24 V, 5–6 A switching supply**, through a 5 A fuse, with 4700 µF / 50 V across V+
+and V− at the motor. If the e-stop button has a spare contact block, a relay on the motor's
+feed from that contact makes "limp when pressed" a hardware fact as well as a DMX one; without
+one, Free over DMX is what the PoC has, and the full-scale rig gets the relay regardless.
 
-The heads have LED strips on their bodies, on the `Light Strips` channel. The show keeps them
-off.
+**Board.** 7–36 V in, straight from the motor's 24 V supply. Five signals: PU and DR on the
+outside connector's GPIO1/GPIO2; **EN**, AL and the **home switch** on a pigtail from the
+internal header. PU, DR and EN through a 74HCT14 on the header's 5 V (the S3 is 3.3 V); AL−
+to ground, AL+ to a GPIO with its pull-up; the microswitch between a GPIO with its pull-up
+and ground. EN is wired because Free must actually de-energise the driver. Address
+`10.0.10.3`, set on itself from `etc/claw-wifi.env`. RS-485 unused this show; termination
+jumper off.
 
-## 12. Front-panel settings on the heads
+**Crank and home.** An 8 mm flange coupling on the shaft, drilled at 3, 5 and 8 mm radius; a
+tab on the disc trips the microswitch once per revolution. Home is the switch's rising edge;
+**neutral is home plus `HOME_OFFSET_DEG`**, measured at commissioning as the angle at which the
+crank arm is perpendicular to the line with the model at rest, and written into Wrist's
+config with the date. Homing turns the crank slowly (0.2 rev/s) in the positive direction
+until the switch; Park means "home if unhomed, then go to neutral". In Speed and Lock the
+switch is also the index: two revolutions without it, or an edge more than 5° from where
+it should be, and Wrist goes Free and says why.
 
-State that lives in each head and survives nothing: a head swapped or reset comes back with
-its own idea of these. Recorded because a wrong one looks like broken software.
+**Line.** 0.3 mm braided Dyneema from the crank pin over a screw-eye at the model's base to
+the chosen node — the stiff line. The compliant line adds 10 cm of 1 mm shock cord or a
+rubber band in series, pretensioned so it never slackens at the largest sway. The motor sits
+on a wooden bridge spanning the model's base, clamped to the table; nothing is fixed to the
+sculpture.
 
-| Setting | Value | Why |
-|---|---|---|
-| DMX address, DMX mode | from `claw.qxw` | Nothing in software can detect a wrong mode; check each against the patch. |
-| `bLnd` | `bLAc` | Signal loss blacks a head out instead of starting its own program. The e-stop and a cable fault then look alike. |
-| `rPAN`, `rTiL` | `no` on every head | A head with one axis reversed tracks DMX perfectly and lands nowhere near the others, which reads as broken aiming code. |
-| `Soud` | `oFF` | A head powered up before the rig sends stays still. |
+### 3.2 Dendrite, in this show
 
-## 13. Sound
+A micro:bit V2 on a battery pack, Velcroed to the model, streaming its accelerometer to Wrist
+over Bluetooth; Wrist relays to the brain. The three placements tried in Listen are the top
+node, a mid-height node, and a strut. Dendrite's protocol, the relay and the estimator are
+`DESIGN.md`'s.
 
-The brain plays through the Alesis io|2 — the same interface the ear captured through — into
-two Monkey Banana powered speakers, in stereo. Nothing captures any more.
+### 3.3 Memory and the dashboard
 
-- **Wiring.** The io|2's left and right main outs (TRS), one to each speaker. Turn its
-  direct-monitor mix knob fully to the computer side, so the unused mic inputs cannot bleed
-  into the speakers, and set the output level with the speakers' own volume knobs; the brain
-  plays each recording at its gain in the sound table, and has no master gain of its own.
-- **Placement.** The heartbeat is for the street and the thunderclap for the person on the
-  path, from the same speakers: low, by the path, under the balcony, out of sight. Set the
-  level by the thunderclap — it is the loud one — and let the heartbeat sit where the gains
-  put it.
-- **Recordings** are in `brain/sounds/`, as they were found — AAC in `.m4a`, MP3 — and are
-  **compiled into the brain**: decoded, resampled to 48 kHz stereo 16-bit, trimmed of what is
-  inaudible at either end, brought to full scale, and stored with their envelope, one byte per
-  DMX frame. Nothing is read from disk at startup or during a show, there is no decoder in
-  the running program, and the binary on the Pi is the whole show. A file the build cannot
-  read is a build error naming it.
-- **On MQTT**, through the brain's client — the mouth is a thread in the brain, so it lives
-  and dies with it and `health/brain` covers it:
+`memory-pi` as the README has it, with one provisioned dashboard for this show,
+`etc-memory-pi/grafana/headless-hug-poc.json`: Dendrite's axes, `brain/sway/*`, `wrist/*`,
+`brain/show` and `brain/run` and `operator/line` as annotations, `dendrite/link`. The Mac is
+on the access point for the sessions and reaches Grafana over the SSH jump as today; QLC+'s
+output for this show unicasts to `10.0.10.1` for the same reason, which the brain's receiver
+binds because the workspace says so.
 
-  | topic | |
-  |---|---|
-  | `mouth/state` | `playing`, `muted` by the show, or `down` when the interface failed |
-  | `mouth/error` | why the interface is down, present only while it is |
-  | `mouth/xruns` | buffer underruns since the brain started: the show is stuttering, make the buffer bigger or the Pi quieter |
-  | `mouth/usb/vid_pid`, `mouth/usb/bus`, `mouth/usb/address`, `mouth/usb/speed` | the interface as the kernel sees it: identity, where on the bus, and `full`/`high` — a full-speed enumeration on a high-speed device is a bad cable or a bad hub port |
-  | `mouth/usb/sysfs` | its `/sys/bus/usb/devices/…` path, so `lsusb -t` and the journal can be read against it |
-  | `mouth/usb/serial`, `mouth/usb/product` | from `/sys`, blank where the device has none |
-  | `mouth/alsa/card`, `mouth/alsa/rate_hz`, `mouth/alsa/period`, `mouth/alsa/buffer` | what the stream was actually opened at — the rate and sizes asked for are not always the ones granted |
+## 4. The experiments, in order
 
-  A missing or dead interface costs the sound and never a frame: the show runs on silent, and
-  `mouth/state` says so. Re-enumeration shows as the `usb/` topics changing under a running
-  brain, which is the signature of a flaky hub port rather than a software fault.
+Each with what it needs working, what is read off the dashboard, and what decides it. The
+numbers go in `POC-RESULTS.md`, by `brain/run`.
 
-The e-stop silences the mouth along with the frame. A console takeover does not: sound is not
-part of the universe, so the show's sound runs on underneath a takeover.
+**E0 — Listen, by hand.** *Needs:* Dendrite, Wrist as bridge (motor side not yet), the
+estimator, Memory. *Do:* Listen; pluck a centimetre; three times per placement, three
+placements; `operator/line` set to `stiff`. *Read:* f₁ and Q as published, checked against ten
+periods counted on the raw trace and cycles to half amplitude; second-mode and cross-axis
+content per placement; the Bluetooth link's drops and counter gaps over the afternoon. Also by
+hand: the static pull test, a luggage scale at the top, grams per millimetre of deflection.
+*Decides:* whether the model has a usable first mode (Q < 3 means a heavier top or a tighter
+net before anything else), the placement, and the reference numbers for everything after.
 
-## 14. The eyeball
+**E1 — Wrist from a fader.** *Needs:* Wrist's motor side, QLC+ on the access point. *Do:*
+Home; Park; Speed at 1, 2, 3 rev/s; bump Kick; Hold; stop QLC+ and watch it go Free; e-stop
+and watch it go Free; release and confirm it refuses Speed until Parked. *Read:*
+`wrist/angle_deg` against the disc; Dendrite's trace unbroken while the motor runs — the two
+share a radio. *Decides:* Wrist is a fixture.
 
-The Axis M3105-LVE watches the yard; the eyeball, inside the brain on the Pi, finds people in
-the picture, places their feet on the path, and hands the show how far the furthest of them
-is from the trigger line. Its design is [`DESIGN.md`](DESIGN.md) §3.6.
+**E2 — Three ways to pull.** *Needs:* E1, the artist. *Do:* under takeover, line at (a) the
+top node, (b) a mid node, (c) a pair of lines from two anchors at 90°, one on the crank and
+one sprung; Speed at f₁ from E0; 3, 5 and 8 mm radii; stiff and compliant. *Read:* amplitude
+per millimetre of radius, cross-axis amplitude, how it looks. *Decides:* the pull geometry for
+full scale, with the artist.
 
-**Network.** The camera's PoE injector plugs straight into the Pi's `eth0`, `10.0.1.0/24`:
-the Pi at `10.0.1.1`, the camera at `10.0.1.3`, reserved for it by the Pi's DHCP server. The Ethernet hub goes between them only when
-a laptop needs the wire too.
+**E3 — Kick.** *Needs:* the Kick experiment. *Do:* ten Kicks. *Read:* f₁ and Q per run and
+their spread against E0. *Decides:* question 3 by method A; pass is ten within 2% of each
+other and of E0.
 
-**Camera.** Mounted so the path runs across the picture, square on: the yard entry at the
-right edge, the trigger line towards the left, the whole walk between them, and the pavement
-out of the picture altogether — the marks only bound the picture left to right, so anyone the
-camera can see walking past behind the entry would count as in the yard. Framing is what
-keeps them out. It runs under its
-own infrared illuminator with the IR-cut filter off, which the retina sets over VAPIX on every
-connect, as the old eyeball did and for the same reasons: infrared beats visible light by a wide
-margin at night, the rose and the amber door barely register in it, and an exposure capped at
-10 ms keeps a walking leg a shape rather than a streak. The thunderclap saturates the picture
-for a few seconds; nothing is detected during it and nothing needs to be. The camera's
-password is in the retina's configuration.
+**E4 — Run and Sweep.** *Needs:* E3. *Do:* Run, then Sweep, stiff; then both compliant.
+*Read:* in Run, amplitude against radius (stiff: equal; compliant: Q times) and
+`brain/sway/lag_deg`; in Sweep, the amplitude and lag curves against frequency. *Decides:*
+the regime, by measurement; and question 3 by method B.
 
-**The two benchmarks.** There is no calibration, only aiming. The two benchmarks are two
-marks fixed in the camera's picture — the trigger column towards the left, the entry column
-towards the right, at `TRIGGER_COLUMN` and `ENTRY_COLUMN` in `eyeball/src/config.rs` as
-fractions of the frame width — and the camera is aimed so the yard lands on them: open the
-annotated feed, which draws both marks, and move the camera until the trigger mark sits on
-the rose and the entry mark sits on the path's entry. Panning slides the picture along the
-path; how far back the camera is mounted sets how much path lies between the marks, so the
-mount's distance from the path is the other thing to move. The marks themselves are the last
-resort, for a mount that cannot move. A person is the trigger-side bottom corner of their
-box — the leading foot, not the middle of the box, because the detector sometimes draws one
-box over a bunch of children, and the one in front is the one who matters. Their distance is
-where that point falls between the two marks, 1 at the entry and 0 at the line.
-Left of the trigger mark is negative; right of the entry mark is the street, and does not
-count. The furthest person is the smallest distance; nobody between the marks is the
-tombstone. Walk the path and watch the feed's number fall from 1 to 0. The number is linear
-in the picture, so it is only as linear in the yard as the camera is square to the path; if
-halfway along reads well off 0.5, the camera is angled — turn it rather than add a mark;
-nothing in the show needs it exact.
+**E5 — Lock.** *Needs:* E4, compliant. *Do:* Lock. *Read:* growth at +90°, hold at 0°, decay
+at −90°; `brain/sway/phase_err_deg`, the difference between the phase the brain commanded and
+the crank angle it got back stamped on Dendrite's samples. *Decides:* whether the phase lock
+works with the Dendrite→Wrist→brain→Wrist round trip in it, and by how many degrees.
 
-**The annotated feed.** `http://10.8.0.3:8080/`, from the Mac over WireGuard, is the
-camera's picture with the eyeball's reading drawn on it: every box, each box's leading foot,
-the two benchmark columns, the distance it is handing the show, and the frame rate it
-is managing. It is how the camera is aimed and the benchmarks are set, and on the night it is
-how the operator sees what the rig sees; it is the operator's view, not part of what the yard
-sees. Over 4G it is paid for out of the data bundle for as long as it is open.
+Throughout, without being an experiment: the Bluetooth link's drops, reconnects and gaps, and
+Wrist's step timing with the link up and down. These decide nothing here; they are the
+evidence for where the central lives at full scale.
 
-It costs detector time: drawing on a frame is nothing, but compressing the result to JPEG
-again is not, on a Pi. So the feed is encoded on its own thread from the latest annotated
-frame, and **only while a browser is connected** — with nobody watching it costs nothing at
-all, and with someone watching `eyeball/fps` says what it costs.
+## 5. Not in this show
 
-**What it hands the show**, once per camera frame it has processed and never otherwise: the
-distance from the furthest person to the trigger line, in paths — 1 at the entry, 0 at the
-line — or `+∞`, the tombstone, with the time it was seen. The show holds the last.
-
-**The detector.** YOLOX-Nano, Megvii's own weights exported at 320×192, half the camera's
-16:9 picture, reading only *person*. At this picture — people three to six metres off — the
-accuracy between small detectors is noise next to their run time, and Nano is the one that
-fits on the Pi. It counts a box from a confidence of 0.09, since its infrared picture scores
-people far lower than a photograph does, and merges overlapping boxes only above an overlap of
-0.6, both looser than usual: a phantom can only land between the marks and the
-show debounces it, while a missed child costs the scare, and children seen side-on overlap.
-
-**How often that is.** The detector sets the pace, not the camera, and on the Pi it shares
-four cores with the DMX loop: the model runs at normal priority on at most three of them,
-below the brain's real-time threads, so a slow model costs frames of the eyeball's and never
-a frame of the rig's. It takes 155 ms a frame on the Pi 3B+ with the brain running, 6.5
-frames a second, where the show wants about five; two frames are what `SCARE_CONFIRM_SECS`
-is meant to cover. The camera is asked for 640×360 MJPEG at 8 a second, a little above it — a
-stream the detector cannot keep up with would queue frames and the distance would lag reality
-by the queue, so the eyeball always takes the newest frame and drops what has piled up behind
-it, and publishes `eyeball/fps` so the queue shows up as a rate below the camera's rather than
-as a show that reacts late.
-
-**On MQTT**, through the brain's connection: `eyeball/distance` (what it saw, when it
-changes, in paths, or `tombstone` — beside `brain/presence`, which is what the show made of it),
-`eyeball/fps` (frames processed per second), `eyeball/people` (boxes the detector found,
-telemetry only — the show never sees a count); and the retina's, `retina/camera` (`ok`, or
-why not) and `retina/fps` (frames received per second, against which `eyeball/fps` shows the
-frames dropped for the newest).
-
-## 15. Show times
-
-`brain/shows.rs` lists the shows: test days as they come, and Halloween.
-
-```
-CITY = "Delft"
-("2026-10-27 09:00", "2026-10-27 22:00")      // test day
-("2026-10-31 09:00", "2026-10-31 22:00")      // Halloween
-```
-
-Each runs from the morning so the rig is up and reporting all day; it is `blackout` by
-daylight, and the show proper begins at civil dusk, which the build works out for Delft —
-around 17:50 on the 31st, in CET since the clocks changed on October 25th. The startup log
-lists each show with its dark stretch and says which clock it believes, as
-[`README.md`](README.md) describes.
-
-## 16. Commissioning
-
-In this order, because each step needs the one before it.
-
-1. **Addresses and modes** on every fixture, read from QLC+. The startup log's slot spans are
-   what the brain believes; check them.
-2. **The e-stop**, before anything is aimed at anyone: press it with the rig running and read
-   `rig: e-stop pressed` and the override count.
-3. **Aim "Rose"**, then **"Thunderclap"**, in the Scene Editor as [`README.md`](README.md)
-   describes, on the rig after dark. Save, deploy, read the presets back from the log.
-4. **Measure `BUILDUP_SECS`**: take the rig over in QLC+, put every head on "Rose", switch to
-   "Thunderclap" and time the slowest to settle. Set `BUILDUP_SECS` to that plus a margin. If it is
-   much more than a second, aim the parked heads closer to their thunderclap positions rather
-   than stretching the darkness.
-5. **Levels**: the thunderclap first, then listen to the heartbeat from the street.
-6. **The show by button**: test mode on, fire the scare with the right button, from `idle`,
-   from `respite`, and once mid-scare. Nothing here needs the eyeball.
-7. **The camera**: with the annotated feed open, aim it square at the path until the trigger
-   mark sits on the rose and the entry mark on the path's entry; walk the path and watch the
-   feed, `eyeball/distance` and `brain/presence`, and listen to the heart quicken. Then the
-   show by walking it.
+A load cell in the line (the full-scale tension method; the Sweep's lag answers the same
+question on the model). Any amplitude bound or supervisor beyond Free on stop and loss. Wind
+and weather. Bluetooth on the brain. The ESP-based brain, RDM, the dials, the e-paper. Sound
+and vision.

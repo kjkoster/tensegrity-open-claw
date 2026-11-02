@@ -1,7 +1,7 @@
 # Tensegrity Open Claw — Owned Devices
 
 **What this file is for.** The physical hardware we own: the machines, the cabinet and what is
-in it, the connectivity, the sensors, and our own fixtures — and which of them stand in for the
+in it, the connectivity, the sensors, our own fixtures and motors — and which of them stand in for the
 gear we rent. It is an inventory, not a manual: how to set the system up is
 [`README.md`](README.md), how one show uses its fixtures is [`SHOW.md`](SHOW.md), and the
 software components that drive these devices are in [`DESIGN.md`](DESIGN.md).
@@ -68,6 +68,12 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail to mount device
 | HQ Power VDPLPS36B2 LED Pinspot PAR36 | One, very cheap RGB. Sold as a pinspot, it is a wash. Mode and address are DIP switches, not a menu — set the binary pattern from the datasheet. 3-channel RGB is all a show needs; 5-channel adds a strobe and macros the e-stop must then mask. Wired DMX. |
 | UKing ZQ02015 moving heads | Four, cheap LED moving heads with a colour wheel, a gobo wheel (a rose among them) and LED strips on the body. Wired DMX. Address (`Addr`) and mode (`CHnd`) are set from the display menu. Front-panel settings live in each head and survive no reset: `rPAN` and `rTiL` `no`, or one head lands nowhere near the others; `Soud` `oFF`; `bLnd` never `Auto`, which starts the head's own program on signal loss. Their motors are loud: fine for a scare, too noisy for anything quiet up close. The definition is partly measured; the strobe band and the real pan and tilt travel are not. |
 | JB Systems Space-4 laser | One. 8-channel mode. Needs its interlock plug fitted and the key turned on, or there is no output. Distrust the manual's DMX thresholds: keep channels in the 5–127 active band, out of the 0–4 dead zone. Wired DMX. |
+
+## Motion
+
+| Device | Details |
+|---|---|
+| Closed-loop stepper | One NEMA 23 integrated closed-loop stepper, labelled "JD57 Series Closed Stepper Motor, Voltage: 24–36 VDC input"; the label overrides the seller's 24–48 V and the manual's 20–50 V. Current is set at the factory, 4 A, with no switch for it. One 12-way 2.5 mm XH-type header, left to right: AL− AL+ EN− EN+ DR− DR+ PU− PU+ V− V− V+ V+, the power pins doubled. Six DIP switches: SW1–SW4 set the pulses per revolution, per the table on the body (1600 is ON, OFF, ON, ON); SW5 the direction (off counter-clockwise, on clockwise); SW6 is labelled 内部调试用，严禁打开, "internal debugging, do not switch on", and stays off. The only manual found, "JD57 Series Integrated Close-Loop Step Motor Manual (PULSE CONTROL)", is for a sibling revision whose SW6 sets the current and whose voltage range differs. From it: inputs 5–24 V at 7–16 mA; a pulse at least 2.5 µs high and 2.5 µs low; direction steady 5 µs before the pulse edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it latches, and resets only when the pulses stop or the power is cycled, and a reset while pulses continue restarts the motor abruptly. No encoder output, no in-position output, no serial port: the alarm line is its only feedback. |
 
 ## Stand-ins for rented gear
 

@@ -1,5 +1,4 @@
-# claw-pi's wired segment, as a NetworkManager profile: the camera, and a laptop when one is
-# plugged in.
+# claw-pi's wired segment, as a NetworkManager profile: a laptop when one is plugged in.
 
 [connection]
 id=claw-eth0
@@ -11,7 +10,7 @@ autoconnect-priority=10
 
 [ipv4]
 # Shared, as on the access point: DHCP for a laptop on the wire, routed out like every other
-# client. The camera's address is a reservation below .100, in claw-eth0.dnsmasq.conf.
+# client.
 method=shared
 address1=10.0.1.1/24
 shared-dhcp-range=10.0.1.100,10.0.1.199

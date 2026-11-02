@@ -6,8 +6,8 @@
 use std::net::Ipv4Addr;
 
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
-// `FRAME_RATE_HZ`, in a file of its own because the rig crates' build scripts need it too.
-include!("../frame_rate.rs");
+// Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
+pub const FRAME_RATE_HZ: u64 = 40;
 
 // E1.31 source priority — one number with two jobs, deliberately not split. It is the
 // priority the brain transmits at, and it is the bar an external console must clear to take
@@ -23,17 +23,14 @@ pub const SACN_PRIORITY: u8 = 100;
 pub const SACN_RELEASE_FRAMES: u8 = 3;
 
 // ── Cores and priorities ─────────────────────────────────────────────────────
-// The Pi has four cores. The frame loop gets the last to itself; the audio thread and every
-// other thread share the first three, where the audio thread's real-time priority puts it
-// ahead of the rest. Stem's unit pins it to the same three, so nothing outside the brain
-// lands on the frame loop's core either.
+// The Pi has four cores. The frame loop gets the last to itself; every other thread shares
+// the first three. Stem's unit pins it to the same three, so nothing outside the brain lands
+// on the frame loop's core either.
 pub const FRAME_LOOP_CORES: &[usize] = &[3];
-pub const AUDIO_CORES: &[usize] = &[2];
 pub const BACKGROUND_CORES: &[usize] = &[0, 1, 2];
 
-// The brain's one real-time priority, shared by the frame loop and the audio thread, which
-// never compete for a core. Any FIFO priority puts them ahead of every ordinary thread; 50 is
-// the one the brain's unit file set before the threads set their own.
+// The frame loop's real-time priority. Any FIFO priority puts it ahead of every ordinary
+// thread; 50 is the one the brain's unit file set before the threads set their own.
 pub const REALTIME_PRIORITY: i32 = 50;
 
 // ── E1.31 receive / external takeover ────────────────────────────────────────
@@ -80,6 +77,10 @@ pub const MQTT_WRITE_TIMEOUT_S: u64 = 5;
 // exists so the frame loop never waits on a socket, not so telemetry survives an outage, and
 // past this depth the newest reading is worth more than the backlog behind it.
 pub const MQTT_QUEUE_DEPTH: usize = 64;
+
+// The largest packet the client encodes. Every topic is a short path and every payload one
+// scalar, so a message that does not fit is a caller's mistake, logged and dropped.
+pub const MQTT_PACKET_MAX: usize = 512;
 
 // Reconnect backoff, matching the other receivers': a broker that comes back is picked up
 // without anything being restarted.

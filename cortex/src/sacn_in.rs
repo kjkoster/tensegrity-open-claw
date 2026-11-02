@@ -125,6 +125,7 @@ impl Takeover {
 }
 
 /// One sACN source we have heard from, keyed by its 16-byte CID.
+#[derive(Clone, Copy)]
 struct Source {
     cid: [u8; CID_LEN],
     ip: Ipv4Addr,
@@ -142,23 +143,34 @@ struct Source {
 /// several — it is the floor the winner has to clear, which is a fixed comparison against
 /// `SACN_PRIORITY` rather than a row that could be outranked by CID.
 struct SourceTable {
-    sources: Vec<Source>,
+    sources: [Option<Source>; cfg::SACN_MAX_SOURCES],
 }
 
 impl SourceTable {
     fn new() -> Self {
-        Self { sources: Vec::new() }
+        Self {
+            sources: [None; cfg::SACN_MAX_SOURCES],
+        }
+    }
+
+    fn live(&self) -> impl Iterator<Item = &Source> {
+        self.sources.iter().flatten()
+    }
+
+    fn find(&self, cid: &[u8; CID_LEN]) -> Option<&Source> {
+        self.live().find(|s| s.cid == *cid)
     }
 
     /// Drop sources not heard from within the data-loss timeout.
     fn expire(&mut self, now_us: u64) {
-        self.sources.retain(|s| {
-            let alive = now_us.saturating_sub(s.last_seen_us) < cfg::SACN_SOURCE_TIMEOUT_US;
-            if !alive {
+        for entry in &mut self.sources {
+            if let Some(s) = entry
+                && now_us.saturating_sub(s.last_seen_us) >= cfg::SACN_SOURCE_TIMEOUT_US
+            {
                 eprintln!("sacn: source timed out: {} priority {}", s.ip, s.priority);
+                *entry = None;
             }
-            alive
-        });
+        }
     }
 
     /// Record a packet: refresh an existing source or insert a new one. A new source past
@@ -166,33 +178,35 @@ impl SourceTable {
     /// and the table only fills if several rogue senders are live at once, which a closed
     /// control network does not produce.
     fn observe(&mut self, cid: [u8; CID_LEN], ip: Ipv4Addr, priority: u8, sequence: u8, now_us: u64) {
-        if let Some(source) = self.sources.iter_mut().find(|s| s.cid == cid) {
-            source.ip = ip;
-            source.priority = priority;
-            source.last_seen_us = now_us;
-            source.last_sequence = sequence;
+        let fresh = Source {
+            cid,
+            ip,
+            priority,
+            last_seen_us: now_us,
+            last_sequence: sequence,
+        };
+        if let Some(source) = self.sources.iter_mut().flatten().find(|s| s.cid == cid) {
+            *source = fresh;
             return;
         }
-        if self.sources.len() < cfg::SACN_MAX_SOURCES {
-            self.sources.push(Source {
-                cid,
-                ip,
-                priority,
-                last_seen_us: now_us,
-                last_sequence: sequence,
-            });
+        if let Some(free) = self.sources.iter_mut().find(|entry| entry.is_none()) {
+            *free = Some(fresh);
             eprintln!("sacn: source added: {ip} priority {priority}");
         }
     }
 
     /// Forget a source that sent a stream-terminated packet.
     fn release(&mut self, cid: &[u8; CID_LEN]) {
-        if let Some(i) = self.sources.iter().position(|s| s.cid == *cid) {
-            let source = self.sources.swap_remove(i);
-            eprintln!(
-                "sacn: source terminated: {} priority {}",
-                source.ip, source.priority
-            );
+        for entry in &mut self.sources {
+            if let Some(source) = entry
+                && source.cid == *cid
+            {
+                eprintln!(
+                    "sacn: source terminated: {} priority {}",
+                    source.ip, source.priority
+                );
+                *entry = None;
+            }
         }
     }
 
@@ -200,7 +214,7 @@ impl SourceTable {
     /// straggler that arrived after a newer one, but accept a big jump backwards, which is
     /// a source that restarted rather than a reordering.
     fn in_sequence(&self, cid: &[u8; CID_LEN], sequence: u8) -> bool {
-        match self.sources.iter().find(|s| s.cid == *cid) {
+        match self.find(cid) {
             None => true,
             Some(source) => {
                 let delta = sequence.wrapping_sub(source.last_sequence) as i8;
@@ -211,8 +225,7 @@ impl SourceTable {
 
     /// The source to obey: highest priority among the live ones, ties broken by smaller CID.
     fn is_winner(&self, cid: &[u8; CID_LEN]) -> bool {
-        self.sources
-            .iter()
+        self.live()
             .max_by_key(|s| (s.priority, std::cmp::Reverse(s.cid)))
             .is_some_and(|winner| &winner.cid == cid)
     }

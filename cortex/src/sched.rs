@@ -1,21 +1,18 @@
 //! Where each of the brain's threads runs, and at what priority.
 //!
 //! The frame loop owns a core of its own at real-time priority, so the kernel can't preempt it
-//! mid-frame and split the back-to-back slot stream: the classic Pi-UART → DMX corruption. The
-//! audio thread is the only other one with a deadline, so it is real-time too, on one of the
-//! background cores, where it preempts whatever else runs there. Everything else drops to
-//! `SCHED_OTHER` on the background cores. A CPU-bound part, such as a detector, then slows
-//! itself and never a frame or a sound period. The kernel's real-time throttle
-//! (`sched_rt_runtime_us`, 95% by default) still guarantees ordinary tasks make progress, so a
-//! busy-spin in the break code cannot lock the box.
+//! mid-frame and split the back-to-back slot stream: the classic Pi-UART → DMX corruption.
+//! Everything else drops to `SCHED_OTHER` on the background cores, so a CPU-bound part slows
+//! itself and never a frame. The kernel's real-time throttle (`sched_rt_runtime_us`, 95% by
+//! default) still guarantees ordinary tasks make progress, so a busy-spin in the break code
+//! cannot lock the box.
 //!
 //! Set by each thread on itself, from inside the process, rather than in the unit file. A unit
-//! file can only say one thing about the whole process, and here the frame loop and the audio
-//! thread need opposite things from the threads beside them.
+//! file can only say one thing about the whole process, and here the frame loop needs the
+//! opposite of the threads beside it.
 //!
 //! The policy and the mask are inherited by any thread a thread spawns after setting them. That
-//! is what puts embassy-time's timer thread on the frame loop's core, and an inference
-//! runtime's worker pool on the background cores, without either of them asking.
+//! is what puts embassy-time's timer thread on the frame loop's core without it asking.
 //!
 //! Neither call can fail for a reason that goes away by itself. The brain runs as root on a
 //! four-core Pi, so a failure is a deploy error, and it panics rather than letting the show
@@ -25,9 +22,10 @@ use crate::config as cfg;
 #[cfg(target_os = "linux")]
 use std::{io, mem};
 
-/// Puts the calling thread on `cores` under `SCHED_FIFO`, at the brain's real-time priority.
-pub fn realtime(cores: &[usize]) {
-    pin(cores, libc::SCHED_FIFO, cfg::REALTIME_PRIORITY);
+/// Puts the calling thread on the frame loop's core under `SCHED_FIFO`, at the brain's
+/// real-time priority.
+pub fn realtime() {
+    pin(cfg::FRAME_LOOP_CORES, libc::SCHED_FIFO, cfg::REALTIME_PRIORITY);
 }
 
 /// Puts the calling thread on the background cores under `SCHED_OTHER`.

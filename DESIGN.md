@@ -32,8 +32,7 @@ rig has one universe and relays a takeover onto it, so those two numbers are the
 well: what the brain listens for, what it sends, and what a wireless fixture listens for. The
 address that output unicasts to is the one the brain's receiver binds.
 
-The workspace has two users: QLC+, which opens it to take the rig over and to aim presets,
-and the build. **The running brain never reads it**: the build consumes it, and it never
+The workspace has two users: QLC+, which opens it to take the rig over, and the build. **The running brain never reads it**: the build consumes it, and it never
 crosses into the running program, not even as a filename. A rig has exactly one, so naming the rig in
 the log already says which file the binary was built from.
 
@@ -48,17 +47,12 @@ no drift checker because none is needed. What that catches, and how to read the 
 complaints when it does, is in [`README.md`](README.md) — it is part of the save-and-deploy
 workflow rather than a thing to know in advance.
 
-**Scenes are pointing presets, and a prescribed set.** Where a head points is a measurement
-taken on the rig with a console, so it lives in the workspace like the patch. The rig crate
-lists the presets its show is written against, by their names in QLC+, and the workspace's
-scenes must be exactly that set: a missing one is a look the show would not get, an extra one
-a look nothing plays. The list is the code's requirement, not a copy of the workspace. Each
-name becomes a constant the way a fixture name does, so a renamed preset fails at its use site.
-The ingest resolves each preset at build time into a pose per head, in degrees, through the
-head's own travel range — the inverse of what aiming does — so a preset is read as a pose and
-never as bytes. A preset holds pan and tilt, coarse and fine, for every head and nothing
-else: a missing channel would resolve to 0°, the end of the head's travel, and an extra one is
-a value the show would never send. Both fail the build.
+**Scenes are QLC+'s own.** The build reads the patch and not the workspace's functions, so a
+scene is a look for a takeover and nothing more. While the rig had moving heads, scenes were
+its pointing presets: where a head points is a measurement taken on the rig with a console,
+so it lived in the workspace like the patch, and the build resolved each into a pose per head
+in degrees. That ingest, and `cortex`'s moving-head code, are on the `last-version-with-mouth`
+tag, the last show with heads.
 
 **The same rule runs past addressing into values.** A `.qxf` says a great deal more than
 which slot a channel occupies: which value opens the shutter, which end of a speed channel is
@@ -191,14 +185,15 @@ decision corrects itself when NTP steps the clock.
 
 Anything the show must survive losing, and that has no reason to be inside the brain, runs
 outside it: Stem, and Memory on a Pi of its own (§3.9). A daemon that crashes, stalls or is restarted mid-tune then costs what it
-provides and never a frame, and a process aiming moving heads at people does not share an
+provides and never a frame, and a process driving fixtures and motors beside people does not share an
 address space with anything that can take it down.
 
-The exceptions are parts with a reason to be inside. The face, the ear and the mouth are ones
-the frame has to stay in step with to the millisecond: a process boundary there is latency
-the audience sees — a cut that lands a hop after the light, a lamp a hop behind the frame.
-The eyeball is one whose reading would otherwise need a socket between two processes on the
-same Pi, or a second machine: inside, it is a thread and a seam.
+The exceptions are parts with a reason to be inside. The face, and the ear and the mouth when
+a rig had them, are ones the frame has to stay in step with to the millisecond: a process
+boundary there is latency the audience sees — a cut that lands a hop after the light, a lamp
+a hop behind the frame. The eyeball was one whose reading would otherwise have needed a
+socket between two processes on the same Pi, or a second machine: inside, it was a thread and
+a seam.
 
 Those run inside the brain, and are written so a dead device costs what it provides: they
 report, retry with backoff, and never block the frame loop; what cannot come back stops the
@@ -216,8 +211,7 @@ error and stops the start.
 | thread | cores | scheduling |
 |---|---|---|
 | the frame loop (the executor, with the face's tasks) and embassy-time's timer thread | 3 | FIFO 50 |
-| the mouth | 2 | FIFO 50, ahead of everything else on that core |
-| the retina, the eyeball's detector and its model's thread pool, the brain's annotated feed; `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
+| `sacn-in`, telemetry, signals | 0–2 | `SCHED_OTHER` |
 | Stem, in its own unit | 0–2 | `Nice=10` |
 
 No core is isolated on the kernel's command line: with every other thread of the brain and
@@ -239,7 +233,7 @@ Those are reported, retried with backoff, and cost only what they provide while 
 The show runs on through them.
 
 Every other fault cannot recover. A missing boot overlay, a serial port that will not take a
-write, an audio interface that opens but refuses the recordings' rate, a port another
+write, a device that opens but refuses the format the build was made for, a port another
 process holds, a thread that cannot be pinned, a library the deploy should have installed:
 retrying any of them only repeats the failure, and logging it and carrying on hides a broken
 rig behind one that seems to run. They panic at the point of failure, preferably at startup,
@@ -255,13 +249,27 @@ it.
 
 The first step of every new show is upgrading everything to its newest release and making it
 work again: the Rust toolchain and every crate, the Python packages, GreptimeDB, Grafana,
-QLC+, Raspberry Pi OS on every Pi, the camera's firmware where its maker still ships one, and
-the models the rig runs. Pre-releases count where a dependency has only those.
+QLC+, Raspberry Pi OS on every Pi, and the firmware of every device whose maker still ships
+one. Pre-releases count where a dependency has only those.
 An older version stays only for a reason written beside its pin.
 
 Upgrading at the start is when it is cheap: there is a whole build ahead to find what broke,
 where upgrading the week of a show is a risk, and never upgrading is a pile of breaking changes
 that arrives all at once, the day something forces it.
+
+### 1.9 `no_std` and no allocator, wherever it can be
+
+Anything shared between the Pi and a microcontroller is `no_std` — not when a firmware
+happens to need it, always. `stem` set the pattern; `dendrite-wire` and `innerear` follow it. The
+reason is not the firmware of today but the brain of tomorrow: the frame loop, the estimator
+and the show may one day run on an ESP, and code that was `std` only out of habit is the
+code that stops that. A crate reaches for `std` only for what the Pi alone has — sockets,
+threads, the serial port, the filesystem — and keeps that in the thinnest shell it can.
+
+The same goes for the heap. A microcontroller may have no allocator at all, so portable code
+works in fixed-size buffers its caller owns: `stem` writes each packet into one and returns
+its length, and the sACN encoder and source table are arrays sized by the protocol and the
+configuration. An allocation in the frame loop is a porting job waiting to happen.
 
 ---
 
@@ -283,16 +291,15 @@ Pi on that access point, Memory (§3.9), so the Pi that drives the show carries 
 
 ```
     ┌── Mac ──────────────────────────────────────────┐
-    │  (SSH / deploy; QLC+ for override + presets)    │
+    │  (SSH / deploy; QLC+ for override)              │
     └───────────────── WireGuard ─────────────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
     │  (builds brain; reads the rig's sensors)        │
-    │  ◄── GPIO, network camera                       │
+    │  ◄── GPIO                                       │
     │  The show                                       │
     │  ├── RS-485 HAT (40 Hz) ──── wired DMX-512      │
-    │  ├── sACN sender ──────────── network           │
-    │  └── USB audio ────────────── speakers          │
+    │  └── sACN sender ──────────── network           │
     └─────────────────────────────────────────────────┘
                                   │
                         one universe of fixtures
@@ -325,12 +332,12 @@ frame rate sits under.
 |---|---|
 | `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
 | `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
-| `brain/` | the rig crate: the rig's patch, its show times, its recordings, and its show |
-| `mouth/` | the mouth (§3.8): playback through a USB audio interface, for a rig crate that wants sound |
-| `mouth-build/` | the mouth's recordings compiled in, a build-dependency of a rig crate that has a mouth |
-| `eyeball/` | the eyeball (§3.6): the retina's frames in, one sighting of the scene out, for a rig crate that wants to see; the rig crate draws and serves its annotated feed |
-| `retina/` | the retina (§3.6): a network camera set up over VAPIX and read as MJPEG, its newest frame handed to the eyeball |
-| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
+| `brain/` | the rig crate: the rig's patch, its show times, and its show |
+| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` and allocation-free for the firmware. The brain's client, which needs std, is `cortex::telemetry`. It shares its directory with Stem's daemon and broker configuration |
+| `innerear/` | the inner ear, the sway estimator (§3.12): a phase-locked loop over acceleration samples and a free-decay estimator for f₁ and Q, `no_std`, a workspace member the rig crate wires in |
+| `dendrite-wire/` | Dendrite's wire contract (§3.11): the GATT service and its packed samples, and the OSC messages the relay emits; `no_std`; a workspace member (the brain decodes the OSC) shared by path with the firmware like `stem` |
+| `wrist/` | Wrist's firmware (§3.10): ESP32-S3, not a workspace member, built on the Mac for its target |
+| `dendrite/` | Dendrite's firmware (§3.11): nRF52833, not a workspace member, built on the Mac for its target |
 
 **Beside the crates**, what the Pis run that is not Rust: `stem/` also holds Stem's daemon,
 its broker configuration and the Python modules every health daemon shares; `etc/` is what
@@ -353,21 +360,20 @@ field for a part one rig has.
 Firmware for a wireless fixture is not a member of this workspace: it is built on the Mac for
 its own target, reads its universe, port and address out of the workspace through
 `cortex-build`'s `addressing()`, and shares the `stem` crate with the brain by path, which is
-why that crate stays `no_std`. Everything in the workspace is built on the Pi, because the
-brain links ALSA.
+why that crate stays `no_std`. Everything in the workspace is built on the Pi.
 
-**Recordings and models are compiled in.** The rig crate keeps its recordings as they were
-found, in whatever format they came in, and names them and their gains in a sound table; the
-component's own build crate decodes each and turns it into a typed constant — the samples,
-and whatever the build derives from them, such as a loudness envelope at the frame rate. A
-sensor's model goes in the same way, with `include_bytes!`, and is loaded from memory. The
-binary on the Pi is then the whole show: no file to be missing at startup, no decoder in the
-running program, and a recording the build cannot read is a build error naming it.
+Wrist's and Dendrite's firmwares restore what the ball had — the sACN front end, WiFi
+provisioning from `etc/claw-wifi.env`, the MQTT client, the deploy integration — from the
+`last-version-with-ball` tag, ported from the C3's RISC-V to the S3's Xtensa where Wrist needs
+it. `deploy.sh` builds both on the Mac; `remote-deploy.sh` flashes Wrist over its USB-C on the
+hub, as it flashed the balls; Dendrite is flashed from the Mac over its own debug interface
+when it is plugged in, and the deploy says so when it is not.
 
-**A table built per frame is built at the frame rate.** `cortex` owns the rate and hands it
-to the build script of every crate that depends on it, through cargo's `links` metadata, so a
-rig crate's build reads the one number the frame loop runs at and a change to it rebuilds
-every such table.
+**Assets are compiled in.** A recording or a model a component needs goes into the binary at
+build time, decoded by the component's own build crate or with `include_bytes!`, so the binary
+on the Pi is the whole show: no file to be missing at startup, no decoder in the running
+program, and an asset the build cannot read is a build error naming it. The mouth's
+recordings and the eyeball's model were built this way (§3.6, §3.8).
 
 ### 2.4 Software stack
 
@@ -378,11 +384,8 @@ Standard Rust on Trixie Raspbian Linux, `std`.
   costs less than working around them.
 - **`zihatec-rs-485-dmx`** for DMX-512 framing — BREAK/MAB timing and full-512 padding. Only
   the device path is ours.
-- **ALSA** for audio.
-- **`tract`**, pure Rust, for a sensor's neural model: nothing prebuilt downloaded and no C++ in
-  the brain. ONNX Runtime only from Debian's package, should `tract` ever be too slow.
 - **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking
-  producers — sensors, the sACN receiver, audio — on their own OS threads feeding it, or fed
+  producers — sensors, the sACN receiver — on their own OS threads feeding it, or fed
   by it, through a lock-free latest-value seam. A blocking `recv` on the executor's thread
   would stall the frame loop, so anything that blocks stays off it, and anything that
   computes for long runs below it in scheduling (§1.6).
@@ -412,23 +415,16 @@ returned to, and neither needs a special case anywhere else.
 ### 2.6 The Pi controller
 
 The deployed unit is a **Raspberry Pi 3B+** running standard 64-bit Debian / Raspberry Pi OS. A Pi 4
-has more headroom and runs the same software unchanged; the eyeball's detector is what will
-justify it.
+has more headroom and runs the same software unchanged.
 
 The Pi runs in **AP mode** (NetworkManager) so fixtures and laptops join its own network
 rather than depending on whatever WiFi exists at the site, uses its **Ethernet port** as a
-wired segment — a network camera, a laptop for SSH — and runs `brain` as a systemd service
-for unattended operation.
+wired segment for a laptop, and runs `brain` as a systemd service for unattended operation.
 
 **Everything that must be found by address has a fixed one, below `.100`.** The access point
 and the wired segment each give the Pi a fixed address, `.1`, and hand out addresses by DHCP
-from `.100`–`.199`, as a convenience for laptops. A device the rig talks to by address gets one
-below `.100` in one of two ways. On the wired segment, a reservation in the Pi's DHCP server,
-`etc/claw-eth0.dnsmasq.conf`, keyed on the device's MAC: the camera, which then needs nothing
-set on itself, and comes back where it is looked for after a factory reset or a replacement.
-On the access point, an address the device sets on itself: a second Pi, a wireless fixture.
-The reservations are the private dnsmasq NetworkManager runs for every shared connection,
-fed a drop-in file; no DHCP server of the rig's own runs beside it. Both networks route their
+from `.100`–`.199`, as a convenience for laptops. A device the rig talks to by address sets
+one below `.100` on itself: a second Pi, a wireless fixture. Both networks route their
 clients out over 4G.
 
 Settings — SSID, serial console, DIP switches, `config.txt` — are in
@@ -437,6 +433,44 @@ Settings — SSID, serial console, DIP switches, `config.txt` — are in
 ---
 
 ## 3. Components
+
+**The rig is a fixed core and the components a show chooses.** The core stays in the code
+whatever the show, used or not. A component is in the code only while a show uses it: when a
+show is done without one, the component is tagged `last-version-with-<component>` and
+removed, with everything that existed only to serve it, and its section here stays as what
+was learned building it. A later show that wants it back restores it from its tag. Fixture
+definitions in `fixtures/` are neither: they are a library, kept whether or not a workspace
+patches them.
+
+| The core | Where |
+|---|---|
+| the frame loop and the rig state machine (§2.5) | `cortex`'s orchestrator |
+| wired DMX out through the RS-485 HAT | `cortex::dmx` |
+| sACN out | `cortex::sacn_out` |
+| sACN in: takeover by priority (§1.2) | `cortex::sacn_in` |
+| the e-stop | `cortex::estop`, read by the face |
+| the face (§3.3) | `brain/src/face.rs`, `fixtures/face.qxf` |
+| the Director, the show's state machine, with test mode | the rig crate's `show.rs` |
+| the calendar, with each show's civil dusk and dawn (§1.5) | `cortex::calendar`, `cortex-build`, the rig crate's `shows.rs` |
+| the QLC+ ingest (§1.1) | `cortex-build`, `cortex::qlc_plus` |
+| the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
+| the telemetry client and the health contract | `cortex::telemetry`, the `stem` crate |
+| Stem (§3.1) | `stem/` |
+| Memory (§3.9) | `etc-memory-pi/` |
+| the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `etc/` |
+
+| Component | In the code |
+|---|---|
+| the ear (§3.4) | no: `last-version-with-ear` |
+| the ball (§3.5) | no: `last-version-with-ball` |
+| the eyeball (§3.6) | no: `last-version-with-eyeball-for-pose-estimation`, `last-version-with-eyeball-for-group-detection` |
+| the retina (§3.6.1) | no: `last-version-with-retina` |
+| the ponytail (§3.7) | no: `last-version-with-ponytails` |
+| the mouth (§3.8) | no: `last-version-with-mouth` |
+| moving heads: their aiming and the QLC+ pointing presets (§1.1) | no: `last-version-with-mouth` |
+| Wrist (§3.10) | coming with the Headless Hug PoC |
+| Dendrite (§3.11) | coming with the Headless Hug PoC |
+| the inner ear (§3.12) | coming with the Headless Hug PoC |
 
 ### 3.1 Stem
 
@@ -461,8 +495,8 @@ death costs telemetry and never uptime.
 
 Every process holds its own connection to the broker, announces itself on `health/<service>`,
 and leaves a will that says `gone`: `brain`, Stem's daemon, and Memory's health daemon and
-recorder. A part inside the brain — the
-face, the mouth, the eyeball — lives and dies with it, so a will of its own would only repeat
+recorder. A part inside the brain, like
+the face, lives and dies with it, so a will of its own would only repeat
 `health/brain`; it publishes its own subtree through the brain's connection (§1.6).
 
 **The Rust side of Stem is the `stem` crate**, in Stem's own directory: how every Rust
@@ -484,7 +518,7 @@ the script names a port, a hub or an interface.
 **It touches the modem alone**, so the show is never disturbed. There is no reboot and no
 power cut. A reboot breaks the show for a link the show does not need. A per-port power cut
 can only be trusted on a hub that really switches its ports individually, which a hub's own
-claim does not prove, and on a ganged hub it would also cut the audio interface.
+claim does not prove, and on a ganged hub it would also cut whatever shares the hub.
 
 ### 3.3 The face
 
@@ -496,8 +530,8 @@ workspace patches them like any fixture. The show writes them into the frame; th
 the pins from the frame that actually went out, after arbitration. So a console that takes the
 rig over drives the lamps too, and the e-stop darkens them with everything else, with
 no special case in either. They dim through the Pi's two hardware PWM channels, because the
-software alternative is a busy-waiting real-time thread per pin, competing with audio and
-the DMX timing.
+software alternative is a busy-waiting real-time thread per pin, competing with the DMX
+timing.
 
 **Its inputs are a `FaceState`.** The face polls and debounces, and publishes the e-stop and
 counts of each gesture — chords, presses — once per poll, on its own latest-value seam.
@@ -597,25 +631,24 @@ no rule of its own.
 
 ### 3.6 The eyeball
 
-A network camera in — an Axis M3105-LVE — one small reading of the scene out to the show, and
-an annotated feed for humans. It has had two lives. First a Python process beside the brain,
-reading a person's arms for the mage rig, removed with it; that code is on the
-`last-version-with-eyeball-for-pose-estimation` tag (`eyeball/` and `cortex/src/eyeball.rs`). Now two Rust
-crates, running as threads inside the brain and handing the show how far into a space the
-furthest person has come.
+One small reading of the scene out to the show, from the frames of a camera (§3.6.1), and an
+annotated feed for humans. It had two lives. First a Python process beside the brain, reading
+a person's arms for the mage rig; that code is on the
+`last-version-with-eyeball-for-pose-estimation` tag (`eyeball/` and `cortex/src/eyeball.rs`).
+Then a Rust crate running as threads inside the brain, handing the Halloween show how far
+into the yard the furthest person had come; it was removed after that show, and is on the
+`last-version-with-eyeball-for-group-detection` tag (`eyeball/`, and the brain's
+`presence.rs`, `draw.rs` and `feed.rs`).
 
-**The retina sees, the eyeball looks.** `retina/` is the camera: setting it up, reading its
-stream, reconnecting when it goes, and handing on its newest frame. `eyeball/` is what is in
+**The retina sees, the eyeball looks.** The retina is the camera; the eyeball is what is in
 the frame: the detector and the distance. Between them is a one-slot mailbox of JPEG frames,
 taken rather than read, so no frame is detected twice. The eyeball says what it needs in a
 `View` — a resolution from those the camera offers, a frame rate within what it can deliver,
 infrared or colour, and which way up the camera hangs — and the retina sets the camera up for
-it, so a consumer with other needs takes no change in the retina; the bounds are types,
-checked where the view is written. What belongs to the camera rather than to whoever looks,
-the mains' 50 Hz and the exposure for people walking, stays the retina's own. The eyeball
-starts its own retina with its view, so whoever runs the eyeball only starts it. A different
-camera is a different retina and the same eyeball. Each reports its own half on the broker,
-`retina/…` and `eyeball/…`, so a dead camera and a slow detector never look alike.
+it, so a consumer with other needs takes no change in the retina. The eyeball starts its own
+retina with its view, so whoever runs the eyeball only starts it. A different camera is a
+different retina and the same eyeball. Each reports its own half on the broker, `retina/…`
+and `eyeball/…`, so a dead camera and a slow detector never look alike.
 
 **The rig draws, the eyeball sees.** The eyeball hands out one sighting per frame: the
 distance and when it was seen, with the picture and the boxes it came from. The show reads
@@ -645,6 +678,22 @@ first life that was arm angles, not the seventeen joints of one pose model; in t
 is one distance, not boxes or a count. The estimator is expected to be replaced, and a schema
 naming its internals would have to change with it.
 
+**The feed costs nothing unwatched.** Drawing on a frame is cheap; compressing it to JPEG
+again is not, on a Pi already running a detector. So the feed is encoded on its own thread,
+from the latest sighting, and only while a browser is connected.
+
+#### 3.6.1 The retina
+
+A network camera, an Axis M3105-LVE, set up over VAPIX and read as MJPEG, its newest frame
+handed to the eyeball: setting the camera up, reading its stream, reconnecting when it goes.
+A component of its own beside the eyeball, removed with it after the Halloween show; it is on
+the `last-version-with-retina` tag (`retina/`, and the camera's DHCP reservation in
+`etc/claw-eth0.dnsmasq.conf`).
+
+**The bounds of a view are types,** checked where the view is written. What belongs to the
+camera rather than to whoever looks, the mains' 50 Hz and the exposure for people walking,
+stays the retina's own.
+
 **The camera is configured by the retina, not by hand.** Which stream, at what size and rate,
 the image rotation, and the sensor's settings are the retina's to decide, beside the camera's
 host and login. It sets the camera's parameters over VAPIX on every connect and reads them
@@ -663,9 +712,10 @@ every frame would queue them behind a slow model, and the reading would lag the 
 queue; so the reader keeps only the newest and drops what has piled up, and a slow model
 shows as a lower frame rate on the broker rather than as a show that reacts late.
 
-**The feed costs nothing unwatched.** Drawing on a frame is cheap; compressing it to JPEG
-again is not, on a Pi already running a detector. So the feed is encoded on its own thread,
-from the latest sighting, and only while a browser is connected.
+**The camera's address is a reservation, not a setting.** On the Pi's wired segment, in the
+private dnsmasq NetworkManager runs for every shared connection, keyed on the camera's MAC, so
+a camera that is factory reset or replaced comes up where the retina looks for it with
+nothing set on it by hand.
 
 #### In the brain: one distance
 
@@ -731,8 +781,11 @@ even with `brain` hung.
 ### 3.8 The mouth
 
 The rig's sound: recordings played through a USB audio interface into two powered speakers, a
-channel each. Its own crates, `mouth/` and `mouth-build/`, which a rig crate depends on when
-its show has sound; `cortex` knows nothing of it (§2.3).
+channel each. Its own crates, `mouth/` and `mouth-build/`, which a rig crate depended on when
+its show had sound; `cortex` knew nothing of it (§2.3). It voiced the Halloween show and was
+removed after it; the code is on the `last-version-with-mouth` tag (`mouth/`, `mouth-build/`,
+and the brain's `sounds/`, `sounds.rs` and `mouth_show.rs`). It was the one part that linked
+ALSA, and so the reason the brain could be built only on Linux.
 
 **A unit, so a show without sound leaves it out.** On the rig crate's side the mouth is its
 recordings in `sounds/`, the sound table that names them and their gains, and one show file of
@@ -749,7 +802,8 @@ thing that sets it. A gain above 0 dB would clip, and fails the build. Overall l
 gain in software to disagree with them.
 
 **Every recording carries its envelope**: its loudness, one byte per DMX frame, at the frame
-rate the rig runs at. The samples are padded with silence to a whole number of frames, so the
+rate the rig runs at, which `cortex` handed the rig crate's build script through cargo's
+`links` metadata, so a change to the rate rebuilt every envelope. The samples are padded with silence to a whole number of frames, so the
 envelope's length is the recording's length in frames, and a look that follows a recording
 plays the envelope by frame index from the frame that cued it. Sound and light then share one
 clock, the frame count, with the sound a buffer behind the frame that asked for it.
@@ -790,13 +844,13 @@ its ALSA card name and USB identity in the mouth's config.
 ### 3.9 Memory
 
 The rig's long memory: everything published on the broker, kept in a time-series database on
-an external SSD, so a show can be read back afterwards — what the eyeball saw, what the show
+an external SSD, so a show can be read back afterwards — what the sensors saw, what the show
 made of it, how hot a Pi ran, when the uplink dropped — and the broker itself. It runs on a Pi
 of its own, `memory-pi`, configured entirely from `etc-memory-pi/` and deployed by
 `deploy-memory-pi.sh`.
 
 **A Pi of its own, because `claw-pi` has no room for it.** `claw-pi` is a 3B+ with 905 MB,
-swap on its SD card, and the eyeball's detector beside the frame loop; a database that flushes
+swap on its SD card, and the frame loop; a database that flushes
 and compacts in bursts has no place there. `memory-pi` is a Pi 3B, enough because Greptime
 publishes 64-bit ARM binaries and runs in a few hundred MB.
 
@@ -855,3 +909,149 @@ empty mount point on the SD card.
 **Power is cut, never shut down.** The cabinet has no off switch. Greptime writes its log to
 the SSD every ten seconds, so a power cut costs at most those seconds and what the recorder
 was holding: the recordings are read in days, not seconds.
+
+### 3.10 Wrist
+
+A crank on a stepper, driving a line to the sculpture; a wireless fixture on the universe; and,
+for now, the Bluetooth central that relays Dendrite (§3.11).
+
+**A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told
+to move, which is what lets the e-stop, a takeover and signal loss cover the crank with no
+rule of their own, and what lets an artist session turn it from a fader with no code. The
+brain writes parameters; Wrist renders the motion at its own rate — the ball's rule, for the
+ball's reason: forty frames a second over WiFi, arriving bunched, cannot carry step pulses.
+
+**Limp on stop and on loss, not held.** Every other fixture holds its last values when the
+signal goes, and the rig's e-stop holds the last frame for the same reason: a head that stays
+put is safe. A crank is not a head. Its output is a force on a structure through a line, and
+a crank held under power against a swinging sculpture is a tug-of-war with whatever is
+pressing the stop. So Wrist's no-function band is **Free**: the driver is disabled and the
+crank turns as the line pulls it, as if the motor had lost power. The same on losing the
+universe. Nothing turns under power while the stop is pressed or the signal is gone. This is
+the one fixture whose signal-loss behaviour is not "hold", and this paragraph is why.
+
+**Free means unhomed.** The motor's encoder is inside its driver and never reaches the
+firmware; while limp, the crank can be turned by the line, by a hand, by the sculpture
+settling, and Wrist cannot see it. So leaving Free, for any reason — boot, stop released,
+universe back, an alarm cleared — leaves Wrist **unhomed**, and unhomed it accepts only
+Hold, Home and Park. A Speed or Lock in the frame is refused and reported, never resumed:
+the rig's rule that a show resumes mid-stride on release is right for light and wrong for a
+crank, and this is where the difference is enforced, in the fixture, where the show cannot
+override it by not knowing about the stop.
+
+**Home and neutral.** A microswitch tripped once per revolution by a tab on the crank disc.
+Home is its rising edge, reached by turning slowly in the positive direction; a revolution
+and a half without it is an alarm. Neutral is home plus a configured offset, the one measured
+fact about a rig's build Wrist carries: the angle at which the crank arm stands perpendicular
+to the line with the sculpture at rest, measured at commissioning with the line attached and
+written into `wrist`'s config with the date, per §1.1's rule about measured facts. Park is
+"home if unhomed, then go to neutral". In Speed and Lock the switch doubles as the index:
+two revolutions without it, or an edge where it should not be, and Wrist goes Free and says
+why — lost steps on a closed-loop motor mean something mechanical.
+
+**Kick is a counter.** A one-frame band over multicast WiFi can be lost or arrive twice; a
+counter that moved is read exactly once (§1.4, the mouth's trigger rule). Wrist kicks on a
+change it sees while parked and homed, re-baselines the counter whenever it leaves Free, and
+abandons a kick the moment the frame changes mode.
+
+**Lock renders a phase it is sent.** In Lock, Wrist runs its own oscillator at the commanded
+frequency, advances a local copy of the sway phase between frames, nudges that copy toward
+each received value with a time constant of seconds, extrapolates it forward by a configured
+latency estimate for the round trip, and holds crank angle = phase + offset. The frame
+corrects; it does not command. That is what lets 25 ms frames with WiFi jitter carry a
+sub-degree phase at sway frequencies.
+
+**The relay, for now.** Wrist holds the Bluetooth connection to Dendrite and forwards every
+sample to the brain as OSC over UDP — §1.4's path for remote sensing — with the crank angle
+and Wrist's own clock stamped on it, and publishes the raw axes on MQTT for Memory. It never
+acts on a sample. The central is here because `claw-pi`'s radio shares the UART the DMX HAT
+needs and is disabled with it; the day the brain has a radio of its own, by a USB adapter or
+by moving to an ESP, the central moves there and nothing in the brain changes: it decodes OSC
+either way. Stamping the crank angle on each sample is why the brain can measure the lag
+between crank and sway, and the phase error of Lock, with no shared clock and no reading of
+telemetry: both numbers arrive in one message from the one place that knows both.
+
+**Hardware.** A Waveshare ESP32-S3-RS485-CAN in its DIN case: the motor's pulse and direction
+on its two outside GPIO, enable, alarm and the switch on its internal header, 3.3 V to 5 V
+through a 74HCT14. Its isolated RS-485 port is why it was chosen over a bare board: it makes
+Wrist a wired fixture the day the access point is the thing we do not want to depend on. WiFi
+and Bluetooth share its one radio by time-slicing; the step timer runs on the other core from
+both.
+
+**The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but
+an alarm line: no encoder, no in-position signal, no serial port. Its alarm latches, and
+clears only when the pulses stop or the power is cycled; cleared while pulses are still
+coming, the motor restarts at once, at whatever rate they arrive. So Wrist goes Free on an
+alarm and stops pulsing before it clears one, and comes out of it unhomed like any other
+Free.
+
+**Telemetry**, on its own connection with a will like the ball: `wrist/mode`, `wrist/homed`,
+`wrist/refused` (what the frame asked for that it would not do, and why), `wrist/alarm`,
+retained on change; `wrist/angle_deg` and `wrist/freq_mhz` at 10 Hz while not Free;
+`health/wrist`. And on Dendrite's behalf, §3.11.
+
+### 3.11 Dendrite
+
+The sway sensor: an accelerometer on the sculpture, streaming raw axes over Bluetooth LE to
+whichever device is its central, for the brain to make a `SwayState` of.
+
+**Raw axes, not a result.** The eyeball reduced landmarks to arm angles on the device so the
+brain would not depend on one model's joints (§3.6). Dendrite goes the other way, and for the
+same reason read forward: the reduction — axis choice, phase extraction, amplitude scaling —
+is what the PoC is iterating, and the brain is where an iteration is a build and a deploy
+rather than a firmware flash on a thing Velcroed to a sculpture. The brain picks the sway
+axis itself, from the principal axis of the oscillation, so the sensor's orientation on the
+structure does not matter and the perpendicular axis comes free as the whirl detector. When
+the reduction is boring it may move down; `SwayState` is the contract either way.
+
+**The wire.** One GATT service of ours, defined once in `dendrite-wire`: a sample
+characteristic notifying packed samples — a 16-bit wrapping counter and three 16-bit axes in
+milli-g, little-endian, as many per notification as the negotiated MTU allows and two at the
+default — and a health characteristic once a second: sample rate, battery millivolts, name.
+The counter is what makes a bunched or dropped notification harmless: the estimator
+interpolates by count, not by arrival. The samples come at the accelerometer's own 50 Hz data
+rate, so the rate is the sensor's, not a timer's. The relay turns each sample into one OSC
+message, `/dendrite/sample`, with the counter, the axes, the relay's crank angle in
+centidegrees (−1 when unhomed) and the relay's uptime in milliseconds; and `/dendrite/health`
+with the rate, battery and link state. The brain binds the access point's address on UDP
+9001; a sample older than half a second is stale.
+
+**Today's hardware.** A BBC micro:bit V2 on a battery pack: an nRF52833 with the accelerometer
+on board, which is the whole reason to use it. Its firmware is Rust on Embassy, built on the
+Mac, flashed with `probe-rs` over the board's own debug interface. It has no gyro; at the top
+of a swaying structure its accelerometer reads tilt and lateral acceleration mixed, both in
+phase with displacement, so phase and frequency come out clean and amplitude in degrees is
+off by the ω²A term. The rig's Dendrite is an ESP32-C3 with an IMU that has one, on the
+access point, sending the same OSC itself with no relay in between.
+
+**On MQTT.** Dendrite has no network identity of its own, so it has no `health/` topic; its
+relay publishes its subtree for it: `dendrite/x`, `dendrite/y`, `dendrite/z` one message per
+sample while Wrist is not Free (a few hundred messages a second, which the broker does not
+notice and Memory stores at half a gigabyte per session day), `dendrite/rate_hz`,
+`dendrite/battery_mv`, `dendrite/link` retained. The relay's will covers them.
+
+### 3.12 The inner ear
+
+The sway estimator, in the `innerear` crate: `no_std`, pure arithmetic, the same code on the Pi today
+and on an ESP tomorrow.
+
+**A PLL per frame.** From the incoming samples it keeps the principal axis of the recent
+oscillation, locks a second-order loop to the signal on that axis with a bandwidth of a tenth
+of the frequency it tracks, and hands the frame loop a `SwayState` through the latest-value
+seam: phase, frequency, amplitude on the axis, amplitude on the perpendicular, and a lock
+quality — the fraction of the signal's power the locked component explains, 0 to 1, with
+locked meaning above 0.7 for a second. The receiver thread runs it per sample at normal
+priority, below the frame loop, like every producer (§1.6).
+
+**Free decay.** Given a window of samples after a transient, it fits f₁ from the zero
+crossings and Q from the log-decrement of successive peaks, and reports how many cycles
+cleared the noise floor; fewer than three and it says the Q is not to be trusted rather than
+printing one. The window opens on a transient above a threshold — a pluck or a kick — not on
+a button press, so the hand that plucks is not also the hand that presses.
+
+**Lag and phase error** come from the stamped samples, not from telemetry: the crank angle
+that arrived on each sample against the phase the loop assigns to it gives the lag between
+crank and sway; in Lock, the phase the brain sent for that frame against the crank angle that
+came back gives the phase error. Both are published as the brain's own derived state,
+`brain/sway/lag_deg` and `brain/sway/phase_err_deg`, decimated with the rest of
+`brain/sway/*` to 5 Hz, which is what a dashboard can show and what the queue can carry.

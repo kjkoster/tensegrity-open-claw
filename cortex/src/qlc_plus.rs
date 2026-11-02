@@ -33,19 +33,6 @@ pub struct Capability {
     pub name: &'static str,
 }
 
-impl Capability {
-    /// The middle of the band — what to send when the band *is* the command, as a wheel
-    /// slot is. Fixtures round their own boundaries, and definitions are transcribed by
-    /// hand, so the edges are where the two disagree.
-    pub const fn center(&self) -> u8 {
-        self.min + (self.max - self.min) / 2
-    }
-}
-
-/// The preset marking a band over which a channel does nothing at all. Not "a safe value" —
-/// a dead band, which is a stronger claim and the only one a park can rely on.
-const NO_FUNCTION: &str = "NoFunction";
-
 /// One DMX channel of a patched fixture, as an absolute 0-based slot in the universe.
 ///
 /// The fixture's start address is already folded in at generation time, so nothing at run
@@ -53,14 +40,12 @@ const NO_FUNCTION: &str = "NoFunction";
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Channel {
     slot: u16,
-    capabilities: &'static [Capability],
 }
 
 impl Channel {
-    /// Only `build.rs`'s output calls this; both arguments are derived from the QLC+ patch
-    /// and the fixture definition it names.
-    pub const fn at(slot: u16, capabilities: &'static [Capability]) -> Self {
-        Self { slot, capabilities }
+    /// Only `build.rs`'s output calls this, with the slot derived from the QLC+ patch.
+    pub const fn at(slot: u16) -> Self {
+        Self { slot }
     }
 
     pub fn slot(self) -> usize {
@@ -86,36 +71,14 @@ impl Channel {
     pub fn set_unit(self, slots: &mut [u8], value: f64) {
         self.set(slots, (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8);
     }
-
-    /// Sends the channel to a band where it does nothing.
-    ///
-    /// For the channels a show must never let drift — auto programs, resets, anything that
-    /// makes a head self-propelled — asking the definition where "nothing" lives beats
-    /// writing a zero, because the zero is only right until a fixture arrives whose dead
-    /// band is elsewhere. The low end of the band rather than its middle, so what we send
-    /// matches what every unpatched slot on the wire already carries: a frame that loses
-    /// this fixture's block lands the channel in the same place we were holding it.
-    ///
-    /// A channel whose definition declares no dead band falls back to zero, which is that
-    /// same wire default and is what the fixture sees before the daemon starts.
-    pub fn park(self, slots: &mut [u8]) {
-        let value = self
-            .capabilities
-            .iter()
-            .find(|capability| capability.preset == Some(NO_FUNCTION))
-            .map_or(0, |capability| capability.min);
-        self.set(slots, value);
-    }
 }
 
 /// A coarse channel and the fine channel that extends it, written as one value.
 ///
 /// Two bytes are one number to everything above the wire, and splitting them at the call
 /// site is how a 16-bit fixture ends up driven at 8 bits: the coarse write alone is valid
-/// code that compiles, runs, and steps visibly. There is no coarse-only form of this type —
-/// a mode whose definition omits its fine channels yields a plain [`Channel`] and does not
-/// implement [`Position`], so the fixture that cannot be driven smoothly fails to build
-/// rather than moving in stairs nobody notices until the rig is lit.
+/// code that compiles, runs, and steps visibly. There is no coarse-only form of this type: a
+/// mode whose definition omits its fine channels yields a plain [`Channel`].
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Channel16 {
     pub coarse: Channel,
@@ -130,24 +93,6 @@ impl Channel16 {
     pub fn set(self, slots: &mut [u8], value: u16) {
         self.coarse.set(slots, (value >> 8) as u8);
         self.fine.set(slots, value as u8);
-    }
-
-    /// Writes a 0..1 value across the pair.
-    pub fn set_unit(self, slots: &mut [u8], value: f64) {
-        self.set(slots, (value.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16);
-    }
-
-    pub fn get(self, slots: &[u8]) -> u16 {
-        ((self.coarse.get(slots) as u16) << 8) | self.fine.get(slots) as u16
-    }
-
-    /// Reads the pair back as a 0..1 value.
-    ///
-    /// Round-tripping through [`Self::set_unit`] returns the value to within half a step of
-    /// the pair — the rounding on the way out is the only loss — which is some thousandths of
-    /// a degree on a head, far below anything its mechanism will place.
-    pub fn get_unit(self, slots: &[u8]) -> f64 {
-        self.get(slots) as f64 / 65535.0
     }
 }
 
@@ -212,22 +157,4 @@ pub trait White {
 /// A fixture with a master dimmer, so intensity need not be folded into the colours.
 pub trait Dimmer {
     fn dimmer(&self) -> Channel;
-}
-
-/// A fixture that can be aimed: 16-bit pan and tilt, over a range its definition states.
-///
-/// The ranges are associated constants rather than numbers in the show because they are the
-/// difference between a rental and this head. Everything above this trait speaks degrees, so
-/// a wider head runs the same code at the same apparent speed instead of compiling happily
-/// and moving half as fast.
-///
-/// Degrees are unreferenced: zero is wherever the fixture's own zero falls, which depends on
-/// how the head is clamped and how the stand sits that night. Nothing here needs an absolute
-/// origin; the recorded points are the reference, and they are recorded per setup.
-pub trait Position {
-    const PAN_RANGE_DEG: f64;
-    const TILT_RANGE_DEG: f64;
-
-    fn pan(&self) -> Channel16;
-    fn tilt(&self) -> Channel16;
 }

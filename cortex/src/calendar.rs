@@ -73,13 +73,13 @@ impl Calendar {
             );
         }
         let now = now();
-        let remaining: Vec<&Show> = self
-            .shows
-            .iter()
-            .filter(|show| now < show.span.stop.unix as f64)
-            .collect();
-        eprintln!("show: {} of {} shows to come", remaining.len(), self.shows.len());
-        for show in remaining {
+        let remaining = || {
+            self.shows
+                .iter()
+                .filter(move |show| now < show.span.stop.unix as f64)
+        };
+        eprintln!("show: {} of {} shows to come", remaining().count(), self.shows.len());
+        for show in remaining() {
             eprintln!(
                 "show:   {} → {}",
                 show.span.start.local, show.span.stop.local

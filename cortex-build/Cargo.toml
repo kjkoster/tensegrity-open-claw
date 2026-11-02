@@ -5,8 +5,8 @@ rust-version = "1.99"
 version      = "0.1.0"
 
 # The QLC+ ingest and the show calendar. Its own crate rather than a module of cortex because
-# a build script may use only its build-dependencies, and putting ALSA, the executor and an
-# FFT onto the host build graph to read a patch file would be a poor trade.
+# a build script may use only its build-dependencies, and putting the executor and the serial
+# port onto the host build graph to read a patch file would be a poor trade.
 #
 # roxmltree is a read-only DOM with no dependencies of its own, and it reports local tag
 # names with the namespace already stripped — which is what keeps QLC+'s default XML

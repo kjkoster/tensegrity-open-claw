@@ -28,8 +28,7 @@ is the inventory of the hardware we own, this setup's machines and cabinet among
 
 # The Pi controller (`claw-pi`)
 
-`brain` is Linux-only (links ALSA) and is **built on the Pi**, never cross-compiled from
-macOS.
+`brain` is Linux-only (GPIO and the serial device) and is **built on the Pi**.
 
 ## Access
 
@@ -51,7 +50,7 @@ macOS.
 
   | Interface | Address | Purpose |
   |---|---|---|
-  | `eth0` | `10.0.1.1/24`, from `etc/claw-eth0.nmconnection`; DHCP for laptops from `.100`–`.199` | the wired segment: a network camera, and SSH / deploy from a laptop |
+  | `eth0` | `10.0.1.1/24`, from `etc/claw-eth0.nmconnection`; DHCP for laptops from `.100`–`.199` | the wired segment: SSH / deploy from a laptop |
   | `wlan0` | `10.0.10.1/24`, from `etc/claw-ap.nmconnection`; DHCP for laptops from `.100`–`.199` | the WiFi AP |
   | `wg0` | `10.8.0.3/32` | WireGuard, for remote access over 4G |
   | `wwan0` | DHCP | 4G uplink |
@@ -69,15 +68,12 @@ macOS.
   point and its clients cannot disagree.
 - **The access point** is `etc/claw-ap.nmconnection`, in NetworkManager's shared mode: the
   Pi at `10.0.10.1`, DHCP for laptops from `.100`–`.199`, DNS relayed, and every client routed
-  out over 4G. Everything on it that must be found by address sets its own, below `.100`. Every
-  deploy installs the profile and brings it up, which drops every WiFi client for a few
-  seconds.
-- The **Ethernet port** is the wired segment: a network camera through its PoE injector, and
-  a laptop for SSH, with an Ethernet hub in the cabinet when both need it. It is
+  out over 4G. Everything on it that must be found by address sets its own, below `.100`. A
+  deploy that changes the profile installs it and brings it up, which drops every WiFi client
+  for a few seconds; one that does not leaves the access point alone.
+- The **Ethernet port** is the wired segment, for a laptop. It is
   `etc/claw-eth0.nmconnection`, in shared mode like the access point: the Pi at `10.0.1.1`,
-  DHCP for a laptop from `.100`–`.199`, routed out over 4G. The camera's address, `10.0.1.3`,
-  is a reservation for its MAC in `etc/claw-eth0.dnsmasq.conf`, which the deploy installs for
-  NetworkManager's own DHCP server; the file lists every fixed address on the segment.
+  DHCP for a laptop from `.100`–`.199`, routed out over 4G.
 
 ### 4G uplink
 
@@ -134,37 +130,8 @@ are in [`SHOW.md`](SHOW.md).
 
 | Device | Interface | Notes |
 |---|---|---|
-| The mouth (a USB audio interface) | USB on the hub (`plughw:CARD=io2,DEV=0`) | Any class-compliant interface; today an Alesis io\|2, only because it was the cheapest used one to be had. ALSA card name (confirm with `aplay -L`) and VID:PID (confirm with `lsusb`, today `0x13b2:0x0008`) are set in `mouth/src/config.rs`. Reports under `mouth/` through the brain's connection; see [The mouth's and the eyeball's topics](#the-mouths-and-the-eyeballs-topics). |
 | Zihatec RS422/485 HAT Rev D | 40-pin header + hardware UART | Wired DMX-512 output. |
 | Cabinet door (the face) | GPIO | E-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM — see [Face lamps](#face-lamps-hardware-pwm). The lamps are patched as the `Face` fixture and follow the frame like any other. Reports under `face/` through the brain's connection. |
-| The retina (an Axis network camera) | `eth0`, through its PoE injector | At `10.0.1.3`, reserved for it by the Pi's DHCP server. The retina owns the camera: its user (`root`), password (`pass`, the factory default) and settings are in `retina/src/config.rs`, the retina sets them over VAPIX on every connect, and it reads the picture the eyeball asks for. Reports under `retina/` through the brain's connection. The eyeball only takes the retina's frames: it runs the detector and reports under `eyeball/`. The brain draws what it saw and serves that as the annotated feed at **`http://10.8.0.3:8080/`** from the Mac — the WireGuard address alone, never the wildcard, which would show the camera's picture to the 4G uplink's public address. See [The mouth's and the eyeball's topics](#the-mouths-and-the-eyeballs-topics). |
-| Ethernet hub | `eth0`, own power supply | Only when a laptop needs the wired segment beside the camera. |
-
-The retina and the eyeball run inside the brain, at normal priority below its real-time
-threads, so a slow camera or a slow model costs the eyeball frames and never a DMX one; why,
-and what it costs, is in [`DESIGN.md`](DESIGN.md) §1.6.
-
-### The mouth's and the eyeball's topics
-
-Both live and die with the brain, so `health/brain` covers them and they have no `health/`
-topic of their own.
-
-| topic | |
-|---|---|
-| `mouth/state` | `playing`, `muted` by the show, or `down` when the interface failed |
-| `mouth/error` | why the interface is down, present only while it is |
-| `mouth/xruns` | buffer underruns since the brain started: make the buffer bigger or the Pi quieter |
-| `mouth/usb/vid_pid`, `mouth/usb/bus`, `mouth/usb/address`, `mouth/usb/speed` | the interface as the kernel sees it; a `full`-speed enumeration of a high-speed device is a bad cable or hub port |
-| `mouth/usb/sysfs`, `mouth/usb/serial`, `mouth/usb/product` | its `/sys` path and identity, for reading `lsusb -t` and the journal against |
-| `mouth/alsa/card`, `mouth/alsa/rate_hz`, `mouth/alsa/period`, `mouth/alsa/buffer` | what the stream was actually opened at, which is not always what was asked for |
-| `retina/camera` | `ok`, or why not |
-| `retina/fps` | frames received a second |
-| `eyeball/fps` | frames detected a second; below `retina/fps` by the frames dropped for the newest |
-| `eyeball/distance` | what it saw, in the space's own unit, or `tombstone` |
-| `eyeball/people` | boxes found; telemetry only, the show never sees a count |
-
-The `usb/` topics changing under a running brain are a re-enumeration: a flaky hub port, not a
-software fault.
 
 ## Power
 
@@ -289,23 +256,18 @@ From the Mac at the repo root:
 ```
 
 Rsyncs to `claw-pi:tensegrity-open-claw/`, then runs `etc/remote-deploy.sh` there, which builds
-`brain` natively, installs it as `/usr/local/bin/brain` along with the systemd unit, and
-restarts the daemon.
+`brain` natively and installs it as `/usr/local/bin/brain` along with the systemd unit. Every
+installed file is compared with what is already on the Pi, and a service is restarted only
+when one of its files changed; the deploy says which were left alone.
 
-The cargo workspace is six crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
+The cargo workspace is four crates; what goes in each is in [`DESIGN.md`](DESIGN.md) §2.3.
 
 The deploy ships **only what the Pi builds from and installs** — the crates, `claw.qxw`,
 `fixtures/`, `stem/` and `etc/`. The list is written out in `deploy.sh` rather
 than filtered by exclusions, so adding something is a decision; the design documents, the
 reference PDFs and the git history stay on the Mac. The
-workspace goes because the build compiles **its fixture patch and its presets** in — so
-saving in QLC+ and deploying is all it takes to get a re-aimed preset onto the rig. The
-build compiles the recordings in too, as it does the eyeball's model, and both travel inside
-their crates: the recordings in `brain/sounds/`, as they were found, since the build decodes
-them itself.
-
-> The Pi built from `~/brain` before the split. That directory is dead; delete it once, by
-> hand — the deploy leaves it alone rather than removing things on the Pi on its own.
+workspace goes because the build compiles **its fixture patch** in — so saving in QLC+ and
+deploying is all it takes to get a repatched fixture onto the rig.
 
 ### What the build does with the workspace
 
@@ -316,32 +278,17 @@ rig.
 **What it reads.** Two sources of truth, neither of them Rust. The workspace says *where*
 fixtures sit; the `.qxf` definitions in `fixtures/` say *what their channels mean*. The
 ingest reads both, resolves each patched fixture against its definition's mode, and generates
-a `patch` module with a struct per fixture — a named field per channel — plus a `presets`
-module, into the rig crate that asked for them. The build reads every definition in `fixtures/` and
-resolves only what the patch names.
+a `patch` module with a struct per fixture — a named field per channel — into the rig crate
+that asked for it. The build reads every definition in `fixtures/` and resolves only what the
+patch names. Scenes and other functions in the workspace are QLC+'s own, for a takeover, and
+the build does not read them.
 
 **Why it happens at build time.** Ingesting rather than committing a generated file means
 there is no stale copy to go stale. `cargo` is told to watch the workspace, so saving in QLC+
 is enough to make the next build pick the change up.
 
-**How presets get resolved.** A preset is a QLC+ scene holding where every head points. QLC+
-stores scene values *fixture-relative*:
-
-```
-<FixtureVal ID="3">0,255,1,0</FixtureVal>
-```
-
-means "on the fixture whose QLC+ ID is 3, set its channel 0 to 255 and channel 1 to 0". Those
-numbers are meaningless without the `<Fixture>` patch and the definitions — which is exactly
-why the patch is authoritative. The ingest resolves them through it into a pan and a tilt in
-degrees per head, through each head's travel range, so `presets::LOOK_AT_BALL.head_red_leg`
-is a pose. Note `<Address>` in the file is **0-based**: DMX address 1 on the wire is
+Note `<Address>` in the file is **0-based**: DMX address 1 on the wire is
 `<Address>0</Address>`.
-
-**The presets are a prescribed set.** `brain/presets.rs` lists the names the show is written
-against — this show's are in [`SHOW.md`](SHOW.md) — and the workspace's scenes must be exactly
-that set. A name becomes its constant the way a fixture name does: "Look at ball" →
-`LOOK_AT_BALL`.
 
 **Why channels are named, not numbered.** Because they become *named fields* rather than
 offsets, drift is caught by the compiler in every direction:
@@ -361,14 +308,6 @@ offsets, drift is caught by the compiler in every direction:
 | remove the E1.31 output from the first universe | fails — the universe, the port and the address come from it |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
 | patch a fixture whose shutter, Effect or Maintenance channel marks no off band | fails, naming the band the e-stop needs marked |
-| add a scene that is not in `brain/presets.rs` | fails, naming it — and the preset it is most likely a typo of |
-| delete or rename a preset's scene | fails, naming the preset that has no scene |
-| record a preset without Pan, Pan Fine, Tilt or Tilt Fine for some head | fails, naming the preset, the head and the channel — a missing pan would be 0°, the end of the head's travel |
-| record a preset with any other channel ticked | fails, naming the preset, fixture and channel — untick it in the Scene Editor |
-| give two scenes the same name | fails; QLC+ does not enforce uniqueness, the daemon needs it |
-| list two names in `brain/presets.rs` that yield the same Rust constant | fails |
-| list a name in `brain/presets.rs` that yields `SUMMARIES` | fails — the presets module uses that name for its log lines |
-| remove a name from `brain/presets.rs` the show still uses | its constant is gone → the use site stops compiling |
 
 There is no drift checker because none is needed. A fixture with no red simply has no `red`
 field, so the engine can only be wired to a fixture that genuinely has one.
@@ -377,19 +316,13 @@ field, so the engine can only be wired to a fixture that genuinely has one.
 the daemon and has no QLC+ library to fall back on, so a missing `.qxf` fails the build
 outright, with a message naming the manufacturer and model.
 
-**Confirming it landed.** The startup log names the patch and the presets the running binary
-was built from:
+**Confirming it landed.** The startup log names the patch the running binary was built from:
 
 ```
 brain: 8 fixtures
 brain:   Wash red leg @ 11–14 — CLF Yara, 4 Channel
 brain: 32 e-stop overrides
-brain: 4 presets
-brain:   Look at ball — Head red leg 270.0°/119.5°, Head green leg 270.0°/119.5°, Head blue leg 270.0°/119.5°
 ```
-
-A preset still at its old pose after you re-aimed and deployed means the build never saw
-the save.
 
 Check the slot spans there after any repatch — that log, not the workspace, is what the
 running binary actually believes.
@@ -474,8 +407,6 @@ plus strobe, programs, resets and rotation, which Blackout leaves running.
   it is released: after a restart the brain does not know what the
   fixtures were doing, and silence leaves them as they were, where a held frame would be a
   guess.
-- **The sound stops too.** The mouth is muted while the e-stop is pressed, at boot as well.
-  A console takeover does not mute it: sound is not part of the universe.
 - **The show does not know.** It runs on underneath the stop, so `brain/show` keeps
   reporting the show state it is in. The rig state is `brain/rig`; the button itself
   is `face/estop`.
@@ -642,8 +573,8 @@ off the Pi.
 
 # QLC+ on the Mac
 
-QLC+ does two jobs here and nothing else: taking the rig over by hand, and aiming the heads'
-presets. It is stock — no plugins, no patches.
+QLC+ does two jobs here and nothing else: holding the patch, and taking the rig over by hand.
+It is stock — no plugins, no patches.
 
 The workspace is [`claw.qxw`](claw.qxw), and it is the **source of truth** for what the rig
 has patched where. `cortex-build` reads
@@ -698,33 +629,12 @@ Four behaviours that are correct but surprise you the first time:
   releases instantly, but QLC+ does not send it, so the timeout does the work.
 - **The e-stop beats a takeover.** While it is pressed the rig holds what it last showed,
   dark and still, whatever you send. Release it and your universe goes out again at once,
-  heads moving to wherever you left them. A motor you run is stopped by the e-stop but
+  fixtures moving to wherever you left them. A motor you run is stopped by the e-stop but
   restarts on release if its fader is still up: pull it down before you release.
 
 Takeover needs priority **strictly above 100**, which is what the daemon transmits at. That
 is deliberate: every sACN source ships defaulted to 100, so a laptop joining the network
 with a live universe cannot seize the rig by accident.
-
-## Aiming a preset
-
-The workspace holds exactly the presets `brain/presets.rs` names, and no other scenes.
-Each holds **only Pan, Pan Fine, Tilt and Tilt Fine, for every head** — the build fails on
-anything else, so the dimmer you raised to see the beam must not be saved into it. The
-placeholders in the workspace are rough; aim every one on the rig.
-
-1. Take the rig over as above, so you are aiming real beams rather than guessing.
-2. **Function Manager**, open the preset in the **Scene Editor**.
-3. Enable its **live-output toggle**. In Simple Desk, raise each head's dimmer so you can see
-   where it points — that dimmer is not part of the scene, and stays out of it.
-4. Move the heads in the Scene Editor. It updates the Function in place.
-5. **File → Save**, then deploy. The startup log lists the presets with every head's pan
-   and tilt; check the one you re-aimed has moved.
-
-Re-aim in the Scene Editor rather than dumping from Simple Desk. A **DMX dump always creates
-a new scene, never updates one**, and it carries every channel you touched: the build then
-fails on a scene that is not a preset, or on a preset with a dimmer in it. If a preset has to
-be recorded from scratch, name it exactly as `brain/presets.rs` has it and untick every
-channel but the four position channels of each head.
 
 Simple Desk fader positions are runtime-only. QLC+ does not persist them, so a look that
 exists only on the desk is gone on reload. Persistent looks are Scenes.

@@ -5,6 +5,6 @@ rust-version = "1.99"
 version      = "0.1.0"
 
 # Stem as the Rust programs see it: the rig's MQTT conventions and the packets they travel in,
-# shared by the brain and any fixture firmware. No dependencies, and no std: firmware builds it
-# for its microcontroller with only `alloc`.
+# shared by the brain and any fixture firmware. No dependencies, no std and no allocator, so
+# firmware builds it for any microcontroller.
 [dependencies]

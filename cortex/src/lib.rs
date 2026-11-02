@@ -10,13 +10,9 @@ pub mod calendar;
 pub mod clock;
 pub mod config;
 pub mod dmx;
-pub mod draw;
-pub mod envelope;
 pub mod estop;
 pub mod latest;
-pub mod moving_head;
 pub mod qlc_plus;
-pub mod rate;
 pub mod sched;
 pub mod telemetry;
 
@@ -58,10 +54,6 @@ pub struct Rig {
     /// The generated patch, as plain data, so the startup log can name what this binary was
     /// built against — and so the frame width can be derived from it.
     pub patch: &'static [PatchEntry],
-    /// The generated presets, likewise, one line each: its name and every head's pose. Lines
-    /// rather than the presets themselves, because a preset's shape is the rig's own — its
-    /// fields are the rig's heads.
-    pub presets: &'static [&'static str],
     /// The generated stop mask: what the e-stop overrides in the held frame.
     pub stop: &'static [estop::StopOverride],
     /// Whether the e-stop is pressed, asked once per frame. The stop acts on the frame that
@@ -80,10 +72,9 @@ pub struct Rig {
     /// rig's show and everything here can publish under `brain/`: the show is built before
     /// the brain comes up, and one service cannot have two clients.
     pub telemetry: telemetry::Publisher,
-    /// The goodbyes of every telemetry client the rig spawned, the brain's included, said by
-    /// the frame loop on shutdown. The rig spawns those clients itself, but only the brain
-    /// knows when it is stopping.
-    pub farewells: Vec<telemetry::Farewell>,
+    /// The goodbye of the brain's telemetry client, said by the frame loop on shutdown. The
+    /// rig spawns the client itself, but only the brain knows when it is stopping.
+    pub farewell: telemetry::Farewell,
 }
 
 /// Slots the sACN frame spans: 1 through the last slot any patched fixture occupies.
@@ -144,14 +135,14 @@ fn installed_ram_kb() -> u64 {
 
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
 ///
-/// The executor lives here rather than in the rig, so a rig binary is its patch, its presets
-/// and its show, and nothing else — `fn main` is one call.
+/// The executor lives here rather than in the rig, so a rig binary is its patch and its show,
+/// and nothing else — `fn main` is one call.
 pub fn run(mut rig: Rig) -> ! {
     // This thread becomes the frame loop. The clock is read straight after pinning it, because
     // the first read starts embassy-time's timer thread, which wakes the frame loop: started
     // here, it inherits the frame loop's core and priority. Every task that reads the clock
     // runs on the executor below, so none can start it earlier.
-    sched::realtime(config::FRAME_LOOP_CORES);
+    sched::realtime();
     embassy_time::Instant::now();
 
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
@@ -174,9 +165,9 @@ pub fn run(mut rig: Rig) -> ! {
         sacn.universe, sacn.port
     );
 
-    // The patch and presets the build compiled in. Logged so a running binary can be checked
-    // against the workspace that produced it: a fixture at the wrong address, or a preset still
-    // at its old pose, means the build never saw the save.
+    // The patch the build compiled in. Logged so a running binary can be checked against the
+    // workspace that produced it: a fixture at the wrong address means the build never saw
+    // the save.
     eprintln!("{name}: {} fixtures", rig.patch.len());
     for fixture in rig.patch {
         // The slot span, not the channel count: the mode name already carries the count,
@@ -190,10 +181,6 @@ pub fn run(mut rig: Rig) -> ! {
         );
     }
     eprintln!("{name}: {} e-stop overrides", rig.stop.len());
-    eprintln!("{name}: {} presets", rig.presets.len());
-    for preset in rig.presets {
-        eprintln!("{name}:   {preset}");
-    }
 
     // Where the brain sits on the universe, under `dmx/brain/`, and what it runs on, under
     // `sys/brain/`, retained, so a subscriber arriving later still gets them.

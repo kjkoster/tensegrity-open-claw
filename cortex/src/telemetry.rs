@@ -5,8 +5,8 @@
 //! end of that, and the reason it cannot be delegated to Stem: only the process itself can
 //! hand the broker a will, and only a will distinguishes "stopped" from "died".
 //!
-//! One process holds one client. A part that lives inside the brain — the face, the mouth —
-//! lives and dies with it, so a will of its own would only repeat `health/brain`. It publishes
+//! One process holds one client. A part that lives inside the brain, like the face, lives and
+//! dies with it, so a will of its own would only repeat `health/brain`. It publishes
 //! its own subtree, `face/…`, through the brain's connection, with a [`Publisher::part`], so
 //! the tree still reads the way the rig is built rather than the way it is compiled.
 //!
@@ -99,13 +99,13 @@ impl Publisher {
 
     /// Queues one fact about what this client runs on, retained, under `sys/<owner>/`.
     pub fn publish_sys(&self, leaf: impl Into<String>, payload: impl Into<String>) {
-        self.send_rooted("sys", leaf.into(), payload.into());
+        self.send_rooted(stem::SYS, leaf.into(), payload.into());
     }
 
     /// Queues one fact about where this client or part sits on the universe, retained, under
     /// `dmx/<owner>/`.
     pub fn publish_dmx(&self, leaf: impl Into<String>, payload: impl Into<String>) {
-        self.send_rooted("dmx", leaf.into(), payload.into());
+        self.send_rooted(stem::DMX, leaf.into(), payload.into());
     }
 
     fn send_rooted(&self, root: &'static str, leaf: String, payload: String) {
@@ -161,21 +161,22 @@ impl Farewell {
         }
         false
     }
-}
 
-/// Says every goodbye and waits, briefly, for all of them to actually leave.
-///
-/// Waiting is the point. The caller is about to `exit`, and a goodbye still sitting in a
-/// channel is a goodbye the broker never hears — at which point the will fires and an orderly
-/// stop is recorded as a crash. All of them share one deadline, so a second client does not
-/// double the shutdown, and it is bounded, because a wedged broker must not be able to hold up
-/// a shutdown: past it the will fires and `gone` is, at worst, pessimistic about a rig that
-/// really is going away.
-pub fn farewell(farewells: &[Farewell]) {
-    let expires = Instant::now() + Duration::from_millis(cfg::MQTT_FAREWELL_MS);
-    let asked: Vec<&Farewell> = farewells.iter().filter(|f| f.ask(expires)).collect();
-    while !asked.iter().all(|f| f.said.load(Ordering::Acquire)) && Instant::now() < expires {
-        thread::sleep(Duration::from_millis(2));
+    /// Says the goodbye and waits, briefly, for it to actually leave.
+    ///
+    /// Waiting is the point. The caller is about to `exit`, and a goodbye still sitting in a
+    /// channel is a goodbye the broker never hears — at which point the will fires and an
+    /// orderly stop is recorded as a crash. The wait is bounded, because a wedged broker must
+    /// not be able to hold up a shutdown: past it the will fires and `gone` is, at worst,
+    /// pessimistic about a rig that really is going away.
+    pub fn say(&self) {
+        let expires = Instant::now() + Duration::from_millis(cfg::MQTT_FAREWELL_MS);
+        if !self.ask(expires) {
+            return;
+        }
+        while !self.said.load(Ordering::Acquire) && Instant::now() < expires {
+            thread::sleep(Duration::from_millis(2));
+        }
     }
 }
 
@@ -240,17 +241,24 @@ fn session(
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(Duration::from_secs(cfg::MQTT_WRITE_TIMEOUT_S)))?;
 
-    stream.write_all(&stem::connect(service))?;
+    let mut buffer = [0u8; cfg::MQTT_PACKET_MAX];
+    let len = stem::connect(&mut buffer, service).expect("a CONNECT fits the packet buffer");
+    stream.write_all(&buffer[..len])?;
     read_connack(&mut stream)?;
     eprintln!("telemetry: {service}: connected to {address}");
     // Only once the broker has accepted us: a broker that keeps refusing must keep backing off,
     // and one that was simply restarted must not be waited on as if it had.
     *backoff_s = 1;
 
-    let health = stem::health_topic(service);
-    stream.write_all(&stem::publish(&health, stem::CONNECTED, true))?;
+    let health = [stem::HEALTH, service];
+    let len = stem::publish(&mut buffer, &health, stem::CONNECTED, true)
+        .expect("a health message fits the packet buffer");
+    stream.write_all(&buffer[..len])?;
+    // Only messages that fitted were retained, so each fits again.
     for (topic, payload) in retained.iter() {
-        stream.write_all(&stem::publish(topic, payload, true))?;
+        let len = stem::publish(&mut buffer, &[topic], payload, true)
+            .expect("a retained message fitted when it was first sent");
+        stream.write_all(&buffer[..len])?;
     }
 
     // Half the keepalive: the broker drops a client at 1.5× the interval it was given, so
@@ -269,23 +277,33 @@ fn session(
                     Scope::Service => format!("{service}/{}", message.topic),
                     Scope::Part(part) => format!("{part}/{}", message.topic),
                     Scope::Rooted { root, owner } => {
-                        stem::rooted_topic(root, owner.unwrap_or(service), &message.topic)
+                        format!("{root}/{}/{}", owner.unwrap_or(service), message.topic)
                     }
                 };
-                let packet = stem::publish(&topic, &message.payload, message.retain);
+                let Ok(len) =
+                    stem::publish(&mut buffer, &[&topic], &message.payload, message.retain)
+                else {
+                    eprintln!(
+                        "telemetry: {service}: {topic} does not fit {} bytes, dropped",
+                        cfg::MQTT_PACKET_MAX
+                    );
+                    continue;
+                };
                 // Recorded before the write, so a value whose write is what failed is the one
                 // the next connect replays.
                 if message.retain {
                     retained.insert(topic, message.payload);
                 }
-                stream.write_all(&packet)?;
+                stream.write_all(&buffer[..len])?;
             }
             Ok(Command::Farewell) => {
                 // On this connection, and followed by a clean DISCONNECT. A goodbye sent over
                 // a second connection would be overwritten moments later by the will firing
                 // on this one — the broker publishes it whenever a connection drops without a
                 // DISCONNECT, and an exiting process drops all of them.
-                stream.write_all(&stem::publish(&health, stem::DISCONNECTED, true))?;
+                let len = stem::publish(&mut buffer, &health, stem::DISCONNECTED, true)
+                    .expect("a health message fits the packet buffer");
+                stream.write_all(&buffer[..len])?;
                 stream.write_all(&stem::DISCONNECT)?;
                 stream.flush()?;
                 said.store(true, Ordering::Release);

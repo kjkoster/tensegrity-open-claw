@@ -24,9 +24,7 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # so adding something is a decision instead of an oversight — the design documents, the
 # reference PDFs, the editor config and the git history all stay on the Mac.
 #
-#   the crates       the members of the cargo workspace; the brain's recordings travel inside
-#                    it, in `brain/sounds/`, and the eyeball's model in `eyeball/models/`, as
-#                    the build compiles them in
+#   the crates       the members of the cargo workspace
 #   Cargo.lock       the versions in git, which cover every target, so the Pi builds exactly
 #                    what was checked rather than resolving again against its own crate index;
 #                    they change only with a deliberate `cargo update`
@@ -46,7 +44,7 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 # resolves it against `fixtures/`, and a missing definition fails the build deliberately,
 # because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
 # QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build brain eyeball mouth mouth-build retina fixtures stem etc)
+DIRECTORIES=(cortex cortex-build brain fixtures stem etc)
 FILES=(Cargo.toml Cargo.lock claw.qxw)
 
 step "rsync sources to $PI:$PI_DIR"
