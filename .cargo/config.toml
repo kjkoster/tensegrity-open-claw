@@ -1,0 +1,8 @@
+# The brain is built on the Mac for the Pi: 64-bit ARM Linux, linked statically against musl,
+# so the binary carries its own C library and runs on whatever Raspberry Pi OS the Pi has.
+# rust-lld ships with Rust, so the cross-build needs no toolchain beyond `rustup target add`.
+#
+# The target is named by deploy.sh rather than made the default here, so a crate's unit tests
+# still run on the Mac.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

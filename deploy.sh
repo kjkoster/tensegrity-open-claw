@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — rsync the sources to claw-pi, then run remote-deploy.sh there to build the
-#             brain natively and restart it.
+# deploy.sh — build the brain here for claw-pi, rsync it and what the Pi runs beside it, then
+#             run remote-deploy.sh there to install it and restart what changed.
 #
 # Run from the repo root on the Mac (riverrain):  ./deploy.sh
 # Stops at the first error so you can see how far it got.
@@ -12,57 +12,42 @@ cd "$(dirname "$0")"
 PI="claw-pi"               # ssh alias (key-based)
 PI_DIR="tensegrity-open-claw"
 
+# The Pi's target: 64-bit ARM Linux, linked statically against musl, so the binary carries its
+# own C library. `.cargo/config.toml` names the linker; `rustup target add` it once per Mac.
+TARGET="aarch64-unknown-linux-musl"
+
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
-# --- Ship sources to the Pi -----------------------------------------------
-# The Pi's clock used to be pushed from here, because cargo decides freshness by mtime and
-# a lagging Pi clock makes every rsynced source look newer than every build artifact. It
-# now runs systemd-timesyncd against the Debian pool (`timedatectl timesync-status`), so
-# both ends already agree and the push was only fighting timesyncd for the clock.
+# --- Build the brain -------------------------------------------------------
+# Here rather than on the Pi: the Mac builds in seconds what the Pi took minutes over, and the
+# Pi then needs no toolchain, no crate index and no sources. The build reads `claw.qxw` and
+# `fixtures/` and resolves the show table, so "save in QLC+, deploy" still gets an edited
+# patch onto the rig. First, so a build that fails leaves the Pi untouched.
+step "build brain for $TARGET"
+cargo build --release --target "$TARGET"
 
-# What the Pi needs in order to build and run, and nothing else. Named rather than excluded,
-# so adding something is a decision instead of an oversight — the design documents, the
-# reference PDFs, the editor config and the git history all stay on the Mac.
+# --- Ship to the Pi --------------------------------------------------------
+# What the Pi runs, and nothing else. Named rather than excluded, so adding something is a
+# decision instead of an oversight — the sources, the design documents, the reference PDFs
+# and the git history all stay on the Mac.
 #
-#   the crates       the members of the cargo workspace
-#   Cargo.lock       the versions in git, which cover every target, so the Pi builds exactly
-#                    what was checked rather than resolving again against its own crate index;
-#                    they change only with a deliberate `cargo update`
-#   claw.qxw        the claw's patch (what is where) and its presets
-#   fixtures/*.qxf   the definitions (what each fixture's channels mean)
-#   stem/           Stem's daemon and broker configuration, and the `stem` crate, the Rust
-#                    programs' half of its conventions
+#   brain/          the binary and its systemd unit
+#   stem/           Stem's daemon, the Python modules every health daemon shares, and their
+#                    unit and requirements; not the `stem` crate, which is built in here
 #   etc/            what the deploy installs onto the Pi that belongs to no daemon: the
-#                    access point's and the wired segment's configuration, the wired
-#                    segment's DHCP reservations, the uplink watchdog (its script, its
-#                    unit and its timer), the boot configuration, and remote-deploy.sh,
-#                    which does the installing
+#                    access point's and the wired segment's configuration, the uplink
+#                    watchdog (its script, its unit and its timer), the boot configuration,
+#                    and remote-deploy.sh, which does the installing
 #
-# A daemon's systemd unit travels inside that daemon's directory.
-#
-# The workspace and the definitions are not optional: the build reads `claw.qxw` and
-# resolves it against `fixtures/`, and a missing definition fails the build deliberately,
-# because the Pi has no QLC+ library to fall back on. Shipping them is what makes "save in
-# QLC+, deploy" enough to get an edited scene, address or mode onto the rig.
-DIRECTORIES=(cortex cortex-build brain fixtures stem etc)
-FILES=(Cargo.toml Cargo.lock claw.qxw)
-
-step "rsync sources to $PI:$PI_DIR"
-# --checksum, not the default size+mtime check: git checkouts and editor saves bump source
-# mtimes without changing content, and a bumped mtime would land newer than the Pi's build
-# artifacts and trigger a spurious cargo rebuild. Content-based sync leaves unchanged files
-# (and their mtimes) untouched, so cargo stays incremental.
-#
-# --delete per directory, so a file removed here also leaves the Pi: a stale fixture
-# definition lingering there would satisfy a build that ought to fail.
-#
-# --exclude=target because build output is never shipped: the Pi builds natively, and a crate
-# directory can still carry a stray target/ from before the cargo workspace put one at the
-# root. Excluding it also protects the Pi's own from --delete.
-for directory in "${DIRECTORIES[@]}"; do
-    rsync -az --checksum --delete --exclude=target "$directory/" "$PI:$PI_DIR/$directory/"
-done
-rsync -az --checksum "${FILES[@]}" "$PI:$PI_DIR/"
+# --checksum, not the default size+mtime check, so a file whose contents did not change is not
+# copied again. --delete for the directories, so a file removed here also leaves the Pi.
+step "rsync to $PI:$PI_DIR"
+rsync -az --checksum \
+    "brain/brain.service" "target/$TARGET/release/brain" "$PI:$PI_DIR/brain/"
+rsync -az --checksum --delete \
+    --exclude=src --exclude=Cargo.toml --exclude=target --exclude=__pycache__ \
+    "stem/" "$PI:$PI_DIR/stem/"
+rsync -az --checksum --delete "etc/" "$PI:$PI_DIR/etc/"
 
 # --- Boot configuration ---------------------------------------------------
 # The rig's settings live in their own file beside config.txt, included from it, so the rest

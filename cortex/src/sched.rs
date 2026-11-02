@@ -61,9 +61,12 @@ fn pin(cores: &[usize], policy: libc::c_int, priority: libc::c_int) {
         );
     }
 
-    let param = libc::sched_param {
-        sched_priority: priority,
-    };
+    // Zeroed and then set, rather than written out: musl's `sched_param` carries sporadic-
+    // server fields glibc's lacks, which `SCHED_FIFO` and `SCHED_OTHER` ignore.
+    //
+    // SAFETY: `sched_param` is plain data, for which all zeroes is a valid value.
+    let mut param: libc::sched_param = unsafe { mem::zeroed() };
+    param.sched_priority = priority;
     // SAFETY: as above, and `param` outlives the call.
     let failed = unsafe { libc::pthread_setschedparam(libc::pthread_self(), policy, &param) };
     if failed != 0 {

@@ -324,8 +324,7 @@ fn read_workspace(workspace: &Path) -> String {
     fs::read_to_string(workspace).unwrap_or_else(|e| {
         panic!(
             "cannot read the QLC+ workspace at {}: {e}\n\
-             The rig's patch comes from that file. deploy.sh rsyncs the whole \
-             repository to the Pi; if you are building by hand, make sure it is there.",
+             The rig's patch comes from that file, at the root of the repository.",
             workspace.display()
         )
     })
@@ -660,8 +659,8 @@ fn resolve_definitions(patch: &mut BTreeMap<u32, Patched>, dir: &Path) {
             panic!(
                 "no fixture definition for {} / {} (patched as {:?}).\n\
                  {} holds: {}\n\
-                 Export the .qxf from QLC+ into that directory and commit it — the Pi \
-                 builds the daemon and has no QLC+ library to fall back on.",
+                 Export the .qxf from QLC+ into that directory and commit it — the build \
+                 reads definitions from there alone, never from QLC+'s library.",
                 fixture.manufacturer,
                 fixture.model,
                 fixture.name,

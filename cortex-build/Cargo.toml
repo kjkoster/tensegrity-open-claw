@@ -12,7 +12,7 @@ version      = "0.1.0"
 # names with the namespace already stripped — which is what keeps QLC+'s default XML
 # namespace from silently matching nothing.
 #
-# The calendar's crates are all offline, because the build runs on the Pi behind a 4G link:
+# The calendar's crates are all offline, so the build needs no network to resolve a show:
 # `cities` is a static table of about ten thousand cities, `tzf-rs` maps coordinates to a
 # zone from polygons it bundles, `jiff` resolves local times in that zone from the system's
 # time-zone database, and `sunrise` computes civil twilight. `chrono` is only there to name

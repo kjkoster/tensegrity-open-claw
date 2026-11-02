@@ -139,7 +139,7 @@ async fn sync_task(calendar: &'static Calendar) -> ! {
 /// reached a server, and lets lapse if it loses it for long enough.
 fn clock_synchronised() -> bool {
     // SAFETY: `timex` is plain data, so all zeroes is a valid value, and with `modes` zero
-    // `ntp_adjtime` only reads the kernel's state into it and changes nothing.
+    // `adjtimex` only reads the kernel's state into it and changes nothing.
     let mut timex: libc::timex = unsafe { std::mem::zeroed() };
-    unsafe { libc::ntp_adjtime(&mut timex) != libc::TIME_ERROR }
+    unsafe { libc::adjtimex(&mut timex) != libc::TIME_ERROR }
 }

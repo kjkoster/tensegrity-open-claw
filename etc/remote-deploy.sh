@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 #
-# remote-deploy.sh — runs ON claw-pi (pushed there by deploy.sh).
-# Installs what the Pi runs beside the brain, then builds the brain natively and installs it.
-# Every service is restarted only when one of its files changed (`install_changed`), so a
-# deploy that touches only the brain restarts only the brain.
+# remote-deploy.sh — runs ON claw-pi (pushed there by deploy.sh, which built the brain).
+# Installs the brain and what the Pi runs beside it. Every service is restarted only when one
+# of its files changed (`install_changed`), so a deploy that touches only the brain restarts
+# only the brain.
 #
 set -euo pipefail
-
-. $HOME/.cargo/env
 
 # Where the sources landed, asked of this script's own location rather than spelled out. A
 # second copy of the path here could disagree with the one deploy.sh rsyncs to, and the
@@ -84,16 +82,12 @@ fi
 
 # Stem's broker is not installed here: it runs on memory-pi, deployed by deploy-memory-pi.sh.
 
-# --- Build brain natively on the Pi ---------------------------------------
-step "build brain"
-( cd "$REPO" && cargo build --release )
-
 # --- Brain daemon ----------------------------------------------------------
 step "install brain daemon"
 # Cargo relinks only when something it builds from changed, so an unchanged binary is a deploy
 # that changed nothing the brain runs, the workspace and the show table included.
 CHANGED=
-install_changed 0755 "$REPO/target/release/brain" /usr/local/bin/brain
+install_changed 0755 "$REPO/brain/brain" /usr/local/bin/brain
 install_changed 0644 "$REPO/brain/brain.service" /etc/systemd/system/brain.service
 sudo systemctl enable brain
 if [ -n "$CHANGED" ]; then

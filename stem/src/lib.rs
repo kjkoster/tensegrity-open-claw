@@ -33,8 +33,8 @@
 //!
 //! A client that publishes at QoS 0 and never subscribes needs a CONNECT, a PUBLISH, a PINGREQ
 //! and a DISCONNECT, and no session state, inflight window or subscription table. The crates
-//! that do this properly bring an async runtime with them, and the brain is rebuilt on a 1.2 GHz
-//! Pi on every deploy.
+//! that do this properly bring an async runtime and an allocator with them, neither of which a
+//! firmware should have to carry for four packet types.
 
 #![no_std]
 
