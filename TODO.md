@@ -10,9 +10,6 @@ measurements go in [`POC-RESULTS.md`](POC-RESULTS.md).
 
 ## 0. Upgrade and clean up
 
-- Upgrade everything to its latest release and make the rig work again, as every show starts
-  (DESIGN §1.8): Trixie packages on both Pis, the Rust toolchain, the crates, QLC+ on the Mac,
-  Grafana and Greptime's pin on `memory-pi`.
 - The PoC's workspace: `claw.qxw` patches `Face` and, once its definition exists, `Wrist`.
   Change the E1.31 output's unicast address to `10.0.10.1`, so the Mac works on the access
   point for this show; the brain binds what the workspace says.
