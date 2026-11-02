@@ -43,8 +43,7 @@ pub const TELEMETRY_SERVICE: &str = "brain";
 /// buffer to fill. Whatever the show senses it holds itself, as the readers of the seams its
 /// sensors publish on. It is a closure rather than a trait
 /// implementation because the boundary carries no meaning beyond "the rig fills the slot
-/// buffer" — when the intent frame lands it replaces the closure and the rig's content does
-/// not move.
+/// buffer".
 pub struct Rig {
     /// The binary's own name, which prefixes every log line. The rig passes
     /// `env!("CARGO_PKG_NAME")`, so it cannot drift from the binary that is installed.

@@ -73,10 +73,11 @@ impl Show {
 
     /// Fills this frame's slots, given what the door says.
     pub fn fill(&mut self, slots: &mut [u8], face: &FaceState) {
-        let chords = face.chords.wrapping_sub(self.seen_chords);
+        // A chord takes seconds to make, so one frame never sees two.
+        let chorded = face.chords != self.seen_chords;
         self.seen_chords = face.chords;
 
-        if chords % 2 == 1 {
+        if chorded {
             self.set_testing(self.testing_since.is_none());
         } else if self
             .testing_since

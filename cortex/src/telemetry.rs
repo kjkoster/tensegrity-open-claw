@@ -126,9 +126,7 @@ impl Publisher {
         // A dropped reading is logged nowhere on purpose: the condition that fills this queue
         // is a broker that stopped reading, which the health tree already reports, and a log
         // line per dropped message would be a second failure printed on top of the first.
-        match self.outgoing.try_send(message) {
-            Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {}
-        }
+        let _ = self.outgoing.try_send(message);
     }
 }
 
@@ -145,21 +143,18 @@ impl Farewell {
     /// Queues the goodbye, retrying a full queue until `expires`. Returns whether it was
     /// queued: a thread that has already exited will never say it.
     fn ask(&self, expires: Instant) -> bool {
-        let mut pending = Some(Command::Farewell);
-        while let Some(command) = pending.take() {
-            match self.outgoing.try_send(command) {
+        loop {
+            match self.outgoing.try_send(Command::Farewell) {
                 Ok(()) => return true,
-                // The queue is full because the thread is busy or the broker is slow. Hand the
-                // command back and try again until the deadline, rather than dropping the
-                // goodbye over a queue that was about to drain anyway.
-                Err(TrySendError::Full(returned)) if Instant::now() < expires => {
-                    pending = Some(returned);
+                // The queue is full because the thread is busy or the broker is slow. Try again
+                // until the deadline, rather than dropping the goodbye over a queue that was
+                // about to drain anyway.
+                Err(TrySendError::Full(_)) if Instant::now() < expires => {
                     thread::sleep(Duration::from_millis(2));
                 }
                 Err(_) => return false,
             }
         }
-        false
     }
 
     /// Says the goodbye and waits, briefly, for it to actually leave.

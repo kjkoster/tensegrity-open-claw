@@ -1,7 +1,7 @@
 //! The sACN receive stage: an external E1.31 console taking the universe away from the
 //! internal engine.
 //!
-//! `dmx.rs` is the send side; this is its counterpart. The packet layout and the source
+//! `sacn_out.rs` is the send side; this is its counterpart. The packet layout and the source
 //! arbitration are a port of the receiver the ponytail firmware used, which is out of the
 //! project now but recoverable — `git show 22dd9a0:ponytail/src/sacn.rs`. That one was
 //! `no_std` and extracted a single fixture's slots; this one is `std` and takes the whole
@@ -412,11 +412,16 @@ fn receive(
             continue;
         }
 
-        // A clean stop hands the rig back at once instead of waiting out the timeout. The
-        // identity is kept in the published value so the orchestrator's release line can
-        // still say who it was.
+        // A clean stop from the source being obeyed hands the rig back at once instead of
+        // waiting out the timeout. Any other source stopping only leaves the table: the one in
+        // control is still sending. The identity is kept in the published value so the
+        // orchestrator's release line can still say who it was.
         if header.terminated {
+            let was_winner = sources.is_winner(&header.cid);
             sources.release(&header.cid);
+            if !was_winner {
+                continue;
+            }
             publisher.publish(Takeover {
                 slots: [0u8; SLOTS],
                 cid: header.cid,
@@ -433,12 +438,12 @@ fn receive(
         }
         sources.observe(header.cid, *from.ip(), header.priority, header.sequence, now);
 
-        // Two gates, in order. First the table: among external sources, only the winner is
-        // heard. Then the floor: the winner takes the universe only if it is strictly above
-        // the brain's own priority. Strict is load-bearing — every sACN source ships
-        // defaulted to 100, so a laptop joining the network with a live universe would
-        // otherwise seize the rig.
-        if sources.is_winner(&header.cid) && header.priority > cfg::SACN_PRIORITY {
+        // Among external sources, only the winner is heard. Whether it clears the brain's own
+        // priority is `Takeover::in_force`'s to decide, every frame: publishing the winner at
+        // whatever priority it now has is what lets a console that lowers its priority hand
+        // back on the next frame, rather than leaving its last frame in force until the
+        // data-loss timeout.
+        if sources.is_winner(&header.cid) {
             publisher.publish(Takeover {
                 slots: slots_of(&pkt[..n], header.slots),
                 cid: header.cid,

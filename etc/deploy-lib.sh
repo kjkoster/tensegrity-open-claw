@@ -6,6 +6,17 @@
 
 step() { printf '\n\033[1m--- %s ---\033[0m\n' "$1"; }
 
+# Restarts a unit and stops the deploy if it does not come up: a service that failed to start
+# is a deploy that failed, and the journal says why.
+restart() {
+    local unit="$1"
+    if ! sudo systemctl restart "$unit"; then
+        echo "ERROR: $unit did not start — journalctl -u $unit -n 40" >&2
+        exit 1
+    fi
+    echo "$unit restarted"
+}
+
 # Installs `source` at `target` with `mode` only when their contents differ, and then sets
 # CHANGED, so a deploy restarts only what it actually changed: a restart costs a service its
 # state, and the access point's costs every station its connection. The caller clears CHANGED
@@ -65,18 +76,23 @@ python_daemon() {
 # Installs a NetworkManager profile template with the rig's WiFi filled in from claw-wifi.env,
 # the one place it is defined. Bash substitution rather than sed, so no character in the
 # passphrase can break it; quoted, so not even `&`. 0600, root's, as NetworkManager requires
-# of a profile holding a secret. Installed through `install_changed`, so it sets CHANGED.
+# of a profile holding a secret. Installed only when it differs, setting CHANGED as
+# `install_changed` does.
 wifi_profile() {
-    local template="$1" name="$2" profile rendered
+    local template="$1" name="$2" profile target
     . "$REPO/etc/claw-wifi.env"
     profile="$(<"$template")"
     profile="${profile//@SSID@/"$CLAW_SSID"}"
     profile="${profile//@PSK@/"$CLAW_PSK"}"
     profile="${profile//@CHANNEL@/"$CLAW_CHANNEL"}"
-    # mktemp's file is the deploying user's alone, so the passphrase is never readable by
-    # anyone else on its way to root's copy.
-    rendered="$(mktemp)"
-    printf '%s\n' "$profile" >"$rendered"
-    install_changed 0600 "$rendered" "/etc/NetworkManager/system-connections/$name.nmconnection"
-    rm -f "$rendered"
+    # Compared and installed straight from the rendered text, so the passphrase never lands in
+    # a file of its own on the way to root's copy.
+    target="/etc/NetworkManager/system-connections/$name.nmconnection"
+    if printf '%s\n' "$profile" | sudo cmp -s - "$target"; then
+        return 0
+    fi
+    sudo rm -f "$target"
+    printf '%s\n' "$profile" | sudo install -m 0600 /dev/stdin "$target"
+    echo "installed $target"
+    CHANGED=1
 }

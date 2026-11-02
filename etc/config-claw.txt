@@ -1,6 +1,6 @@
 # The rig's own boot configuration, included from /boot/firmware/config.txt by its last line,
-# `include config-claw.txt`. deploy.sh installs this file beside it and offers to add that
-# line; everything else in config.txt stays as Raspberry Pi OS ships it.
+# `include config-claw.txt`. deploy.sh installs this file beside it and adds that line if it
+# is missing; everything else in config.txt stays as Raspberry Pi OS ships it.
 #
 # Read at boot only: a change here takes a reboot to land.
 
@@ -22,8 +22,7 @@ disable_pvt=1
 # the real fix for the DMX receivers, and dropping this saves heat and power in the cabinet.
 force_turbo=1
 
-# The onboard analog audio uses both hardware PWM channels, which the face's lamps need. The
-# brain captures from a USB interface, so nothing is lost.
+# The onboard analog audio uses both hardware PWM channels, which the face's lamps need.
 dtparam=audio=off
 
 # PWM0 on GPIO12 and PWM1 on GPIO13: the face's two lamps.

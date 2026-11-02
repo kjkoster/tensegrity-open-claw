@@ -42,6 +42,8 @@ cargo build --release --target "$TARGET"
 # --checksum, not the default size+mtime check, so a file whose contents did not change is not
 # copied again. --delete for the directories, so a file removed here also leaves the Pi.
 step "rsync to $PI:$PI_DIR"
+# rsync creates only the last directory of a destination, so a freshly set-up Pi needs these.
+ssh "$PI" "mkdir -p $PI_DIR/brain $PI_DIR/stem $PI_DIR/etc"
 rsync -az --checksum \
     "brain/brain.service" "target/$TARGET/release/brain" "$PI:$PI_DIR/brain/"
 rsync -az --checksum --delete \
@@ -82,7 +84,7 @@ else
     echo "added '$INCLUDE_LINE' to $BOOT_DIR/config.txt — reboot $PI for it to take effect"
 fi
 
-# --- Build and restart on the Pi ------------------------------------------
+# --- Install and restart on the Pi ----------------------------------------
 step "run remote deploy on $PI"
 ssh "$PI" "bash $PI_DIR/etc/remote-deploy.sh"
 

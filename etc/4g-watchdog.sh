@@ -27,8 +27,8 @@
 # There is deliberately no reboot and no power cut. A reboot breaks the show for a link the show
 # does not need, and a warm reboot does not cut USB power anyway. A power cut can only be trusted
 # to cut the modem's port alone when the hub really switches ports individually, and a hub's own
-# claim to do so is not reliable; on a hub that gangs its ports it would cut the audio interface
-# beside the modem too.
+# claim to do so is not reliable; on a hub that gangs its ports it would cut whatever shares the
+# hub too.
 #
 # Separately from the ladder: when the internet is up but the WireGuard tunnel is not, wg-quick
 # is restarted. That covers the tunnel-side failures the uplink ladder cannot see.

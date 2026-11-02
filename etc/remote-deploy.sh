@@ -7,18 +7,17 @@
 #
 set -euo pipefail
 
-# Where the sources landed, asked of this script's own location rather than spelled out. A
-# second copy of the path here could disagree with the one deploy.sh rsyncs to, and the
-# result would be a clean deploy that rebuilt and reinstalled the previous sources.
+# Where deploy.sh put the files, asked of this script's own location rather than spelled out.
+# A second copy of the path here could disagree with the one deploy.sh rsyncs to, and the
+# result would be a clean deploy that reinstalled the previous files.
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 . "$REPO/etc/deploy-lib.sh"
 
 # --- 4G uplink watchdog ----------------------------------------------------
-# Ahead of everything else, for the same reason the broker goes ahead of the build and a
-# stronger one: this is what gets the Pi back onto the network after the modem wedges, and the
-# rig is a long way from the person who would otherwise have to walk to it. A deploy that dies
-# at the build should still have installed the way back in.
+# Ahead of everything else: this is what gets the Pi back onto the network after the modem
+# wedges, and the rig is a long way from the person who would otherwise have to walk to it. A
+# deploy that dies further down should still have installed the way back in.
 #
 # The script carries its own configuration — the modem's USB vendor, the ping targets, the
 # tunnel address and the thresholds — and finds the modem itself on every run, so nothing in it
@@ -39,11 +38,7 @@ sudo systemctl enable 4g-watchdog.timer
 # firing it from here would have it judge an uplink in the middle of being deployed over.
 if [ -n "$CHANGED" ]; then
     sudo systemctl daemon-reload
-    if sudo systemctl restart 4g-watchdog.timer; then
-        echo "4G watchdog timer restarted"
-    else
-        echo "WARNING: 4g-watchdog.timer did not start — journalctl -u 4g-watchdog.timer -n 40"
-    fi
+    restart 4g-watchdog.timer
 else
     echo "4G watchdog unchanged"
 fi
@@ -92,8 +87,7 @@ install_changed 0644 "$REPO/brain/brain.service" /etc/systemd/system/brain.servi
 sudo systemctl enable brain
 if [ -n "$CHANGED" ]; then
     sudo systemctl daemon-reload
-    sudo systemctl restart brain
-    echo "brain daemon restarted"
+    restart brain
 else
     echo "brain unchanged"
 fi
@@ -112,11 +106,7 @@ python_daemon /opt/stem/venv "$REPO/stem/requirements.txt"
 sudo systemctl enable stem
 if [ -n "$CHANGED" ]; then
     sudo systemctl daemon-reload
-    if sudo systemctl restart stem; then
-        echo "stem daemon restarted"
-    else
-        echo "WARNING: stem did not start — journalctl -u stem -n 40"
-    fi
+    restart stem
 else
     echo "Stem unchanged"
 fi

@@ -8,8 +8,8 @@ cabinet door and watched live in Grafana on `memory-pi`. Its results go in
 [`TODO.md`](TODO.md). The components it introduces — Wrist, Dendrite, the inner ear — are
 described in [`DESIGN.md`](DESIGN.md), not here; this file says only how this show uses them.
 
-The previous show's components are on their tags: `last-version-with-eyeball-for-group-detection`
-and `last-version-with-mouth`.
+The previous show's components are on their tags: `last-version-with-eyeball-for-group-detection`,
+`last-version-with-retina` and `last-version-with-mouth`.
 
 ---
 
@@ -46,7 +46,7 @@ meaning from the code: test mode.
 ### 2.1 The calendar
 
 The calendar stays, as in every show: `brain/shows.rs` lists a window per experiment day
-(09:00–23:00, Amsterdam), and outside a window the Director is in blackout — lamps off, Wrist
+(09:00–23:00, Delft, in Europe/Amsterdam time), and outside a window the Director is in blackout — lamps off, Wrist
 in Free. Test mode, by the chord, is the code's way to run outside a window for a while, and
 is kept unchanged for that purpose.
 
@@ -68,11 +68,13 @@ press of the button that selects, so a pluck can be set up with one hand on the 
                               (back to the same experiment, armed)          left from Lock ──▶ armed Listen
 ```
 
-- At boot, and after blackout, the Director is in **armed Listen**, Wrist in Park.
+- At boot inside a window, and when a window opens, the Director is in **armed Listen**, Wrist
+  in Park.
 - **Running** an experiment returns to the same experiment armed when it finishes or is
   aborted, so the right button repeats it. The left button is ignored while one runs.
 - Every state is published as `brain/show`, retained, as the code already does
-  (`armed-listen`, `listen`, `armed-kick`, `kick`, `run`, `sweep`, `lock`, `blackout`). Each
+  (`armed-listen`, `listen`, `armed-kick`, `kick`, `armed-run`, `run`, `armed-sweep`, `sweep`,
+  `armed-lock`, `lock`, `blackout`). Each
   start increments `brain/run`, retained — a run counter, not a second state topic — so a
   Grafana annotation and a line in `POC-RESULTS.md` name the same run.
 - The line's state, stiff or compliant, is not something the brain can know. The operator
@@ -119,7 +121,7 @@ firmware, described in `DESIGN.md`, used here:
   under power while the stop is pressed. The same happens when Wrist loses the universe.
 - **Released:** the live frame returns. Wrist comes out of Free **unhomed** — it cannot have
   seen the crank being turned while limp — and accepts only Hold, Home and Park until it has
-  been parked again; a Run or Lock in the frame is refused and reported, not resumed. So the
+  been parked again; a Speed or Lock in the frame is refused and reported, not resumed. So the
   operator releases the stop, presses the right button to abort to Park, and Wrist homes and
   parks; then the experiment can be run again. The show never sees the stop; Wrist's rule is
   what stops motion from resuming on its own.

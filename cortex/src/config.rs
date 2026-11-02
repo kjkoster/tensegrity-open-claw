@@ -35,8 +35,9 @@ pub const REALTIME_PRIORITY: i32 = 50;
 
 // ── E1.31 receive / external takeover ────────────────────────────────────────
 // The E1.31 network-data-loss timeout: an external source that goes quiet this long loses
-// the universe and the internal engine resumes. This is the backstop only — a clean QLC+
-// shutdown sets the stream-terminated bit and hands back inside one frame.
+// the universe and the internal engine resumes. QLC+ does not send the stream-terminated bit,
+// so this is what hands the universe back from it; a source that does send it hands back
+// inside one frame.
 pub const SACN_SOURCE_TIMEOUT_US: u64 = 2_500_000;
 
 // Distinct senders tracked at once. Normally one console; a few more absorbs strays without

@@ -21,11 +21,6 @@ measurements go in [`POC-RESULTS.md`](POC-RESULTS.md).
   48 V supply (kept for the full-scale drive), the two Waveshare boards and the crank parts.
 - Hardware out of the cabinet: the camera and its PoE injector, the audio interface, their
   cables.
-- Cross-build `brain` on the Mac for `aarch64-unknown-linux-musl`, linked with `rust-lld`,
-  and have the deploy ship the binary instead of the sources.
-- Once a cross-built brain runs, free `claw-pi`'s disk of everything the build used:
-  `~/tensegrity-open-claw/target`, the crate sources and `Cargo.*` the deploy no longer ships,
-  and the Rust toolchain (`rustup self uninstall`, which takes `~/.cargo` and `~/.rustup`).
 
 ## 1. The riskiest thing first: Dendrite to Wrist to the brain, live
 
@@ -131,7 +126,7 @@ stage because the dashboard is how everything after it is read. The motor is sta
   `sweep`, `armed-lock`, `lock` — with the button rules and lamp patterns of `SHOW.md` §2;
   the Listen window opening on a transient above the pluck threshold; the Kick counter;
   Run's five-second ramp; Sweep's frequency schedule; Lock's three phases and its floor; all
-  as constants in `brain/show`, named, with units.
+  as constants in `brain/src/show.rs`, named, with units.
 - Dashboard panels for each experiment: the sweep's amplitude and lag against frequency,
   Lock's growth and decay, `brain/sway/phase_err_deg`.
 - E3, E4, E5 from `SHOW.md` §4, stiff then compliant, each run into `POC-RESULTS.md`.
@@ -183,7 +178,7 @@ stage because the dashboard is how everything after it is read. The motor is sta
 - The full-scale shopping list from the decisions: servo or NEMA 34 with E2's tension
   estimate behind it, the gearbox, the load cell, the anemometer, the C3 Dendrite's IMU, a
   Bluetooth adapter for the Pi if the central moves there before the brain does.
-- Tag `poc-headless-hug`; remove what only the PoC needed (Sweep, `operator/line`), keep what
+- Tag `<YYYY-MM-DD>-headless-hug-poc`; remove what only the PoC needed (Sweep, `operator/line`), keep what
   the real show will (Listen, Kick, Run, Lock, the Director's button rules, Wrist, Dendrite,
   the relay until it moves); `SHOW.md` becomes the real show's file; empty this file for the
   next show.

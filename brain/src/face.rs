@@ -17,7 +17,7 @@
 //! consecutive samples.
 //!
 //! The lamps dim through the Pi's two hardware PWM channels, not a software PWM: that is a
-//! busy-waiting real-time thread per pin, competing with audio and the DMX timing.
+//! busy-waiting real-time thread per pin, competing with the DMX timing.
 //!
 //! The face is a part of its own on the broker, publishing through the brain's connection:
 //! `face/left_button`, `face/right_button` and `face/estop`, retained. It has no `health/`
@@ -50,10 +50,9 @@ const SETTLE_SAMPLES: u8 = 3;
 /// leaning on the door does not do it.
 const CHORD_SAMPLES: u16 = 200;
 /// At the edge of hearing, and no further. The lamps share the cabinet's supply and ground with
-/// the audio interface, and at 1 kHz their switching was audible in the quiet ends of every
-/// recording, stepping with each frame as the lamp dimmed. Their drivers cannot follow much
-/// faster: at 25 kHz the lamps were erratic. Lower is audible to the children in the audience,
-/// who hear up to about 20 kHz. A whole number of the PWM clock's ticks, so the period is exact.
+/// everything else in it, so their switching is a tone in whatever picks that up, and children
+/// in the audience hear up to about 20 kHz. Their drivers cannot follow much faster: at 25 kHz
+/// the lamps were erratic. A whole number of the PWM clock's ticks, so the period is exact.
 const LAMP_PWM_HZ: f64 = 20_000.0;
 
 /// What the door says, as of the face's last poll.
