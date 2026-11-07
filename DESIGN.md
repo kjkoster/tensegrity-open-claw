@@ -27,6 +27,17 @@ has one universe and relays a takeover onto it, so those numbers are the rig's t
 brain listens for, what it sends, and what a wireless fixture listens for. The address the
 output unicasts to is the one the brain's receiver binds.
 
+**A networked fixture's addresses are in its name.** A fixture on the rig's network is named
+`Name [ip mac]` in the workspace — `Wrist [10.0.10.3 aa:bb:cc:dd:ee:ff]`: one space before the
+bracket, one between the two, the IPv4 address and then the MAC in lower case. QLC+ has no
+field for either and rewrites the file from its own model on every save, dropping anything it
+does not know, so the name is the one place that survives and sits on the fixture it belongs
+to. The build reads the bracket off before the name becomes a Rust constant and fails on a
+malformed one or on an address or a MAC two fixtures share. A fixture with no bracket is
+allowed; a firmware build for one fails, because a fixture that joins the network has to be
+found there. From the one bracket come the address compiled into that fixture's firmware and
+the static lease the access point's DHCP serves it as a backup, so the two cannot disagree.
+
 **The running brain never reads the workspace**, not even as a filename: the build consumes it.
 A rig has exactly one, so naming the rig in the log already says which file the binary was
 built from.
@@ -122,6 +133,13 @@ not MQTT, because a broker in the path would make it part of the show (§1.3). T
 each new reading once, so silence goes stale. The receiver binds the one address the sensors'
 network reaches, because a wildcard would also answer the 4G uplink's public address.
 
+**One definition for every non-DMX stream.** As the QLC+ files are for DMX (§1.1), an
+OSCQuery namespace file — the JSON show-control tools use to describe an OSC device: every
+address with its type tags, ranges and units — is the one source of truth for a device's OSC,
+in `fixtures/` beside its `.qxf`. The build compiles it into the encoders and decoders at both
+ends, whatever language each end is in, so a key or a type that disagrees between them is a
+build error, not a confusing trace.
+
 ### 1.5 Time is resolved at build time
 
 The show table names a city and lists local start/stop pairs; the build turns that into a
@@ -199,11 +217,9 @@ and never upgrading is a pile of breaking changes that arrives all at once.
 ### 1.9 `no_std` and no allocator, wherever it can be
 
 Anything shared between the Pi and a microcontroller is `no_std` — always, not when a firmware
-happens to need it. `stem` set the pattern; `dendrite-wire` and `innerear` will follow it when
-they come with the Headless Hug PoC. The reason is the brain of tomorrow: the frame loop, the
-estimator and the show may one day run on an ESP, and code that was `std` out of habit is what
-stops that. A crate reaches for `std` only for what the Pi alone has — sockets, threads, the
-serial port, the filesystem — in the thinnest shell it can.
+happens to need it. `stem` set the pattern. Code that was `std` out of habit is what stops a
+part moving onto a microcontroller. A crate reaches for `std` only for what the Pi alone has —
+sockets, threads, the serial port, the filesystem — in the thinnest shell it can.
 
 The same for the heap: portable code works in fixed-size buffers its caller owns. `stem` writes
 each packet into one and returns its length; the sACN encoder and source table are arrays
@@ -262,10 +278,7 @@ reporting a healthy signal, which reads as a wiring fault and is not one. The pa
 | `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
 | `brain/` | the rig crate: the rig's patch, its show times, and its show |
 | `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` and allocation-free. It shares its directory with Stem's daemon and broker configuration |
-| `innerear/` | *coming with the Headless Hug PoC:* the sway estimator (§3.12), `no_std`, a workspace member the rig crate wires in |
-| `dendrite-wire/` | *coming with the Headless Hug PoC:* Dendrite's wire contract (§3.11), `no_std`, a workspace member shared by path with the firmware like `stem` |
-| `wrist/` | *coming with the Headless Hug PoC:* Wrist's firmware (§3.10), ESP32-S3, not a workspace member |
-| `dendrite/` | *coming with the Headless Hug PoC:* Dendrite's firmware (§3.11), nRF52833, not a workspace member |
+| `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
 
 **Beside the crates**: `stem/` also holds Stem's daemon, its broker configuration and the
 Python modules every health daemon shares; `etc/` is what `claw-pi`'s deploy installs that
@@ -283,13 +296,8 @@ and its `Rig` never grow a field for one rig's part.
 **Everything is built on the Mac.** The brain is cross-built for 64-bit ARM Linux, statically
 linked against musl: the Mac builds in seconds what the Pi took minutes over, and the Pi needs
 no toolchain and no sources. Firmware for a wireless fixture is built on the Mac for its own
-target, reads its universe, port and address out of the workspace through `cortex-build`'s
-`addressing()`, and shares `stem` by path. With the Headless Hug PoC, Wrist's and Dendrite's
-firmwares will restore what the ball had — the sACN front end, WiFi provisioning from
-`etc/claw-wifi.env`, the MQTT client, the deploy integration — from `last-version-with-ball`,
-ported to the S3's Xtensa where Wrist needs it; `deploy.sh` is to build both, Wrist flashed
-over USB-C on the hub as the balls were, Dendrite from the Mac over its debug interface when
-plugged in.
+target and reads its universe, port and address out of the workspace through `cortex-build`;
+Rust firmware shares `stem` by path.
 
 **Assets are compiled in.** A recording or a model a component needs goes into the binary at
 build time, so the binary is the whole show: no file to be missing at startup, no decoder at run
@@ -298,7 +306,9 @@ eyeball's model were built this way (§3.6, §3.8).
 
 ### 2.4 Software stack
 
-Standard Rust, `std`, on Raspberry Pi OS.
+Standard Rust, `std`, on Raspberry Pi OS. Rust is preferred everywhere; a microcontroller whose
+Rust support falls short may force C++, and that is then a design choice stated in the
+component's section.
 
 - **A hand-rolled sACN encoder** on a UDP socket. The `sacn` crates were not a good fit; the
   packet is small enough that owning it costs less than working around them.
@@ -336,8 +346,9 @@ systemd service.
 
 **Everything that must be found by address has a fixed one, below `.100`.** Each network gives
 the Pi `.1` and hands out `.100`–`.199` by DHCP as a convenience for laptops; a device the rig
-talks to by address — a second Pi, a wireless fixture — sets its own on itself. Both networks
-route their clients out over 4G.
+talks to by address sets its own on itself — a second Pi in its configuration, a wireless
+fixture from its workspace name (§1.1), with a static lease for its MAC as a backup. Both
+networks route their clients out over 4G.
 
 ---
 
@@ -376,9 +387,7 @@ workspace patches them.
 | the ponytail (§3.7) | no: `last-version-with-ponytails` |
 | the mouth (§3.8) | no: `last-version-with-mouth` |
 | moving heads: their aiming and the QLC+ pointing presets (§1.1) | no: `last-version-with-mouth` |
-| Wrist (§3.10) | coming with the Headless Hug PoC |
-| Dendrite (§3.11) | coming with the Headless Hug PoC |
-| the inner ear (§3.12) | coming with the Headless Hug PoC |
+| Wrist (§3.10) | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json` |
 
 ### 3.1 Stem
 
@@ -694,7 +703,7 @@ because both Pis power up together and `memory-pi` is up long before the access 
 `claw-pi`. The Mac reaches it only by jumping through `claw-pi`: a tunnel of its own would buy
 nothing, because a dead `claw-pi` leaves little to do remotely anyway.
 
-**Five processes:**
+**Six processes:**
 
 - **Mosquitto**, Stem's broker (§3.1).
 - **The health daemon**, `memory.py`, Stem's counterpart for `memory-pi`. It shares Stem's board
@@ -705,6 +714,9 @@ nothing, because a dead `claw-pi` leaves little to do remotely anyway.
 - **The recorder**, `recorder.py`, writing every live message into Greptime over InfluxDB line
   protocol in five-second batches. Greptime has no MQTT listener, and its documented route is
   EMQX's rule engine, which would replace Mosquitto; a recorder is a page of Python.
+- **The OSC bridge**, ingesting the OSC a fixture sends to `memory-pi` directly, decoded from
+  that fixture's OSCQuery file (§1.4), alongside what the recorder takes off the broker, so a
+  fixture that speaks no MQTT is recorded without the brain in the path.
 - **Grafana**, from its apt repository, reading Greptime as a MySQL server, on loopback, its
   settings and data source provisioned from the repo. No dashboard is provisioned by default;
   one made in the UI lives in Grafana's own database.
@@ -733,127 +745,61 @@ days, not seconds.
 
 ### 3.10 Wrist
 
-A crank on a stepper, driving a line to the sculpture; a wireless fixture on the universe; and,
-for now, the Bluetooth central that relays Dendrite (§3.11).
+A guy-wire drive that sways a structure at its own first natural frequency: an integrated
+closed-loop stepper reeling the wire through a series spring, an accelerometer on the structure
+and a load cell under the motor, all on one board that follows the universe and closes the sway
+loop itself. Its firmware is C++ on the Arduino core for the ESP8266, which the chip forces
+(§2.4); what it does, its pins and its constants are in [`CONTROL_LOOP.md`](CONTROL_LOOP.md).
 
 **A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told to
-move, which lets the e-stop, a takeover and signal loss cover the crank with no rule of their
-own, and lets an artist session turn it from a fader. The brain writes parameters; Wrist
-renders the motion at its own rate, for the ball's reason: forty bunched frames a second over
-WiFi cannot carry step pulses.
+move, which lets the e-stop, a takeover and signal loss cover the drive with no rule of their
+own, and lets an artist session drive it from a fader. The brain sets only a mode and an
+amplitude; Wrist renders the motion at its own rate, for the ball's reason: forty bunched
+frames a second over WiFi cannot carry step pulses.
 
-**Limp on stop and on loss, not held.** Every other fixture holds its last values, because a
-head that stays put is safe. A crank's output is a force on a structure through a line, and a
-crank held under power against a swinging sculpture is a tug-of-war with whatever is pressing
-the stop. So Wrist's no-function band is **Free**: the driver is disabled and the crank turns as
-the line pulls it. The same on losing the universe. This is the one fixture whose signal-loss
-behaviour is not "hold", and this paragraph is why.
+**The loop closes in the fixture.** Sensor, oscillator and motor share one board, so nothing in
+the phase loop crosses the network: no WiFi latency or jitter to allow for, no shared clock, no
+relay. The ESP8266 has no Bluetooth, so the accelerometer is wired to the board rather than
+sending from a radio of its own. A local oscillator phase-locked to the sway times the drive;
+the frame says only how much.
 
-**Free means unhomed.** The motor's encoder is inside its driver; while limp the crank can be
-turned by the line, a hand or the sculpture settling, and Wrist cannot see it. So leaving Free
-for any reason — boot, stop released, universe back, alarm cleared — leaves Wrist **unhomed**,
-accepting only Hold, Home and Park. A Speed or Lock in the frame is refused and reported, never
-resumed: the rig's rule that a show resumes mid-stride on release is right for light and wrong
-for a crank, and it is enforced in the fixture, where the show cannot override it by not
-knowing about the stop.
+**A resonance pumped through a spring.** Rubber bands between the wire and the structure turn
+motor position into force, so the motor drives the structure's own mode and the drive's phase
+is the control; a stiff line would fight the structure instead. Every lag in the chain —
+sensor, filter, motor, bands, structure — is absorbed in one phase offset that Wrist learns
+while it runs, by seeking the largest sway at a fixed drive, rather than one computed or set by
+hand. Frequency and Q come from the ring-down after a single tug, a pluck. What Wrist learns
+persists across power cycles and is reported, so the coded-in defaults are updated by hand from
+what it learned.
 
-**Home and neutral.** A microswitch tripped once per revolution by a tab on the crank disc. Home
-is its rising edge, reached turning slowly in the positive direction; a revolution and a half
-without it is an alarm. Neutral is home plus a configured offset — the angle at which the crank
-arm stands perpendicular to the line with the sculpture at rest, measured at commissioning and
-written into `wrist`'s config with the date (§1.1's rule for measured facts). Park is "home if
-unhomed, then go to neutral". In Speed and Lock the switch is also the index: two revolutions
-without it, or an edge where it should not be, and Wrist goes Free and says why — lost steps on
-a closed-loop motor mean something mechanical.
+**Blackout is limp.** Mode's no-function band is Blackout: coils released, as if the motor's
+power were cut, which is also Wrist's idle state. Every other fixture holds its last values on
+loss, because a head that stays put is safe; a drive held under power against a swinging
+structure is a tug-of-war with whatever else is happening. So on losing the universe Wrist
+releases at once, the one fixture whose signal-loss behaviour is not "hold", and this paragraph
+is why. A Blackout in the frame — the e-stop's mask included, which Wrist cannot tell apart
+from a requested one — first brakes the sway under power, driving in antiphase for a bounded
+time, then releases: a structure brought to rest is safer than one left swinging on a limp
+wire, and while frames arrive the rig is there to brake with.
 
-**Kick is a counter**, because a one-frame band over multicast WiFi can be lost or arrive twice
-(§1.4). Wrist kicks on a change seen while parked and homed, re-baselines whenever it leaves
-Free, and abandons a kick the moment the frame changes mode.
-
-**Lock renders a phase it is sent.** Wrist runs its own oscillator at the commanded frequency,
-advances a local copy of the sway phase between frames, nudges it toward each received value
-with a time constant of seconds, extrapolates it by a configured round-trip latency, and holds
-crank angle = phase + offset. The frame corrects; it does not command. That is what lets 25 ms
-frames with WiFi jitter carry a sub-degree phase.
-
-**The relay, for now.** Wrist holds the Bluetooth connection to Dendrite and forwards every
-sample to the brain as OSC (§1.4), stamped with the crank angle and Wrist's own clock, and
-publishes the raw axes on MQTT. It never acts on a sample. The central is here because
-`claw-pi`'s radio shares the UART the DMX HAT needs and is disabled with it; when the brain has
-a radio of its own the central moves there and the brain, decoding OSC either way, does not
-change. The stamped crank angle is why the brain can measure the lag between crank and sway,
-and Lock's phase error, with no shared clock: both numbers arrive in one message from the one
-place that knows both.
-
-**Hardware.** A Waveshare ESP32-S3-RS485-CAN in its DIN case. Its isolated RS-485 port is why it
-was chosen over a bare board: it makes Wrist a wired fixture the day the access point is the
-thing we do not want to depend on. WiFi and Bluetooth time-slice its one radio; the step timer
-runs on the other core.
+**Blackout means unhomed.** Released, the shaft can be turned by the wire, a hand or the
+structure settling, and the motor's encoder is inside its driver where Wrist cannot read it. So
+every exit from Blackout homes first, to a switch at the wire's pay-out end with the bands still
+stretched, so the wire is never slack; then Wrist takes up whatever the frame asks.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
-latching alarm, which clears only when the pulses stop or the power is cycled; cleared while
-pulses still come, the motor restarts at once. So Wrist goes Free on an alarm, stops pulsing
-before it clears one, and comes out unhomed like any other Free.
+latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
+in-position signal. Wrist's other evidence is its own — the load cell's tension, the home switch
+closing mid-run on lost steps or a slipped wrap, a stale accelerometer, a move clamped at the
+travel limits — and every protection acts in the fixture, where the show cannot override it by
+not knowing.
 
-**Telemetry**, on its own connection with a will: `wrist/mode`, `wrist/homed`, `wrist/refused`
-(what it would not do, and why), `wrist/alarm`, retained on change; `wrist/angle_deg` and
-`wrist/freq_mhz` at 10 Hz while not Free; `health/wrist`. And Dendrite's, §3.11.
+**Step pulses from a timer NMI.** The ESP8266 has one core, shared with WiFi; pulses timed in
+ordinary code would jitter with the radio's interrupts, so a timer at non-maskable priority
+makes them from a velocity the control tick sets.
 
-### 3.11 Dendrite
-
-The sway sensor: an accelerometer on the sculpture, streaming raw axes over Bluetooth LE to its
-central, for the brain to make a `SwayState` of.
-
-**Raw axes, not a result.** The eyeball reduced landmarks on the device so the brain would not
-depend on one model (§3.6). Dendrite goes the other way for the same reason read forward: the
-reduction — axis choice, phase extraction, amplitude scaling — is what the PoC iterates, and in
-the brain an iteration is a deploy rather than a flash on a thing Velcroed to a sculpture. The
-brain picks the sway axis from the oscillation's principal axis, so the sensor's orientation
-does not matter and the perpendicular comes free as the whirl detector. When the reduction is
-boring it may move down; `SwayState` is the contract either way.
-
-**The wire**, defined once in `dendrite-wire`. One GATT service of ours: a sample
-characteristic notifying packed samples — a 16-bit wrapping counter and three 16-bit milli-g
-axes, little-endian, as many per notification as the MTU allows, two at the default — and a
-health characteristic once a second: sample rate, battery millivolts, name. The counter makes a
-bunched or dropped notification harmless: the estimator interpolates by count, not arrival.
-Samples come at the accelerometer's own 50 Hz data rate. The relay turns each into one OSC
-`/dendrite/sample` — counter, axes, crank angle in centidegrees (−1 unhomed), relay uptime in
-ms — and sends `/dendrite/health` with rate, battery and link state. The brain binds the access
-point's address on UDP 9001; a sample older than half a second is stale.
-
-**Today's hardware.** A BBC micro:bit V2 — an nRF52833 with the accelerometer on board, the whole
-reason to use it — with Rust firmware on Embassy, flashed with `probe-rs`. It has no gyro; at
-the top of a swaying structure the accelerometer reads tilt and lateral acceleration mixed,
-both in phase with displacement, so phase and frequency come out clean and amplitude in degrees
-is off by the ω²A term. The rig's Dendrite is an ESP32-C3 with an IMU that has one, on the
-access point, sending the same OSC itself.
-
-**On MQTT.** Dendrite has no network identity, so no `health/` topic; its relay publishes its
-subtree under the relay's will: `dendrite/x`, `y`, `z` per sample while Wrist is not Free (a
-few hundred a second, about half a gigabyte per session day in Memory), and `dendrite/rate_hz`,
-`battery_mv`, `link` retained.
-
-### 3.12 The inner ear
-
-The sway estimator, the `innerear` crate: `no_std`, pure arithmetic, the same code on the Pi
-today and an ESP tomorrow.
-
-**A PLL per sample.** It keeps the principal axis of the recent oscillation, locks a
-second-order loop to the signal on that axis with a bandwidth a tenth of the frequency it
-tracks, and hands the frame loop a `SwayState` through the seam: phase, frequency, amplitude on
-the axis and on the perpendicular, and a lock quality — the fraction of the signal's power the
-locked component explains, locked above 0.7 for a second. The receiver thread runs it per
-sample below the frame loop (§1.6).
-
-**Free decay.** Given a window after a transient, it fits f₁ from the zero crossings and Q from
-the log-decrement of successive peaks, and reports how many cycles cleared the noise floor;
-fewer than three and it says the Q is not to be trusted rather than printing one. The window
-opens on a transient — a pluck or a kick — not a button press, so the hand that plucks is not
-also the hand that presses.
-
-**Lag and phase error** come from the stamped samples, not telemetry: the crank angle on each
-sample against the phase the loop assigns it gives the lag; in Lock, the phase sent for that
-frame against the crank angle that came back gives the phase error. They are published as
-`brain/sway/lag_deg` and `brain/sway/phase_err_deg`, with the rest of `brain/sway/*` decimated
-to 5 Hz, what a dashboard can show and the queue can carry.
+**Telemetry is OSC, out only.** No MQTT client: Wrist sends its loop variables and raw inputs
+as OSC bundles, and its transitions, pluck results and protections as events. Nothing is
+computed for telemetry; what can be derived is derived from the recording. The address space is
+`fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
+coded in, worked out from raw readings in the telemetry.

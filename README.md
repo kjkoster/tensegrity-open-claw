@@ -195,6 +195,10 @@ QLC+'s library. `<Address>` in the `.qxw` is 0-based: DMX address 1 is `<Address
 | repatch so the channel count and the mode disagree | fails: re-pick the mode in QLC+'s Fixture Manager |
 | overlap two fixtures' slots | fails, naming both and their spans |
 | name two fixtures so they yield the same Rust constant | fails |
+| name a networked fixture `Name [ip mac]`, e.g. `Wrist [10.0.10.3 aa:bb:cc:dd:ee:ff]` | its firmware gets that address, and the access point's DHCP a static lease for that MAC |
+| write the bracket any other way: not one space before it and one inside, not IPv4 then a lower-case MAC | fails, naming the fixture |
+| give two fixtures the same address or the same MAC | fails, naming both |
+| build a fixture's firmware when its name carries no bracket | fails: a fixture on the network needs both |
 | patch a fixture outside the first universe | fails |
 | change the E1.31 output's universe or port | the brain listens and sends there |
 | change the E1.31 output's unicast address | the brain's receiver binds that address |

@@ -5,8 +5,9 @@ fixtures it uses and how each is set up. The audience is us. The show is a set o
 the rig runs on a one-metre model of the *Headless Hug* sculpture, stepped through from the
 cabinet door and watched live in Grafana on `memory-pi`. Its results go in
 [`POC-RESULTS.md`](POC-RESULTS.md). How to get from here to a running PoC is in
-[`TODO.md`](TODO.md). The components it introduces — Wrist, Dendrite, the inner ear — are
-described in [`DESIGN.md`](DESIGN.md), not here; this file says only how this show uses them.
+[`TODO.md`](TODO.md). The component it introduces, Wrist, is described in
+[`DESIGN.md`](DESIGN.md), and its firmware in [`CONTROL_LOOP.md`](CONTROL_LOOP.md), not here;
+this file says only how this show uses it.
 
 The previous show's components are on their tags: `last-version-with-eyeball-for-group-detection`,
 `last-version-with-retina` and `last-version-with-mouth`.
@@ -16,116 +17,114 @@ The previous show's components are on their tags: `last-version-with-eyeball-for
 ## 1. What the PoC is for
 
 The full-scale piece is a nine-metre tensegrity mast that must sway back and forth, in a
-controlled manner, unattended, with an audience present, driven through a guy wire by a crank
-at the structure's own first natural frequency. Three assumptions in that plan are measured
-here, on the model, with the drive chain in miniature:
+controlled manner, unattended, with an audience present, driven through a guy wire at the
+structure's own first natural frequency. Three assumptions in that plan are measured here, on
+the model, with the drive chain in miniature:
 
-1. **Dendrite senses the sway** — frequency, amplitude and phase — and there is a placement on
-   the structure where it does so best.
-2. **Wrist moves the structure controllably** — amplitude follows the crank, the motion stays
-   in one plane, and the drive stops when told.
-3. **The brain finds the resonance by itself**, repeatably, from its own sensor and actuator.
+1. **Wrist senses the sway** — frequency, amplitude and phase — from an accelerometer on the
+   structure, and there is a placement where it does so best.
+2. **Wrist moves the structure controllably** — the sway follows the amplitude it is sent, the
+   motion stays in one plane, and the drive brakes and stops when told.
+3. **Wrist finds and holds the resonance by itself**, repeatably: frequency and Q from a
+   pluck, the drive's phase learned while it runs, nothing calibrated by hand.
 
-A fourth question rides along: **which regime the drive is in.** A stiff line makes the model
-follow the crank (amplitude equals stroke; resonance only lowers the load); a compliant line
-makes the crank pump a resonance (amplitude grows over cycles; phase is the control). Every
-experiment is run with both, by putting an elastic section into the line or leaving it out,
-because the full-scale design branches on it.
+The drive is compliant by design: rubber bands between the motor and the wire are a series
+spring, so the motor pumps a resonance and phase is the control. A stiff line is not tried.
 
-What does not scale — the amplitude bound, the guy tension, the servo — is out of scope. What
+What does not scale — the amplitude bound, the guy tension, the motor — is out of scope. What
 does scale is the code, the fixture definitions, the measurement method and the decisions.
 
 ## 2. What the audience sees
 
-The model on its wooden base; a line from a node on it down over a screw-eye to a crank on a
-motor beside the base; the cabinet; a laptop on the access point showing the Grafana
-dashboard. On the cabinet door the left lamp says what the rig is doing, the two buttons drive
-the programme, the e-stop lets the crank go limp. The right lamp and the chord keep their
-meaning from the code: test mode.
+The model on its wooden base, a small accelerometer on it on a cable; a wire from a node on it
+down through a run of rubber bands to a motor beside the base, wrapped round the motor's shaft,
+the motor on a load cell; the cabinet; a laptop on the access point showing the Grafana
+dashboard. On the cabinet door the left lamp says what the rig is doing, the two lamps together
+plot the drive and the sway while it runs, the two buttons drive the programme, the e-stop
+brakes the drive and lets it go limp.
 
-### 2.1 The calendar
+### 2.1 No calendar, no test mode
 
-The calendar stays, as in every show: `brain/shows.rs` lists a window per experiment day
-(09:00–23:00, Delft, in Europe/Amsterdam time), and outside a window the Director is in blackout — lamps off, Wrist
-in Free. Test mode, by the chord, is the code's way to run outside a window for a while, and
-is kept unchanged for that purpose.
+The show always runs: from boot to power-off the Director runs the programme. The calendar and
+test mode stay in the code, disabled: the calendar never takes the Director to blackout, and
+the chord does nothing, so the right lamp never says test mode.
 
 ### 2.2 The programme
 
-Five experiments, always one of them *armed*. The **left button selects**, the **right button
-runs**, and while an experiment runs the right button **aborts** it. Nothing starts on a single
-press of the button that selects, so a pluck can be set up with one hand on the model.
+Two experiments, always one of them *armed*. The **left button selects**, the **right button
+runs**, and while an experiment runs the right button **aborts** it. Nothing starts on a press
+of the button that selects.
 
 ```
-                 left                 left                 left
-   armed Listen ──────▶ armed Kick ──────▶ armed Run ──────▶ armed Sweep ──────▶ armed Lock
-        ▲  │               │  ▲              │  ▲               │  ▲               │   │
-        │  │ right         │  │ right        │  │ right         │  │ right         │   │ right
-        │  ▼               ▼  │              ▼  │               ▼  │               ▼   │
-        │ Listen          Kick              Run               Sweep              Lock  │
-        │  │ done/abort    │ done/abort      │ done/abort       │ done/abort       │    │
-        └──┴───────────────┴────────────────┴──────────────────┴──────────────────┴────┘
-                              (back to the same experiment, armed)          left from Lock ──▶ armed Listen
+   armed Pluck ◀──── left ────▶ armed Run
+     │      ▲                    │      ▲
+right│      │ done/abort    right│      │ done/abort
+     ▼      │                    ▼      │
+    Pluck ──┘                   Run ────┘
 ```
 
-- At boot inside a window, and when a window opens, the Director is in **armed Listen**, Wrist
-  in Park.
+- At boot the Director is in **armed Pluck**, Wrist in Blackout.
+- Armed, the brain sends Wrist's Mode as Blackout: Wrist's idle state, coils released. Ending
+  or aborting an experiment is that Blackout, which Wrist takes by braking the sway to quiet
+  first. Blackout is a Mode only: Amplitude is a size, and 0 means no size, not Blackout.
+- The Director has no blackout state of its own. Wrist is otherwise in Blackout only when the
+  e-stop's mask or a lost universe puts it there (§2.4).
 - **Running** an experiment returns to the same experiment armed when it finishes or is
   aborted, so the right button repeats it. The left button is ignored while one runs.
 - Every state is published as `brain/show`, retained, as the code already does
-  (`armed-listen`, `listen`, `armed-kick`, `kick`, `armed-run`, `run`, `armed-sweep`, `sweep`,
-  `armed-lock`, `lock`, `blackout`). Each
-  start increments `brain/run`, retained — a run counter, not a second state topic — so a
-  Grafana annotation and a line in `POC-RESULTS.md` name the same run.
-- The line's state, stiff or compliant, is not something the brain can know. The operator
-  publishes it from the Mac as `operator/line` (`stiff` or `compliant`, retained) before a
-  run; the recorder stores it with the time, Grafana shows it as an annotation, the brain
-  never reads it.
+  (`armed-pluck`, `pluck`, `armed-run`, `run`). Each start increments `brain/run`,
+  retained — a run counter, not a second state topic — so a Grafana annotation and a line in
+  `POC-RESULTS.md` name the same run.
 
-The experiments, each with what it is for:
+The experiments, each with what it is for. Their amplitudes and durations are named constants
+in `brain/src/show.rs`, with units.
 
 | experiment | what the rig does | what it answers |
 |---|---|---|
-| **Listen** | Wrist stays in Park. The brain waits up to 60 s for a transient on Dendrite above the pluck threshold — the operator plucks the model by hand — then takes the next ten seconds as free decay, estimates f₁ and Q, publishes `brain/sway/f1_hz` and `brain/sway/q` retained, and finishes. | 1, and 3 by hand: the estimator on a human pluck, before the motor exists |
-| **Kick** | Listen, with Wrist's Kick as the pluck: the brain bumps Wrist's Kick counter, Wrist makes one quarter-turn out and back, the decay is taken from the moment the crank is back in Park. | 3, method A: resonance by free decay, no hands |
-| **Run** | Speed mode at `f1_hz` for sixty seconds, ramped up over the first five, then Park. | 2: the structure follows the crank at resonance |
-| **Sweep** | Speed mode from 0.5 f₁ to 1.5 f₁ over 120 s; the brain publishes amplitude and the lag between crank angle and sway phase as it goes (`brain/sway/amp`, `brain/sway/lag_deg`); then Park. | 3, method B: the amplitude peak and the lag crossing 90° — visible only with compliance in the line |
-| **Lock** | Lock mode: thirty seconds pumping at +90°, thirty holding at 0°, then braking at −90° until `brain/sway/amp` is below the lock floor; then Park. | the phase lock over the frame, pumping and braking — meaningful only with compliance |
+| **Pluck** | The brain sends Pluck at the pluck amplitude. Wrist homes, brakes the model to quiet if it is not, tugs once, records the ring-down for 30 s, adopts f and Q if the peaks are clean, persists them and returns to rest. The brain holds Pluck long enough for all of that, then finishes. | 3: resonance by free decay, no hands |
+| **Run** | The brain sends Run at the run amplitude for a few minutes, then finishes. Wrist homes, starts the model swinging if it is still, locks to the sway and drives in phase with its velocity, learning the drive's phase as it goes. | 2 and 3: the structure swings controllably at resonance, found and held by Wrist |
 
 Artist sessions and commissioning use QLC+'s takeover from any state, as on every show; the
-Director does not know and does not need a state for it.
+Director does not know and does not need a state for it. Mode and Amplitude on faders are how
+Wrist is driven at any amplitude, and in RampDown, which the programme never sends.
 
 ### 2.3 The lamps
 
-The left lamp is the show's only light. The right lamp is test mode's, as the code has it.
+| situation | left lamp | right lamp |
+|---|---|---|
+| armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | off |
+| Pluck | steady 100% | off |
+| Run | the driven sine | the measured sine |
+| finished | two 1 s fades up and down, then the armed pattern | off |
+| aborted | three 100 ms flashes, then the armed pattern | off |
 
-| situation | left lamp |
-|---|---|
-| blackout | off |
-| armed, experiment *k* of 5 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating |
-| Listen or Kick, waiting for the transient | steady 40% |
-| any experiment, PLL locked | brightness follows the sway: (1 + sin φ)/2, so the lamp breathes with the model |
-| any experiment, PLL not locked | steady 100% |
-| Kick, the kick itself | 300 ms at full |
-| finished | two 1 s fades up and down, then the armed pattern |
-| aborted | three 100 ms flashes, then the armed pattern |
+**In Run, the two lamps plot the two waveforms side by side.** The left lamp pulses with the
+driven sine, (1 + sin(φ + φ_off))/2; the right with the measured one, the sway on Wrist's
+accelerometer scaled to its amplitude, (1 + sway/a)/2. Side by side they show the drive leading
+the sway. Both come from Wrist's OSC to the brain: the driven phase from its state bundle,
+advanced at the oscillator's frequency between bundles so the lamp moves smoothly at the frame
+rate; the measured from its waveform bundle as it arrives. The brain writes both into the
+face's channels like any other look. While Wrist's OSC is stale, both lamps are at steady
+100%.
 
-### 2.4 The e-stop, signal loss, and what the crank does
+### 2.4 The e-stop, signal loss, and what the drive does
 
 The e-stop is the rig's show-stop, as the README has it, and the show runs on underneath it.
 What is specific to this show is what Wrist does — set by this show's `.qxf` and Wrist's
-firmware, described in `DESIGN.md`, used here:
+firmware, in `CONTROL_LOOP.md`, used here:
 
-- **Pressed:** the mask puts Wrist's Mode in its no-function band, **Free**: the driver is
-  disabled and the crank goes limp, as if the motor's power had been removed. Nothing turns
-  under power while the stop is pressed. The same happens when Wrist loses the universe.
-- **Released:** the live frame returns. Wrist comes out of Free **unhomed** — it cannot have
-  seen the crank being turned while limp — and accepts only Hold, Home and Park until it has
-  been parked again; a Speed or Lock in the frame is refused and reported, not resumed. So the
-  operator releases the stop, presses the right button to abort to Park, and Wrist homes and
-  parks; then the experiment can be run again. The show never sees the stop; Wrist's rule is
-  what stops motion from resuming on its own.
-- **Boot with the stop pressed:** nothing goes out, Wrist stays Free, as every fixture does.
+- **Pressed:** the mask puts Wrist's Mode in its no-function band, **Blackout**. Wrist cannot
+  tell that from a Blackout the show asks for: if it was driving, it brakes the sway under
+  power, for at most 30 s, then releases its coils, as if the motor's power had been removed.
+- **Released:** the live frame returns. Position was lost while the coils were released, so
+  Wrist homes, then takes up whatever the frame asks, a Run included. Nothing in the fixture
+  stops motion resuming on its own. The show runs on under the stop and reads the buttons, so
+  an experiment aborted with the right button while the stop is pressed makes the release a
+  Blackout, and nothing moves.
+- **Universe lost:** no frame for 2.5 s, or the brain ending its stream as it stops, and Wrist
+  releases its coils at once, with no brake.
+- **Boot with the stop pressed:** nothing goes out, Wrist stays in Blackout, as every fixture
+  does.
 
 ## 3. The fixtures
 
@@ -133,21 +132,20 @@ The workspace patches two fixtures: `Face` as the code has it, and `Wrist`.
 
 ### 3.1 Wrist
 
-A JD57 integrated closed-loop stepper (NEMA 23) with a crank disc on its shaft, controlled by a
-Waveshare ESP32-S3-RS485-CAN that follows the universe over the access point, and — for this
-show — the Bluetooth central that relays Dendrite's samples to the brain as OSC. What it is and
-why is `DESIGN.md`'s. How this show sets it up:
+A JD57 integrated closed-loop stepper (NEMA 23) on a load cell, the guy wire wrapped round its
+bare shaft, and an ADXL345 accelerometer on the model, all on one NodeMCU (ESP8266) that
+follows the universe over the access point and closes the sway loop itself. The brain sets
+only its mode and amplitude, and reads its OSC for the face. What it is and why is
+`DESIGN.md`'s; its firmware, pins and constants are `CONTROL_LOOP.md`'s. How this show sets it
+up:
 
-**Patch.** `fixtures/wrist.qxf`, mode "8 Channel", at the top of the universe, address 500.
+**Patch.** `fixtures/wrist.qxf`, mode "2 Channel", at the top of the universe, address 500,
+named `Wrist [10.0.10.3 <its MAC>]`.
 
 | ch | name | group | this show's use |
 |---|---|---|---|
-| 1 | Mode | Maintenance; no-function band **Free** | Free · Hold · Home · Park · Speed · Lock |
-| 2–3 | Frequency coarse/fine | — | mHz; crank revolutions per second in Speed, sway Hz in Lock (one revolution per sway cycle, so the same number); allowed 100–5000 |
-| 4–5 | Phase coarse/fine | — | 0–65535 → 0–360°; Lock only |
-| 6 | Offset | — | 0–255 → −90° … +90°, 128 = 0°; Lock only |
-| 7 | Ramp | — | value × 0.02 rev/s² (0 reads as 1); limits every change of frequency and of mode |
-| 8 | Kick | Maintenance; no-function band 0 | a counter 1–255; a change seen while Parked and homed is one kick |
+| 1 | Mode | Maintenance; no-function band **Blackout** (0–15) | Blackout 0–15 · RampDown 16–63 · Run 64–191 · Pluck 192–255 |
+| 2 | Amplitude | Nothing | 0–255 → 0 … `A_max` steps: in Run the drive's amplitude, in Pluck the size of the tug |
 
 **Motor.** Labelled "JD57 Series Closed Stepper Motor", **24–36 V DC**; the label is what
 counts, over the seller's listing and over the manual, which is for a sibling revision.
@@ -157,109 +155,113 @@ switches:
 
 | switch | setting | why |
 |---|---|---|
-| SW1–SW4 | ON, OFF, ON, ON | 1600 pulses per revolution, per the table on the body; 5 rev/s is 8 kHz of pulses |
-| SW5 | as set at commissioning | the motor's direction (off counter-clockwise, on clockwise), which is Wrist's positive direction |
+| SW1–SW4 | the 800 row of the table on the body | 800 pulses per revolution: the model's fastest motion, about 8 rev/s, is 6.4 kHz of pulses, inside the 12.5 kHz the firmware can make; 1600 would not be |
+| SW5 | as set at commissioning | the motor's direction (off counter-clockwise, on clockwise), set so positive reels the wire in |
 | SW6 | off, always | "internal debugging, do not switch on" |
 
 What the sibling's manual says and the PoC relies on: the inputs take 5–24 V at 7–16 mA; a
 pulse is at least 2.5 µs high and 2.5 µs low; direction must be steady 5 µs before the pulse
 edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it
 latches, and resets only when the pulses stop or the power is cycled, and a reset while
-pulses continue restarts the motor abruptly, so Wrist stops pulsing before it clears an
-alarm. The alarm line is the motor's only feedback: no encoder output, no in-position output,
-no serial port.
+pulses continue restarts the motor abruptly. The alarm line is the motor's only feedback: no
+encoder output, no in-position output, no serial port. Unpowered, or disabled, the shaft holds
+only by its detent torque.
 
 Supply: a **24 V, 5–6 A switching supply**, through a 5 A fuse, with 4700 µF / 50 V across V+
 and V− at the motor. If the e-stop button has a spare contact block, a relay on the motor's
-feed from that contact makes "limp when pressed" a hardware fact as well as a DMX one; without
-one, Free over DMX is what the PoC has, and the full-scale rig gets the relay regardless.
+feed from that contact makes "limp when pressed" a hardware fact as well as a DMX one, at the
+cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
+gets the relay regardless.
 
-**Board.** 7–36 V in, straight from the motor's 24 V supply. Five signals: PU and DR on the
-outside connector's GPIO1/GPIO2; **EN**, AL and the **home switch** on a pigtail from the
-internal header. PU, DR and EN through a 74HCT14 on the header's 5 V (the S3 is 3.3 V); AL−
-to ground, AL+ to a GPIO with its pull-up; the microswitch between a GPIO with its pull-up
-and ground. EN is wired because Free must actually de-energise the driver. Address
-`10.0.10.3`, set on itself from `etc/claw-wifi.env`. RS-485 unused this show; termination
-jumper off.
+**Board.** A NodeMCU (ESP8266) on 5 V from the cabinet's USB charger, a supply of its own: it
+shares no ground with the motor, and the drive's optos are the only link. PU, DR and EN are
+driven from 3.3 V, the anodes common and each GPIO sinking a cathode; the manual asks 5 V, so
+the current is measured on the bench and, below 7 mA, the anodes go to 5 V with a 1N4148 in
+each cathode lead. AL, the homing switch, the ADXL345 on I²C and the HX711 for the load cell
+take the rest of the pins, as `CONTROL_LOOP.md` lists them. Address `10.0.10.3`, from its name
+in the workspace, `Wrist [10.0.10.3 <its MAC>]`: compiled into the firmware and served as a
+static lease for its MAC by the access point's DHCP as a backup.
 
-**Crank and home.** An 8 mm flange coupling on the shaft, drilled at 3, 5 and 8 mm radius; a
-tab on the disc trips the microswitch once per revolution. Home is the switch's rising edge;
-**neutral is home plus `HOME_OFFSET_DEG`**, measured at commissioning as the angle at which the
-crank arm is perpendicular to the line with the model at rest, and written into Wrist's
-config with the date. Homing turns the crank slowly (0.2 rev/s) in the positive direction
-until the switch; Park means "home if unhomed, then go to neutral". In Speed and Lock the
-switch is also the index: two revolutions without it, or an edge more than 5° from where
-it should be, and Wrist goes Free and says why.
+**Wire and home.** The guy wire is wrapped a few turns round the bare 8 mm shaft, its tail tied
+off — a capstan, 25 mm of wire a revolution — then a short cable, a hook, rubber bands in
+parallel, a hook, and the wire to the chosen node. The bands are the series spring, and their
+preload keeps the wire taut. The homing switch marks the wire's pay-out end, with the bands
+still stretched; the rest position, the travel and the tension limits for the band set are
+measured at commissioning and coded into the firmware. A Blackout leaves the shaft to its
+detent, so either the preload stays below what the detent holds, or a backup guy, fixed and
+slightly longer, keeps the model standing without the motor's. The motor sits on a bar-type
+load cell, the wire leaving the shaft along the cell's axis, on a wooden bridge spanning the
+model's base, clamped to the table; nothing is fixed to the sculpture but the wire and the
+accelerometer.
 
-**Line.** 0.3 mm braided Dyneema from the crank pin over a screw-eye at the model's base to
-the chosen node — the stiff line. The compliant line adds 10 cm of 1 mm shock cord or a
-rubber band in series, pretensioned so it never slackens at the largest sway. The motor sits
-on a wooden bridge spanning the model's base, clamped to the table; nothing is fixed to the
-sculpture.
+### 3.2 The accelerometer
 
-### 3.2 Dendrite, in this show
-
-A micro:bit V2 on a battery pack, Velcroed to the model, streaming its accelerometer to Wrist
-over Bluetooth; Wrist relays to the brain. The three placements tried in Listen are the top
-node, a mid-height node, and a strut. Dendrite's protocol, the relay and the estimator are
-`DESIGN.md`'s.
+An ADXL345 breakout Velcroed to the model, on a cable to Wrist's board run apart from the
+motor's. Wrist picks the sway axis at each Pluck, so the breakout's orientation does not
+matter. The three placements tried in E0 are the top node, a mid-height node, and a strut.
 
 ### 3.3 Memory and the dashboard
 
 `memory-pi` as the README has it, with one provisioned dashboard for this show,
-`etc-memory-pi/grafana/headless-hug-poc.json`: Dendrite's axes, `brain/sway/*`, `wrist/*`,
-`brain/show` and `brain/run` and `operator/line` as annotations, `dendrite/link`. The Mac is
-on the access point for the sessions and reaches Grafana over the SSH jump as today; QLC+'s
-output for this show unicasts to `10.0.10.1` for the same reason, which the brain's receiver
-binds because the workspace says so.
+`etc-memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
+transitions, pluck results and protections as annotations, and `brain/show` and `brain/run` as
+annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
+lamps and to `memory-pi`, whose OSC bridge ingests it alongside MQTT, so the trace runs on
+while the brain is down. The Mac is on the access point for the sessions
+and reaches Grafana over the SSH jump as today; QLC+'s output for this show unicasts to
+`10.0.10.1` for the same reason, which the brain's receiver binds because the workspace says
+so.
 
 ## 4. The experiments, in order
 
 Each with what it needs working, what is read off the dashboard, and what decides it. The
 numbers go in `POC-RESULTS.md`, by `brain/run`.
 
-**E0 — Listen, by hand.** *Needs:* Dendrite, Wrist as bridge (motor side not yet), the
-estimator, Memory. *Do:* Listen; pluck a centimetre; three times per placement, three
-placements; `operator/line` set to `stiff`. *Read:* f₁ and Q as published, checked against ten
-periods counted on the raw trace and cycles to half amplitude; second-mode and cross-axis
-content per placement; the Bluetooth link's drops and counter gaps over the afternoon. Also by
-hand: the static pull test, a luggage scale at the top, grams per millimetre of deflection.
-*Decides:* whether the model has a usable first mode (Q < 3 means a heavier top or a tighter
-net before anything else), the placement, and the reference numbers for everything after.
+**E0 — Sensing, by hand.** *Needs:* Wrist's board and the accelerometer (motor not yet
+wired), its telemetry in Memory, the dashboard. *Do:* with Wrist in Blackout, pluck the model a
+centimetre by hand; three times per placement, three placements. *Read:* off the raw trace,
+f₁ from ten periods counted and Q from the cycles to half amplitude; second-mode and
+cross-axis content per placement. Also by hand: the static pull test, a luggage scale at the
+top, grams per millimetre of deflection. *Decides:* whether the model has a usable first mode
+(Q < 3 means a heavier top or a tighter net before anything else), the placement, and the
+reference numbers for everything after.
 
-**E1 — Wrist from a fader.** *Needs:* Wrist's motor side, QLC+ on the access point. *Do:*
-Home; Park; Speed at 1, 2, 3 rev/s; bump Kick; Hold; stop QLC+ and watch it go Free; e-stop
-and watch it go Free; release and confirm it refuses Speed until Parked. *Read:*
-`wrist/angle_deg` against the disc; Dendrite's trace unbroken while the motor runs — the two
-share a radio. *Decides:* Wrist is a fixture.
+**E1 — Wrist from a fader.** *Needs:* Wrist's motor side, the load cell calibrated, QLC+ on
+the access point. *Do:* under takeover, Mode to Pluck at a small Amplitude and watch it home
+and tug; Run, Amplitude up and down; RampDown, then Blackout; Run again and stop the brain,
+whose stream ends, and watch the coils release at once (stopping QLC+ only hands the universe
+back to the brain); e-stop while running and watch it brake, then release; release the stop
+and watch it home and resume. *Read:* the motor's position against the wire, the load cell against
+the bands, the transitions; the accelerometer's trace clean while the motor runs. *Decides:*
+Wrist is a fixture.
 
-**E2 — Three ways to pull.** *Needs:* E1, the artist. *Do:* under takeover, line at (a) the
-top node, (b) a mid node, (c) a pair of lines from two anchors at 90°, one on the crank and
-one sprung; Speed at f₁ from E0; 3, 5 and 8 mm radii; stiff and compliant. *Read:* amplitude
-per millimetre of radius, cross-axis amplitude, how it looks. *Decides:* the pull geometry for
-full scale, with the artist.
+**E2 — Three ways to pull.** *Needs:* E1, the artist. *Do:* under takeover, the wire at (a) the
+top node, (b) a mid node, (c) a pair of guys from two anchors at 90°, one on Wrist and one
+sprung; Run at three amplitudes. *Read:* sway amplitude per step of drive amplitude,
+cross-axis amplitude, how it looks. *Decides:* the pull geometry for full scale, with the
+artist.
 
-**E3 — Kick.** *Needs:* the Kick experiment. *Do:* ten Kicks. *Read:* f₁ and Q per run and
-their spread against E0. *Decides:* question 3 by method A; pass is ten within 2% of each
-other and of E0.
+**E3 — Pluck.** *Needs:* the Pluck experiment. *Do:* ten Plucks. *Read:* f₁, Q, the axis and
+the clean peaks per run, and their spread against E0. *Decides:* question 3, the resonance
+found; pass is ten within 2% of each other and of E0.
 
-**E4 — Run and Sweep.** *Needs:* E3. *Do:* Run, then Sweep, stiff; then both compliant.
-*Read:* in Run, amplitude against radius (stiff: equal; compliant: Q times) and
-`brain/sway/lag_deg`; in Sweep, the amplitude and lag curves against frequency. *Decides:*
-the regime, by measurement; and question 3 by method B.
+**E4 — Run.** *Needs:* E3. *Do:* Run. *Read:* time to lock; the drive phase Wrist acquires and
+how it settles; the steady sway amplitude against Q times the static deflection the drive
+amplitude makes; rise time, and brake time when the Run ends; the two lamps side by side.
+*Decides:* questions 2 and 3, the resonance held and the amplitude followed.
 
-**E5 — Lock.** *Needs:* E4, compliant. *Do:* Lock. *Read:* growth at +90°, hold at 0°, decay
-at −90°; `brain/sway/phase_err_deg`, the difference between the phase the brain commanded and
-the crank angle it got back stamped on Dendrite's samples. *Decides:* whether the phase lock
-works with the Dendrite→Wrist→brain→Wrist round trip in it, and by how many degrees.
+**E5 — A long run.** *Needs:* E4. *Do:* under takeover, Run at one amplitude for an afternoon.
+*Read:* how the drive phase and the oscillator's frequency drift and whether the adaptation
+follows them without falling back to acquiring; the persisted values; every protection that
+fires. *Decides:* whether the loop holds the resonance unattended, which is the full scale's
+premise.
 
-Throughout, without being an experiment: the Bluetooth link's drops, reconnects and gaps, and
-Wrist's step timing with the link up and down. These decide nothing here; they are the
-evidence for where the central lives at full scale.
+Throughout, without being an experiment: Wrist's control-tick timing and the age of its last
+frame, with WiFi and the step pulses sharing one core. These decide nothing here; they are the
+evidence for the full scale's choice of board.
 
 ## 5. Not in this show
 
-A load cell in the line (the full-scale tension method; the Sweep's lag answers the same
-question on the model). Any amplitude bound or supervisor beyond Free on stop and loss. Wind
-and weather. Bluetooth on the brain. The ESP-based brain, RDM, the dials, the e-paper. Sound
-and vision.
+A stiff line. Any amplitude bound or supervisor beyond Wrist's own protections. Wind and
+weather. A sensor apart from Wrist, and Bluetooth anywhere. The ESP-based brain, RDM, the
+dials, the e-paper. Sound and vision.
