@@ -28,8 +28,7 @@ the model, with the drive chain in miniature:
 3. **Wrist finds and holds the resonance by itself**, repeatably: frequency and Q from a
    pluck, the drive's phase learned while it runs, nothing calibrated by hand.
 
-The drive is compliant by design: rubber bands between the motor and the wire are a series
-spring, so the motor pumps a resonance and phase is the control. A stiff line is not tried.
+The drive is compliant by design (`DESIGN.md` §3.10); a stiff line is not tried.
 
 What does not scale — the amplitude bound, the guy tension, the motor — is out of scope. What
 does scale is the code, the fixture definitions, the measurement method and the decisions.
@@ -132,12 +131,9 @@ The workspace patches two fixtures: `Face` as the code has it, and `Wrist`.
 
 ### 3.1 Wrist
 
-A JD57 integrated closed-loop stepper (NEMA 23) on a load cell, the guy wire wrapped round its
-bare shaft, and an ADXL345 accelerometer on the model, all on one NodeMCU (ESP8266) that
-follows the universe over the access point and closes the sway loop itself. The brain sets
-only its mode and amplitude, and reads its OSC for the face. What it is and why is
-`DESIGN.md`'s; its firmware, pins and constants are `CONTROL_LOOP.md`'s. How this show sets it
-up:
+The sway drive. What it is and why is `DESIGN.md` §3.10; its hardware, firmware, pins and
+constants are `CONTROL_LOOP.md`'s; its parts are in `OWNED-DEVICES.md`. The brain sets only
+its mode and amplitude, and reads its OSC for the face. How this show sets it up:
 
 **Patch.** `fixtures/wrist.qxf`, mode "2 Channel", at the top of the universe, address 500,
 named `Wrist [10.0.10.3 <its MAC>]`.
@@ -147,11 +143,8 @@ named `Wrist [10.0.10.3 <its MAC>]`.
 | 1 | Mode | Maintenance; no-function band **Blackout** (0–15) | Blackout 0–15 · RampDown 16–63 · Run 64–191 · Pluck 192–255 |
 | 2 | Amplitude | Nothing | 0–255 → 0 … `A_max` steps: in Run the drive's amplitude, in Pluck the size of the tug |
 
-**Motor.** Labelled "JD57 Series Closed Stepper Motor", **24–36 V DC**; the label is what
-counts, over the seller's listing and over the manual, which is for a sibling revision.
-Current is set at the factory, 4 A, with no switch for it. One 12-way 2.5 mm XH header, left
-to right: AL− AL+ EN− EN+ DR− DR+ PU− PU+ V− V− V+ V+, the power pins doubled. Six DIP
-switches:
+**Motor.** The closed-loop stepper; its label, connector and limits are in
+`OWNED-DEVICES.md`. Its DIP switches for this show:
 
 | switch | setting | why |
 |---|---|---|
@@ -159,40 +152,24 @@ switches:
 | SW5 | as set at commissioning | the motor's direction (off counter-clockwise, on clockwise), set so positive reels the wire in |
 | SW6 | off, always | "internal debugging, do not switch on" |
 
-What the sibling's manual says and the PoC relies on: the inputs take 5–24 V at 7–16 mA; a
-pulse is at least 2.5 µs high and 2.5 µs low; direction must be steady 5 µs before the pulse
-edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it
-latches, and resets only when the pulses stop or the power is cycled, and a reset while
-pulses continue restarts the motor abruptly. The alarm line is the motor's only feedback: no
-encoder output, no in-position output, no serial port. Unpowered, or disabled, the shaft holds
-only by its detent torque.
-
-Supply: a **24 V, 5–6 A switching supply**, through a 5 A fuse, with 4700 µF / 50 V across V+
-and V− at the motor. If the e-stop button has a spare contact block, a relay on the motor's
-feed from that contact makes "limp when pressed" a hardware fact as well as a DMX one, at the
-cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
+**Supply.** The motor supply at **38 V** (`OWNED-DEVICES.md` says why it runs there), through
+a 5 A fuse, with two 47 µF / 50 V in parallel across V+ and V− at the motor, both pins of
+each power pair connected. They damp the leads' ringing; they are too small to absorb the
+motor's braking, so an over-voltage flash while braking says a larger one is needed. If the e-stop button has a spare contact block, a relay on the motor's
+feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
+hardware fact as well as a DMX one, at the cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
 gets the relay regardless.
 
-**Board.** A NodeMCU (ESP8266) on 5 V from the cabinet's USB charger, a supply of its own: it
-shares no ground with the motor, and the drive's optos are the only link. PU, DR and EN are
-driven from 3.3 V, the anodes common and each GPIO sinking a cathode; the manual asks 5 V, so
-the current is measured on the bench and, below 7 mA, the anodes go to 5 V with a 1N4148 in
-each cathode lead. AL, the homing switch, the ADXL345 on I²C and the HX711 for the load cell
-take the rest of the pins, as `CONTROL_LOOP.md` lists them. Address `10.0.10.3`, from its name
-in the workspace, `Wrist [10.0.10.3 <its MAC>]`: compiled into the firmware and served as a
-static lease for its MAC by the access point's DHCP as a backup.
+**Board.** The NodeMCU on 5 V from the cabinet's USB charger, wired as `CONTROL_LOOP.md` §2
+has it, ENA through an S8050. Powered and running no code, the board leaves the motor free;
+unpowered, it leaves the driver enabled and the shaft held under power (both tested
+2026-11-07), so the motor's supply goes off before the board's.
 
-**Wire and home.** The guy wire is wrapped a few turns round the bare 8 mm shaft, its tail tied
-off — a capstan, 25 mm of wire a revolution — then a short cable, a hook, rubber bands in
-parallel, a hook, and the wire to the chosen node. The bands are the series spring, and their
-preload keeps the wire taut. The homing switch marks the wire's pay-out end, with the bands
-still stretched; the rest position, the travel and the tension limits for the band set are
-measured at commissioning and coded into the firmware. A Blackout leaves the shaft to its
-detent, so either the preload stays below what the detent holds, or a backup guy, fixed and
-slightly longer, keeps the model standing without the motor's. The motor sits on a bar-type
-load cell, the wire leaving the shaft along the cell's axis, on a wooden bridge spanning the
-model's base, clamped to the table; nothing is fixed to the sculpture but the wire and the
-accelerometer.
+**Wire and home.** As `CONTROL_LOOP.md` §2 has it, the wire running to the chosen node. The
+rest position, the travel and the tension limits for the band set are measured at
+commissioning and coded into the firmware. The motor on its load cell sits on a wooden bridge
+spanning the model's base, clamped to the table; nothing is fixed to the sculpture but the
+wire and the accelerometer.
 
 ### 3.2 The accelerometer
 
