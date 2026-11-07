@@ -153,9 +153,10 @@ named `Wrist [10.0.10.3 <its MAC>]`.
 | SW6 | off, always | "internal debugging, do not switch on" |
 
 **Supply.** The motor supply at **38 V** (`OWNED-DEVICES.md` says why it runs there), through
-a 5 A fuse, with two 47 µF / 50 V in parallel across V+ and V− at the motor, both pins of
-each power pair connected. They damp the leads' ringing; they are too small to absorb the
-motor's braking, so an over-voltage flash while braking says a larger one is needed. If the e-stop button has a spare contact block, a relay on the motor's
+a 5 A fuse, with 4700 µF / 50 V across V+ and V− at the motor, fixed down rather than
+hanging from its leads, and both pins of each power pair connected. Until it arrives, two
+47 µF / 50 V stand in: they damp the leads' ringing but cannot absorb the motor's braking.
+If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
 hardware fact as well as a DMX one, at the cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
 gets the relay regardless.
@@ -194,8 +195,8 @@ so.
 Each with what it needs working, what is read off the dashboard, and what decides it. The
 numbers go in `POC-RESULTS.md`, by `brain/run`.
 
-**E0 — Sensing, by hand.** *Needs:* Wrist's board and the accelerometer (motor not yet
-wired), its telemetry in Memory, the dashboard. *Do:* with Wrist in Blackout, pluck the model a
+**E0 — Sensing, by hand.** *Needs:* Wrist's board and the accelerometer, its telemetry in
+Memory, the dashboard. *Do:* with Wrist in Blackout, pluck the model a
 centimetre by hand; three times per placement, three placements. *Read:* off the raw trace,
 f₁ from ten periods counted and Q from the cycles to half amplitude; second-mode and
 cross-axis content per placement. Also by hand: the static pull test, a luggage scale at the

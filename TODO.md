@@ -13,10 +13,11 @@ steps here.
 
 ## Soldering
 
-- On the bench, with the supply at 38 V, before wiring, and into `SHOW.md` §3.1 and the
-  firmware's constants (`CONTROL_LOOP.md` §12): the wire tension the unpowered shaft holds by its detent; the status LED at
-  power-up and on a forced stall.
-- Wire: the two 47 µF / 50 V at the motor; the home switch and the ADXL345 on the pins in
+- On the bench, into `OWNED-DEVICES.md` and the firmware's constants: the status LED and the
+  alarm on a forced stall, holding the shaft while `wrist/bench` plucks; once the wire is on,
+  the tension the unpowered shaft holds by its detent.
+- Find a plank to mount Wrist's board and its wiring on, instead of a housing.
+- Wire: the 4700 µF / 50 V at the motor once it arrives, the two 47 µF until then; the home switch and the ADXL345 on the pins in
   `CONTROL_LOOP.md` §2.
 - If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
   feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
@@ -30,7 +31,8 @@ steps here.
   Change the E1.31 output's unicast address to `10.0.10.1`, so the Mac works on the access
   point for this show; the brain binds what the workspace says.
 - `OWNED-DEVICES.md` keeps the camera, the Alesis and the speakers as owned, not in the
-  cabinet, and gains Wrist's parts: the motor, the NodeMCU, the ADXL345, the load cell and its HX711.
+  cabinet, and gains the rest of Wrist's parts: the NodeMCU, the ADXL345, the load cell and
+  its HX711.
 - Hardware out of the cabinet: the camera and its PoE injector, the audio interface, their
   cables.
 - Delete `fixtures/dendrite.oscquery.json`, and `fixtures/wrist.xml`, a copy of the old
@@ -38,8 +40,8 @@ steps here.
 
 ## Wrist's board: sensing and telemetry
 
-The target: E0, the accelerometer's trace on the dashboard from Wrist's board, the motor not
-yet wired. The dashboard comes first because it is how everything after it is read.
+The target: E0, the accelerometer's trace on the dashboard from Wrist's board, the motor in
+Blackout. The dashboard comes first because it is how everything after it is read.
 
 - Buy: a microswitch for home; rubber bands, two hooks, a short cable and the guy wire; a
   plank, two G-clamps; for the motor, four M4 bolts as long as the flange, what it bolts to, a
@@ -74,8 +76,9 @@ yet wired. The dashboard comes first because it is how everything after it is re
 - Import `fixtures/wrist.qxf` into QLC+ and patch it at 500 as `Wrist [10.0.10.3 <its MAC>]`.
   Confirm the mask compiles to Blackout for Mode and holds Amplitude.
 - `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy.sh`, the
-  OSC encoders generated from `wrist.oscquery.json` at build time; flashed over USB. Decide
-  the build tool, `arduino-cli` or PlatformIO, and write it down.
+  OSC encoders generated from `wrist.oscquery.json` at build time; flashed over USB; built
+  with `arduino-cli`, the core and libraries pinned in a `sketch.yaml` profile. Delete the
+  bench sketch, `wrist/bench/`, once the firmware moves the motor.
 - `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: WiFi at the address from the
   header, with modem sleep off; the sACN receiver, its 2.5 s timeout and Stream-Terminated;
   Blackout only, ENA released; the ADXL345 and the HX711; the lock-in running; the state and

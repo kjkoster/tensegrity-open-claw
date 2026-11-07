@@ -19,6 +19,7 @@ grinder is the example — and the basic electronic components are on hand.
 | `riverrain` | MacBook Air M2, local user `kjkoster`. The development machine. |
 | `eyeson` | MacBook Air 2015, dual-core Broadwell i5 at 1.6 GHz, no usable GPU, macOS Monterey (its last), no Ethernet port, local user `kjkoster`. Spare. |
 | Spare Raspberry Pis | Several, at least one a Pi 4, some with more than 1 GB of RAM. |
+| ESP32 DIN-rail controllers | Two Waveshare ESP32-S3-RS485-CAN-U: an ESP32-S3 with an RS-485 and a CAN interface, in a DIN-rail case. Not in use yet. |
 
 ## The cabinet
 
@@ -68,7 +69,7 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail.
 
 | Device | Details |
 |---|---|
-| Closed-loop stepper | One NEMA 23 integrated closed-loop stepper, labelled "JD57 Series Closed Stepper Motor, Voltage: 24–36 VDC input"; the seller says 24–48 V and the manual 20–50 V. Runs at 38 V: powered at 38 V the driver shows green and no over-voltage (one red flash), measured 2026-11-07. Current is set at the factory, 4 A, with no switch for it. Enable: with EN+ on 3.3 V, EN− open holds the shaft (enabled) and EN− to ground frees it (disabled), so the EN opto lit disables the driver; an input draws 11.7 mA from 3.3 V with its − pin grounded; with no fault, the alarm output rests open (all measured 2026-11-07). One 12-way 2.5 mm XH-type header, left to right: AL− AL+ EN− EN+ DR− DR+ PU− PU+ V− V− V+ V+, the power pins doubled. Six DIP switches: SW1–SW4 set the pulses per revolution, per the table on the body (1600 is ON, OFF, ON, ON); SW5 the direction (off counter-clockwise, on clockwise); SW6 is labelled 内部调试用，严禁打开, "internal debugging, do not switch on", and stays off. The only manual found, "JD57 Series Integrated Close-Loop Step Motor Manual (PULSE CONTROL)", is for a sibling revision whose SW6 sets the current and whose voltage range differs. From it: inputs 5–24 V at 7–16 mA; a pulse at least 2.5 µs high and 2.5 µs low; direction steady 5 µs before the pulse edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it latches, and resets only when the pulses stop or the power is cycled, and a reset while pulses continue restarts the motor abruptly. No encoder output, no in-position output, no serial port: the alarm line is its only feedback. |
+| Closed-loop stepper | One NEMA 23 integrated closed-loop stepper, labelled "JD57 Series Closed Stepper Motor, Voltage: 24–36 VDC input"; the seller says 24–48 V and the manual 20–50 V. Runs at 38 V: powered at 38 V the driver shows green and no over-voltage (one red flash), measured 2026-11-07. Current is set at the factory, 4 A, with no switch for it. Enable: with EN+ on 3.3 V, EN− open holds the shaft (enabled) and EN− to ground frees it (disabled), so the EN opto lit disables the driver; an input draws 11.7 mA from 3.3 V with its − pin grounded; with no fault, the alarm output rests open; at 38 V and 800 steps a revolution, with the shaft free, it follows a ramp of 200,000 steps/s² to 12,000 steps a second (15 revolutions a second) without an alarm (all measured 2026-11-07). One 12-way 2.5 mm XH-type header, left to right: AL− AL+ EN− EN+ DR− DR+ PU− PU+ V− V− V+ V+, the power pins doubled. Six DIP switches: SW1–SW4 set the pulses per revolution, per the table on the body (1600 is ON, OFF, ON, ON); SW5 the direction (off counter-clockwise, on clockwise); SW6 is labelled 内部调试用，严禁打开, "internal debugging, do not switch on", and stays off. The only manual found, "JD57 Series Integrated Close-Loop Step Motor Manual (PULSE CONTROL)", is for a sibling revision whose SW6 sets the current and whose voltage range differs. From it: inputs 5–24 V at 7–16 mA; a pulse at least 2.5 µs high and 2.5 µs low; direction steady 5 µs before the pulse edge; 200 kHz at most. The alarm is an opto-isolated open collector, 30 V and 50 mA; it latches, and resets only when the pulses stop or the power is cycled, and a reset while pulses continue restarts the motor abruptly. No encoder output, no in-position output, no serial port: the alarm line is its only feedback. |
 | Motor supply | An adjustable DC supply, 38–62 V; it goes no lower than 38 V. Feeds the closed-loop stepper at its minimum, 38 V, two volts over the stepper's label, which the stepper takes (above). Kept at its minimum: the stepper's own over-voltage limit for this revision is not known. |
 
 ## Components
@@ -78,7 +79,7 @@ A partial list of a larger stock: parts are added here as they are looked for.
 | Part | Details |
 |---|---|
 | Small-signal transistors, TO-92 | All bipolar, no MOSFETs among them. NPN: 2SC1815, 2SC945, S8050, MPSA42 (300 V), S9018 (RF), and one marked A93904, taken to be a 2N3904. PNP: 2N3906, 2SA1015, 2N5401 (150 V), S8550, S9015. Pinouts differ between types and makers; check with a multimeter's diode test before soldering. |
-| Electrolytic capacitors | Mostly 16 V, and 47 µF / 50 V, two of which sit across the motor's 38 V supply. |
+| Electrolytic capacitors | Mostly 16 V, and 47 µF / 50 V. A 4700 µF / 50 V (Jamicon `TLP478M050S1A5Q40L`, 22 × 40 mm) is on order for the motor's 38 V supply. |
 
 ## Stand-ins for rented gear
 
