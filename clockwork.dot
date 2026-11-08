@@ -13,69 +13,135 @@
 //                           the one place the WiFi is defined.
 //   subgraph cluster_<dev>  a device, labelled with its host name.
 //   <dev>_if                the device's addresses, one field each: interface, address,
-//                           network. "dhcp" for an address taken from a lease.
-//   any other node          a service on that device: its name, then one field per port it
-//                           listens on, `<id> protocol transport interface:port`, `*` for every
-//                           interface. A service that only sends has its name alone.
-//   an edge                 data flowing from the sender to the receiver's port, labelled with
-//                           what flows; sACN always names its universe. sACN is unicast only:
+//                           network. "dhcp" for an address taken from a lease. The network
+//                           may be left out where the address lies in its CIDR; a lease
+//                           always names it. The device that is a WiFi network's access
+//                           point adds `ap`; there is one.
+//   any other node          a service on that device: a table of one column, a cell per row.
+//                           The first cell is its name, in bold, at port `title`; then one cell
+//                           per port it listens on, at port `<id>`, holding
+//                           `protocol transport interface:port`. The interface names the address
+//                           it binds, the one `<dev>_if` gives that interface; `lo` binds
+//                           127.0.0.1, which `<dev>_if` does not list; `*` binds the wildcard,
+//                           0.0.0.0. A service that only sends has its name alone.
+//   an edge                 from the title of the service that connects to the port it connects
+//                           to, labelled with what flows. Data flows the same way, except where
+//                           a subscriber connects to fetch it: `dir=back` turns that arrow round
+//                           to show the flow. sACN always names its universe. sACN is unicast only:
 //                           one edge per sender and recipient, sent to the recipient's
 //                           address on the network they share. Edges sit in one
 //                           subgraph per protocol, named after it, which also sets its colour
 //                           and line style.
 
 digraph clockwork {
-    graph [rankdir=LR, fontname="Helvetica", nodesep=0.3, ranksep=1.2];
+    graph [rankdir=LR, forcelabels=true, fontname="Helvetica", nodesep=0.3, ranksep=1.2];
     node [shape=record, fontname="Helvetica", fontsize=10];
     edge [fontname="Helvetica", fontsize=9];
 
-    networks [label="networks|<ap> ap 10.0.10.0/24 gateway 10.0.10.1 dhcp 10.0.10.100–10.0.10.199 ssid \"closed claw DMX\" psk \"close-that-claw\" channel 6|<wired> wired 10.0.1.0/24 gateway 10.0.1.1 dhcp 10.0.1.100–10.0.1.199|<wireguard> wireguard 10.8.0.0/24|<4g> 4g dhcp"];
+    networks [label="networks|<wifi> wifi 10.0.10.0/24 gateway 10.0.10.2 dhcp 10.0.10.100–10.0.10.199 ssid \"closed claw DMX\" psk \"close-that-claw\" channel 6|<wired> wired 10.0.1.0/24 gateway 10.0.1.1 dhcp 10.0.1.100–10.0.1.199|<wireguard> wireguard 10.8.0.0/24|<4g> 4g dhcp"];
 
     // ── Devices ──────────────────────────────────────────────────────────────────────────────
 
-    subgraph cluster_claw_pi {
-        label="claw-pi";
+    subgraph cluster_chaos_pi {
+        label="chaos-pi";
 
-        claw_pi_if [label="addresses|wlan0 10.0.10.1 ap|eth0 10.0.1.1 wired|wg0 10.8.0.3 wireguard|wwan0 dhcp 4g"];
+        chaos_pi_if [label="addresses|wlan0 10.0.10.2 ap|eth0 10.0.1.1 wired|wg0 10.8.0.3 wireguard|wwan0 dhcp 4g"];
 
-        claw_pi_brain    [label="brain|<sacn> sACN udp wlan0:5568|<osc> OSC udp wlan0:?"];
-        claw_pi_stem     [label="stem"];
-        claw_pi_dnsmasq  [label="dnsmasq|<dns_ap> DNS udp wlan0:53|<dhcp_ap> DHCP udp wlan0:67|<dns_wired> DNS udp eth0:53|<dhcp_wired> DHCP udp eth0:67"];
-        claw_pi_sshd     [label="sshd|<ssh> SSH tcp *:22"];
-        claw_pi_wg       [label="wireguard"];
-        claw_pi_watchdog [label="4g-watchdog"];
+        node [shape=plain];
+
+        chaos_pi_brain [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>brain</b></td></tr>
+            <tr><td port="sacn">sACN udp wlan0:5568</td></tr>
+            <tr><td port="osc">OSC udp wlan0:9001</td></tr>
+        </table>>];
+        chaos_pi_stem [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>stem</b></td></tr>
+        </table>>];
+        chaos_pi_dnsmasq [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>dnsmasq</b></td></tr>
+            <tr><td port="dns_ap">DNS udp wlan0:53</td></tr>
+            <tr><td port="dhcp_ap">DHCP udp wlan0:67</td></tr>
+            <tr><td port="dns_wired">DNS udp eth0:53</td></tr>
+            <tr><td port="dhcp_wired">DHCP udp eth0:67</td></tr>
+        </table>>];
+        chaos_pi_sshd [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>sshd</b></td></tr>
+            <tr><td port="ssh">SSH tcp *:22</td></tr>
+        </table>>];
+        chaos_pi_wg [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>wireguard</b></td></tr>
+        </table>>];
+        chaos_pi_watchdog [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>4g-watchdog</b></td></tr>
+        </table>>];
     }
 
     subgraph cluster_memory_pi {
         label="memory-pi";
 
-        memory_pi_if [label="addresses|wlan0 10.0.10.2 ap|lo 127.0.0.1"];
+        memory_pi_if [label="addresses|wlan0 10.0.10.30"];
 
-        memory_pi_mosquitto  [label="mosquitto|<mqtt> MQTT tcp *:1883"];
-        memory_pi_osc_bridge [label="osc-bridge|<osc> OSC udp wlan0:?"];
-        memory_pi_recorder   [label="recorder"];
-        memory_pi_memory     [label="memory"];
-        memory_pi_greptime   [label="greptime|<http> HTTP tcp lo:4000|<grpc> gRPC tcp lo:4001|<mysql> MySQL tcp lo:4002"];
-        memory_pi_grafana    [label="grafana|<http> HTTP tcp lo:3000"];
-        memory_pi_sshd       [label="sshd|<ssh> SSH tcp *:22"];
+        node [shape=plain];
+
+        memory_pi_mosquitto [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>mosquitto</b></td></tr>
+            <tr><td port="mqtt">MQTT tcp *:1883</td></tr>
+        </table>>];
+        memory_pi_osc_bridge [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>osc-bridge</b></td></tr>
+            <tr><td port="osc">OSC udp wlan0:9001</td></tr>
+        </table>>];
+        memory_pi_recorder [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>recorder</b></td></tr>
+        </table>>];
+        memory_pi_memory [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>memory</b></td></tr>
+        </table>>];
+        memory_pi_greptime [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>greptime</b></td></tr>
+            <tr><td port="http">HTTP tcp lo:4000</td></tr>
+            <tr><td port="grpc">gRPC tcp lo:4001</td></tr>
+            <tr><td port="mysql">MySQL tcp lo:4002</td></tr>
+        </table>>];
+        memory_pi_grafana [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>grafana</b></td></tr>
+            <tr><td port="http">HTTP tcp lo:3000</td></tr>
+        </table>>];
+        memory_pi_sshd [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>sshd</b></td></tr>
+            <tr><td port="ssh">SSH tcp *:22</td></tr>
+        </table>>];
     }
 
     subgraph cluster_wrist {
         label="wrist";
 
-        wrist_if [label="addresses|wifi 10.0.10.3 ap"];
+        wrist_if [label="addresses|wifi 10.0.10.3"];
 
-        wrist_firmware [label="firmware|<sacn> sACN udp wifi:5568"];
+        node [shape=plain];
+
+        wrist_firmware [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>firmware</b></td></tr>
+            <tr><td port="sacn">sACN udp wifi:5568</td></tr>
+        </table>>];
     }
 
     subgraph cluster_mac {
         label="mac";
 
-        mac_if [label="addresses|en0 dhcp ap|utun 10.8.0.4 wireguard"];
+        mac_if [label="addresses|en0 dhcp wifi|utun 10.8.0.4 wireguard"];
 
-        mac_qlc     [label="QLC+"];
-        mac_ssh     [label="ssh"];
-        mac_browser [label="browser"];
+        node [shape=plain];
+
+        mac_qlc [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>QLC+</b></td></tr>
+        </table>>];
+        mac_ssh [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>ssh</b></td></tr>
+        </table>>];
+        mac_browser [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>browser</b></td></tr>
+        </table>>];
     }
 
     subgraph cluster_wg_hub {
@@ -83,7 +149,12 @@ digraph clockwork {
 
         wg_hub_if [label="addresses|wg 10.8.0.1 wireguard"];
 
-        wg_hub_wg [label="wireguard|<wg> WireGuard udp ?:?"];
+        node [shape=plain];
+
+        wg_hub_wg [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>wireguard</b></td></tr>
+            <tr><td port="wg">WireGuard udp ?:?</td></tr>
+        </table>>];
     }
 
     subgraph cluster_internet {
@@ -96,59 +167,59 @@ digraph clockwork {
 
     subgraph sacn {
         edge [color="#2ca02c", fontcolor="#2ca02c", penwidth=2.5];
-        mac_qlc       -> claw_pi_brain:sacn  [label="sACN universe 1, unicast"];
-        claw_pi_brain -> wrist_firmware:sacn [label="sACN universe 1, unicast"];
+        mac_qlc:title        -> chaos_pi_brain:sacn [xlabel="sACN universe 1, unicast"];
+        chaos_pi_brain:title -> wrist_firmware:sacn [xlabel="sACN universe 1, unicast"];
     }
 
     subgraph osc {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
-        wrist_firmware -> claw_pi_brain:osc        [label="OSC"];
-        wrist_firmware -> memory_pi_osc_bridge:osc [label="OSC"];
+        wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
+        wrist_firmware:title -> memory_pi_osc_bridge:osc [xlabel="OSC"];
     }
 
     subgraph mqtt {
         edge [color="#ff7f0e", fontcolor="#ff7f0e", penwidth=1.5];
-        claw_pi_brain            -> memory_pi_mosquitto:mqtt [label="MQTT"];
-        claw_pi_stem             -> memory_pi_mosquitto:mqtt [label="MQTT"];
-        memory_pi_memory         -> memory_pi_mosquitto:mqtt [label="MQTT"];
-        memory_pi_mosquitto:mqtt -> memory_pi_recorder       [label="MQTT"];
+        chaos_pi_brain:title     -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
+        chaos_pi_stem:title      -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
+        memory_pi_memory:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
+        memory_pi_recorder:title -> memory_pi_mosquitto:mqtt [xlabel="MQTT, subscribed", dir=back];
     }
 
     subgraph influx {
         edge [color="#17becf", fontcolor="#17becf", penwidth=1.5, style=dashed];
-        memory_pi_recorder -> memory_pi_greptime:http [label="InfluxDB line protocol"];
+        memory_pi_recorder:title -> memory_pi_greptime:http [xlabel="InfluxDB line protocol"];
     }
 
     subgraph mysql {
         edge [color="#9467bd", fontcolor="#9467bd", penwidth=1.5];
-        memory_pi_grafana -> memory_pi_greptime:mysql [label="MySQL"];
+        memory_pi_grafana:title -> memory_pi_greptime:mysql [xlabel="MySQL"];
     }
 
     subgraph http {
         edge [color="#2ca02c", fontcolor="#2ca02c", penwidth=1.5, style=dashed];
-        mac_browser -> memory_pi_grafana:http [label="HTTP, tunnelled over SSH"];
+        mac_browser:title -> memory_pi_grafana:http [xlabel="HTTP, tunnelled over SSH"];
     }
 
     subgraph ssh {
         edge [color="#7f7f7f", fontcolor="#7f7f7f", penwidth=1];
-        mac_ssh -> claw_pi_sshd:ssh   [label="SSH over WireGuard"];
-        mac_ssh -> memory_pi_sshd:ssh [label="SSH, jumping through claw-pi"];
+        mac_ssh:title -> chaos_pi_sshd:ssh  [xlabel="SSH over WireGuard"];
+        mac_ssh:title -> memory_pi_sshd:ssh [xlabel="SSH, jumping through chaos-pi"];
     }
 
     subgraph wireguard {
         edge [color="#8c564b", fontcolor="#8c564b", penwidth=2, style=bold];
-        claw_pi_wg -> wg_hub_wg:wg [label="WireGuard over 4G"];
+        chaos_pi_wg:title -> wg_hub_wg:wg [xlabel="WireGuard over 4G"];
     }
 
     subgraph icmp {
         edge [color="#e377c2", fontcolor="#e377c2", penwidth=1, style=dotted];
-        claw_pi_watchdog -> internet_ping:cloudflare [label="ICMP over 4G"];
-        claw_pi_watchdog -> internet_ping:google     [label="ICMP over 4G"];
-        claw_pi_watchdog -> wg_hub_wg:wg             [label="ICMP over WireGuard"];
+        chaos_pi_watchdog:title -> internet_ping:cloudflare [xlabel="ICMP over 4G"];
+        chaos_pi_watchdog:title -> internet_ping:google     [xlabel="ICMP over 4G"];
+        chaos_pi_watchdog:title -> wg_hub_wg:wg             [xlabel="ICMP over WireGuard"];
     }
 
     subgraph undecided {
         edge [color="#000000", fontcolor="#000000", penwidth=1, style=dotted, arrowhead=empty];
-        memory_pi_osc_bridge -> memory_pi_greptime:http [label="undecided"];
+        memory_pi_osc_bridge:title -> memory_pi_greptime:http [xlabel="undecided"];
     }
 }

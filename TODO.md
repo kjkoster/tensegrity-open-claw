@@ -17,12 +17,10 @@ The target: Wrist's board on the access point, sending its `sys/…` messages, a
 `claw-pi` showing them arrive. `memory-pi` is out of action, so `claw-pi` is where they are
 seen. The access point, Wrist's address and where its OSC goes all come from `clockwork.dot`.
 
-- Settle `sys/…` in `wrist.oscquery.json`: its addresses, type tags and rate.
-- Settle the OSC port: `clockwork.dot` has `wlan0:?` for both the brain's and the OSC
-  bridge's.
-- Rust: `cortex-build` reads `clockwork.dot` into Rust constants: the networks, with the
-  access point's SSID, passphrase and channel; each device's addresses; the OSC edges. It
-  fails on an address two devices share.
+- Rust: `cortex-build` reads from `clockwork.dot` what the build needs, and no more: the dot
+  is where the facts are recorded, and the build and the deploy compile config from it. For
+  now: the address and port the brain's OSC receiver binds, and the address and port of each
+  sACN recipient it sends to. More is read as more comes to depend on it.
 - `claw-pi`'s access point from the dot: the deploy renders `claw-ap.nmconnection` from what
   `cortex-build` read, in place of `etc/claw-wifi.env`.
 - C++: Wrist's build reads `clockwork.dot` into a C++ header, as `cortex-build` does for Rust:

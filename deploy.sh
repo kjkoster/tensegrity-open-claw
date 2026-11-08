@@ -18,6 +18,12 @@ TARGET="aarch64-unknown-linux-musl"
 
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
+# --- Draw the network ------------------------------------------------------
+# `clockwork.svg` is drawn from `clockwork.dot` on every deploy, so the picture never lags the
+# graph the build reads. It stays on the Mac: it is git-ignored and nothing ships it.
+step "draw clockwork.svg"
+dot -Tsvg clockwork.dot -o clockwork.svg
+
 # --- Build the brain -------------------------------------------------------
 # Here rather than on the Pi: the Mac builds in seconds what the Pi took minutes over, and the
 # Pi then needs no toolchain, no crate index and no sources. The build reads `clockwork.qxw` and

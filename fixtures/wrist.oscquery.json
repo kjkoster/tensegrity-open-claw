@@ -88,6 +88,14 @@
               "RANGE": [{ "MIN": 1, "MAX": 512 }],
               "CLOCKWORK_CHAOS_ON_EVENT": "connect"
             },
+            "port": {
+              "FULL_PATH": "/dmx/wrist/port",
+              "DESCRIPTION": "The UDP port Wrist listens on for sACN.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1, "MAX": 65535 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
             "sacn_age": {
               "FULL_PATH": "/dmx/wrist/sacn_age",
               "DESCRIPTION": "How long ago the last frame of the universe arrived.",
