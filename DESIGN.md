@@ -17,7 +17,7 @@ How to set the system up and operate it is [`README.md`](README.md); one show is
 ### 1.1 The QLC+ workspace is the patch
 
 **None of the fixture addressing is written in Rust.** A rig's QLC+ workspace — the claw's is
-`claw.qxw` — is the source of truth for *where* its fixtures sit, and the `.qxf` definitions in
+`clockwork.qxw` — is the source of truth for *where* its fixtures sit, and the `.qxf` definitions in
 `fixtures/` for *what their channels mean*. The build ingests both and generates a struct per
 fixture, with a named field per channel, into that rig's own crate.
 

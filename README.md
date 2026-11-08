@@ -182,7 +182,7 @@ decision.
 
 ### The patch
 
-The build reads `claw.qxw` and the `.qxf` definitions in `fixtures/` and compiles the patch in,
+The build reads `clockwork.qxw` and the `.qxf` definitions in `fixtures/` and compiles the patch in,
 so **saving in QLC+ and deploying** is how a repatch reaches the rig (why: DESIGN §1.1). Every
 definition a patched fixture names must be committed to `fixtures/`; the build never reads
 QLC+'s library. `<Address>` in the `.qxw` is 0-based: DMX address 1 is `<Address>0</Address>`.
@@ -395,7 +395,7 @@ dashboard made in the UI lives in Grafana's own database on the SD card; export 
 
 # QLC+ on the Mac
 
-Stock QLC+, for two jobs: holding the patch in [`claw.qxw`](claw.qxw), and taking the rig over
+Stock QLC+, for two jobs: holding the patch in [`clockwork.qxw`](clockwork.qxw), and taking the rig over
 by hand.
 
 ## Installing the fixture definitions (once, and after any change to `fixtures/`)

@@ -5,7 +5,7 @@ include!("shows.rs");
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    cortex_build::ingest(&manifest_dir.join("..").join("claw.qxw"));
+    cortex_build::ingest(&manifest_dir.join("..").join("clockwork.qxw"));
 
     println!("cargo:rerun-if-changed=shows.rs");
     cortex_build::calendar(CITY, SHOWS);

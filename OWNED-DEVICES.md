@@ -79,7 +79,7 @@ A partial list of a larger stock: parts are added here as they are looked for.
 | Part | Details |
 |---|---|
 | Small-signal transistors, TO-92 | All bipolar, no MOSFETs among them. NPN: 2SC1815, 2SC945, S8050, MPSA42 (300 V), S9018 (RF), and one marked A93904, taken to be a 2N3904. PNP: 2N3906, 2SA1015, 2N5401 (150 V), S8550, S9015. Pinouts differ between types and makers; check with a multimeter's diode test before soldering. |
-| Electrolytic capacitors | Mostly 16 V, and 47 µF / 50 V. A 4700 µF / 50 V (Jamicon `TLP478M050S1A5Q40L`, 22 × 40 mm) is on order for the motor's 38 V supply. |
+| Electrolytic capacitors | Mostly 16 V. A 4700 µF / 50 V (Jamicon `TLP478M050S1A5Q40L`, 22 × 40 mm) is on order for the motor's 38 V supply. |
 
 ## Stand-ins for rented gear
 

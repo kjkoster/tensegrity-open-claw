@@ -20,7 +20,7 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
 # --- Build the brain -------------------------------------------------------
 # Here rather than on the Pi: the Mac builds in seconds what the Pi took minutes over, and the
-# Pi then needs no toolchain, no crate index and no sources. The build reads `claw.qxw` and
+# Pi then needs no toolchain, no crate index and no sources. The build reads `clockwork.qxw` and
 # `fixtures/` and resolves the show table, so "save in QLC+, deploy" still gets an edited
 # patch onto the rig. First, so a build that fails leaves the Pi untouched.
 step "build brain for $TARGET"

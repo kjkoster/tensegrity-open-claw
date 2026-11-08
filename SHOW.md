@@ -154,8 +154,7 @@ named `Wrist [10.0.10.3 <its MAC>]`.
 
 **Supply.** The motor supply at **38 V** (`OWNED-DEVICES.md` says why it runs there), through
 a 5 A fuse, with 4700 µF / 50 V across V+ and V− at the motor, fixed down rather than
-hanging from its leads, and both pins of each power pair connected. Until it arrives, two
-47 µF / 50 V stand in: they damp the leads' ringing but cannot absorb the motor's braking.
+hanging from its leads, and both pins of each power pair connected. It is on order.
 If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
 hardware fact as well as a DMX one, at the cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig

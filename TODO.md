@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: soldering first, then clean up, then Wrist's sensing and telemetry, then its motor under a
+it: the workspace first, then soldering, then clean up, then Wrist's sensing and telemetry, then its motor under a
 console, then the brain's programme; commissioning second to last, results and clean-up last.
 The full-scale rig is not here: it gets a list of its own. Steps only; a
 step that is done is deleted. Where a step changes a design, the change goes in
@@ -11,13 +11,21 @@ steps here.
 
 ---
 
+## The workspace
+
+- The workspace already patches `Face`; it patches `Wrist` once its definition exists. Change
+  the E1.31 output's unicast address from `10.8.0.3` to `10.0.10.1`, so the Mac works on the
+  access point for this show; the brain binds what the workspace says.
+- Import `fixtures/wrist.qxf` into QLC+ and patch it at 500 as `Wrist [10.0.10.3 <its MAC>]`.
+  Confirm the mask compiles to Blackout for Mode and holds Amplitude.
+
 ## Soldering
 
 - On the bench, into `OWNED-DEVICES.md` and the firmware's constants: the status LED and the
   alarm on a forced stall, holding the shaft while `wrist/bench` plucks; once the wire is on,
   the tension the unpowered shaft holds by its detent.
 - Find a plank to mount Wrist's board and its wiring on, instead of a housing.
-- Wire: the 4700 µF / 50 V at the motor once it arrives, the two 47 µF until then; the home switch and the ADXL345 on the pins in
+- Wire: the 4700 µF / 50 V at the motor once it arrives; the home switch and the ADXL345 on the pins in
   `CONTROL_LOOP.md` §2.
 - If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
   feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
@@ -27,9 +35,6 @@ steps here.
 
 ## Clean up
 
-- The PoC's workspace: `claw.qxw` patches `Face` and, once its definition exists, `Wrist`.
-  Change the E1.31 output's unicast address to `10.0.10.1`, so the Mac works on the access
-  point for this show; the brain binds what the workspace says.
 - `OWNED-DEVICES.md` keeps the camera, the Alesis and the speakers as owned, not in the
   cabinet, and gains the rest of Wrist's parts: the NodeMCU, the ADXL345, the load cell and
   its HX711.
@@ -73,8 +78,6 @@ Blackout. The dashboard comes first because it is how everything after it is rea
 - `cortex-build`: generate a C++ header for Wrist's firmware from the workspace and
   `wrist.qxf`: the universe, the port, Wrist's start address, its IP, and Mode's bands, so
   the firmware holds no second copy of the patch; the WiFi from `etc/claw-wifi.env`.
-- Import `fixtures/wrist.qxf` into QLC+ and patch it at 500 as `Wrist [10.0.10.3 <its MAC>]`.
-  Confirm the mask compiles to Blackout for Mode and holds Amplitude.
 - `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy.sh`, the
   OSC encoders generated from `wrist.oscquery.json` at build time; flashed over USB; built
   with `arduino-cli`, the core and libraries pinned in a `sketch.yaml` profile. Delete the
@@ -125,6 +128,9 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 - Reorganise: the two Pis, the hub, the modem, the SSD, the supply and its terminals each in
   their place; 5 V, 12 V and 38 V runs apart; signal leads away from mains. Photograph it for
   README's *Attached hardware*.
+- Once it is delivered: fit the battery for the brain's ESP32-S3 on-board RTC, powered through
+  the 4-pin J7 SH1.0 connector; the brain reads its time from the RTC at boot, and sets the
+  RTC by NTP via the Pi.
 
 ## With the artist, once Wrist's motor runs from QLC+
 

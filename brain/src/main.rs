@@ -12,7 +12,7 @@ mod face;
 mod face_show;
 mod show;
 
-// `patch`, generated from claw.qxw by the ingest. The workspace and the `.qxf`
+// `patch`, generated from clockwork.qxw by the ingest. The workspace and the `.qxf`
 // definitions are the source of truth; nothing about the addressing is hand-maintained, and
 // there is no second copy of the patch to drift out of step with it.
 include!(concat!(env!("OUT_DIR"), "/rig.rs"));
