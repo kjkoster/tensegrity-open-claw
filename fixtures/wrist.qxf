@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE FixtureDefinition>
+<FixtureDefinition xmlns="http://www.qlcplus.org/FixtureDefinition">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>5.3.0</Version>
+  <Author>Kees Jan Koster</Author>
+ </Creator>
+ <Manufacturer>Clockwork Chaos</Manufacturer>
+ <Model>Wrist</Model>
+ <Type>Other</Type>
+ <Channel Name="Mode">
+  <Group Byte="0">Maintenance</Group>
+  <Capability Min="0" Max="50" Preset="NoFunction">Blackout</Capability>
+  <Capability Min="51" Max="101">RampDown</Capability>
+  <Capability Min="102" Max="152">Run</Capability>
+  <Capability Min="153" Max="203">Pluck</Capability>
+  <Capability Min="204" Max="255">Manual</Capability>
+ </Channel>
+ <Channel Name="Amplitude">
+  <Group Byte="0">Nothing</Group>
+  <Capability Min="0" Max="255">Amplitude, none to the maximum</Capability>
+ </Channel>
+ <Channel Name="Direction">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="127" Preset="RotationClockwise">Clockwise, in Manual only</Capability>
+  <Capability Min="128" Max="255" Preset="RotationCounterClockwise">Counter-clockwise, in Manual only</Capability>
+ </Channel>
+ <Channel Name="Speed">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="0" Preset="RotationStop">Stopped</Capability>
+  <Capability Min="1" Max="255" Preset="SlowToFast">Slow to the maximum, in Manual only</Capability>
+ </Channel>
+ <Mode Name="4 Channel">
+  <Channel Number="0">Mode</Channel>
+  <Channel Number="1">Amplitude</Channel>
+  <Channel Number="2">Direction</Channel>
+  <Channel Number="3">Speed</Channel>
+ </Mode>
+ <Physical>
+  <Bulb Type="Other" Lumens="0" ColourTemperature="0"/>
+  <Dimensions Weight="0" Width="0" Height="0" Depth="0"/>
+  <Lens Name="Other" DegreesMin="0" DegreesMax="0"/>
+  <Focus Type="Fixed" PanMax="0" TiltMax="0"/>
+  <Technical PowerConsumption="0" DmxConnector="Other"/>
+ </Physical>
+</FixtureDefinition>

@@ -135,13 +135,15 @@ The sway drive. What it is and why is `DESIGN.md` §3.10; its hardware, firmware
 constants are `CONTROL_LOOP.md`'s; its parts are in `OWNED-DEVICES.md`. The brain sets only
 its mode and amplitude, and reads its OSC for the face. How this show sets it up:
 
-**Patch.** `fixtures/wrist.qxf`, mode "2 Channel", at the top of the universe, address 500,
+**Patch.** `fixtures/wrist.qxf`, mode "4 Channel", at the top of the universe, address 500,
 named `Wrist [10.0.10.3 <its MAC>]`.
 
 | ch | name | group | this show's use |
 |---|---|---|---|
-| 1 | Mode | Maintenance; no-function band **Blackout** (0–15) | Blackout 0–15 · RampDown 16–63 · Run 64–191 · Pluck 192–255 |
+| 1 | Mode | Maintenance; no-function band **Blackout** (0–50) | Blackout 0–50 · RampDown 51–101 · Run 102–152 · Pluck 153–203 · Manual 204–255 |
 | 2 | Amplitude | Nothing | 0–255 → 0 … `A_max` steps: in Run the drive's amplitude, in Pluck the size of the tug |
+| 3 | Direction | Nothing | in Manual only: 0–127 clockwise, 128–255 counter-clockwise |
+| 4 | Speed | Speed; stop band **Stopped** (0) | in Manual only: 0 stopped, 1–255 slow … `v_max` |
 
 **Motor.** The closed-loop stepper; its label, connector and limits are in
 `OWNED-DEVICES.md`. Its DIP switches for this show:

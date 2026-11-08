@@ -7,8 +7,9 @@ Target: NodeMCU (ESP8266) driving a JD57 integrated closed-loop stepper. Languag
 1. **Pluck:** one fast tug on the guy wire, then estimate the structure's sway frequency `f` and quality factor `Q` from the ring-down.
 2. **Run:** phase-lock a local oscillator to the sway and drive the motor in phase with the structure's velocity at an amplitude the desk sets. The drive phase is adapted continuously; nothing is calibrated by hand.
 3. **Blackout:** coils released, identical to power loss. Also the idle state.
+4. **Manual:** turn the shaft at a speed and in a direction the desk sets, to wind the wire and to test the motor. Needs neither homing nor the accelerometer.
 
-Everything else is support for those three.
+Everything else is support for those four.
 
 ## 2. Hardware
 
@@ -96,9 +97,12 @@ stateDiagram-v2
     Pluck --> Blackout : sACN lost
     RampDown --> Blackout : sACN lost
     Homing --> Blackout : sACN lost
+    Blackout --> Manual : ch1 = Manual
+    Manual --> Blackout : ch1 ≠ Manual, once stopped
+    Manual --> Blackout : sACN lost, or protection
 ```
 
-**Blackout.** `inc = 0`, ENA released. Position unknown from here on. Sensors, lock-in and telemetry keep running (the load-cell calibration readings are taken here). Entered by ch1 0–15 or all channels zero (via RampDown if the motor was driving), and immediately by sACN loss (no frame for 2.5 s, or Stream-Terminated).
+**Blackout.** `inc = 0`, ENA released. Position unknown from here on. Sensors, lock-in and telemetry keep running (the load-cell calibration readings are taken here). Entered by ch1 in Blackout's band or all channels zero (via RampDown if the motor was driving), and immediately by sACN loss (no frame for 2.5 s, or Stream-Terminated).
 
 **Homing.** Automatic on every exit from Blackout. Enable, 100 ms. If the switch is closed, reel in until it opens. Pay out slowly for at most `x_pre + margin` steps or until the switch closes. Reel in slowly to the switch edge; `x = 0`. Go to `x_pre`. Abort to Blackout if the load cell reads slack before the edge is found.
 
@@ -108,9 +112,11 @@ stateDiagram-v2
 
 **RampDown.** Driver on, PLL on, drive at 180° with `A_brake` until `a < a_quiet` or `T_ramp`; then whatever ch1 asks. Holding at `x_pre` while ch1 stays in the RampDown range.
 
+**Manual.** Entered from Blackout only: in any other mode, ch1 = Manual counts as Blackout, so the motor stops the usual way first. No homing; `x` counts from where Manual began and means nothing after it. Enable, 100 ms, then turn the shaft in ch3's direction at ch4's speed, ramping at `a_manual` to each new speed. A change of direction ramps to a stop and back up. Speed 0 holds the shaft, enabled. Leaving Manual ramps to a stop first, then releases into Blackout. Ch2 is ignored, as ch3 and ch4 are in every other mode.
+
 ## 5. Protections (all there are)
 
-- Soft limits `0 ≤ x ≤ x_max` in the velocity stage; a clamped move is logged.
+- Soft limits `0 ≤ x ≤ x_max` in the velocity stage; a clamped move is logged. Not in Manual, where `x` has no home.
 - Load cell: `F < F_slack` or `F > F_max` → RampDown → Blackout.
 - ADXL345 stale > 100 ms → oscillator free-runs, PLL frozen; stale > 2 s → RampDown → Blackout.
 - sACN lost → Blackout, immediately.
@@ -123,24 +129,26 @@ One universe (**DECISION:** number). 10–40 Hz, irregular; levels sampled per f
 
 | Ch | Function |
 |---|---|
-| 1 | Mode: 0–15 Blackout · 16–63 RampDown · 64–191 Run · 192–255 Pluck |
+| 1 | Mode: 0–50 Blackout · 51–101 RampDown · 102–152 Run · 153–203 Pluck · 204–255 Manual |
 | 2 | Amplitude `A`: 0–255 → 0 … `A_max` steps. In Run the drive amplitude; in Pluck the size of the tug. |
+| 3 | Direction, in Manual only: 0–127 clockwise · 128–255 counter-clockwise, facing the shaft |
+| 4 | Speed, in Manual only: 0 stopped; 1–255 → slow … `v_max` |
+
+`fixtures/wrist.qxf` is the source of these bands; this table is a rendering of it.
 
 ## 7. OSC (out only)
 
-Base `/wrist/`. Always on, logged to a remote database. The address space is an **OSCQuery document** (`FULL_PATH`, `TYPE`, `ACCESS`, `CONTENTS`), hand-authored and versioned; the encoders are **generated from it at build time**. Tables here are a rendering; the document wins. Whether the MCU also serves it over HTTP/mDNS: **DECISION**.
+Always on, sent to each OSC recipient `clockwork.dot` names for Wrist, logged to a remote database. The address space, and how each address is sent, is `fixtures/wrist.oscquery.json`; the file's format, its roots (`/wrist/`, `/dmx/wrist/`, `/sys/wrist/`) and the three ways to send are `DESIGN.md`'s OSC section. The encoders are **generated from it at build time**. Whether the MCU also serves it over HTTP/mDNS: **DECISION**.
 
 Only loop variables and raw inputs are sent. Nothing is computed for telemetry: no Hz (`ω` is sent), no settle times (derive from transition timestamps in the database), no CPU estimate.
 
-State bundle, 10 Hz: `mode`, `flags` (homed, locked, alm), `osc/omega`, `osc/phase`, `pll/err`, `amp/a`, `drive/A`, `drive/phase_off`, `adapt/regime`, `motor/x`, `load/force`, `sacn/age`, `health/tick_dt`, and the persisted tuning values `tuned/f_est`, `tuned/Q_est`, `tuned/axis`, `tuned/phase_off` — these are what the firmware has learned, and reading them here is how the coded-in defaults get updated by hand.
-Waveform bundle, 100 Hz: `imu/raw` (3), `imu/sway`, `load/raw`.
-Events: `event/transition` (from, to, reason), `pluck/result` (f, Q, axis, n_peaks), `event/protection` (which, value).
+The file holds only what the firmware sends so far: the mode, the alarm, the load cell, the tick interval, where Wrist sits on the universe and how fresh its frames are, and what it runs on. To come with the modes that use them, each value its own message: homed and locked; `osc/omega`, `osc/phase`, `pll/err`, `amp/a`, `drive/A`, `drive/phase_off`, `adapt/regime`, `motor/x`; the accelerometer's three axes and the sway, on each reading; the persisted tuning values `f_est`, `Q_est`, axis and `phase_off`, which are what the firmware has learned, and reading them is how the coded-in defaults get updated by hand; and the transitions, pluck results and protections as they happen.
 
 Nothing comes in over OSC. Calibration constants are coded in (§10); the raw readings needed to derive them are in the telemetry. **Load-cell calibration** (once per rig, in Blackout): unhook the wire, average `load/raw` from the database → `tare`; hang a known mass, average → `scale_g = (raw − tare)/F_known`; put both in the code and rebuild.
 
 ## 8. Persisted (LittleFS)
 
-`f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Written when a Pluck finishes; `φ_off` at most once a minute. Loaded at boot; the coded-in defaults are used only when nothing is persisted (first boot, or after a flash erase). Reported in the state bundle so the defaults can be updated by hand.
+`f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Written when a Pluck finishes; `φ_off` at most once a minute. Loaded at boot; the coded-in defaults are used only when nothing is persisted (first boot, or after a flash erase). Reported over OSC so the defaults can be updated by hand.
 
 ## 9. LED
 
@@ -163,6 +171,8 @@ Nothing comes in over OSC. Calibration constants are coded in (§10); the raw re
 | lock-in τ, dither, `K_adapt`, max step | 4 cycles, ±8° / 30 cycles, tune, 5° | |
 | `T_record`, `T_capture`, `T_ramp`, `N_peaks_min` | 30 s, 60 s, 30 s, 6 | |
 | sACN timeout | 2.5 s | E1.31 |
+| `a_manual` | steps/s² | Manual's ramp; the bench ran 200,000 without an alarm, shaft free |
+| `dir_cw` | DIR level | the level that turns the shaft clockwise, facing it, with SW5 as set; by test |
 
 ## 11. What to expect
 

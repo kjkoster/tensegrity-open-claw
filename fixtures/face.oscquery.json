@@ -1,0 +1,66 @@
+{
+  "HOST_INFO": {
+    "NAME": "face",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "face": {
+      "FULL_PATH": "/face",
+      "DESCRIPTION": "The cabinet door: an e-stop and two buttons. Its lamps are DMX, in face.qxf.",
+      "CONTENTS": {
+        "left_button": {
+          "FULL_PATH": "/face/left_button",
+          "DESCRIPTION": "Whether the left button is held down, after debouncing.",
+          "TYPE": "T",
+          "ACCESS": 1,
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "right_button": {
+          "FULL_PATH": "/face/right_button",
+          "DESCRIPTION": "Whether the right button is held down, after debouncing.",
+          "TYPE": "T",
+          "ACCESS": 1,
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "estop": {
+          "FULL_PATH": "/face/estop",
+          "DESCRIPTION": "The e-stop, decided from its two contacts. A fault on either contact counts as pressed. false: released; true: pressed; cable_fault: both contacts open; contact_fault: both closed.",
+          "TYPE": "s",
+          "ACCESS": 1,
+          "RANGE": [
+            { "VALS": ["false", "true", "cable_fault", "contact_fault"] }
+          ],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        }
+      }
+    },
+    "dmx": {
+      "FULL_PATH": "/dmx",
+      "CONTENTS": {
+        "face": {
+          "FULL_PATH": "/dmx/face",
+          "DESCRIPTION": "Where the face sits on the rig's universe, as the patch says.",
+          "CONTENTS": {
+            "universe": {
+              "FULL_PATH": "/dmx/face/universe",
+              "DESCRIPTION": "The universe the face's lamps are on.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1, "MAX": 63999 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "address": {
+              "FULL_PATH": "/dmx/face/address",
+              "DESCRIPTION": "The face's DMX start address.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1, "MAX": 512 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            }
+          }
+        }
+      }
+    }
+  }
+}

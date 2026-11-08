@@ -1,23 +1,50 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: the workspace first, then soldering, then clean up, then Wrist's sensing and telemetry, then its motor under a
-console, then the brain's programme; commissioning second to last, results and clean-up last.
-The full-scale rig is not here: it gets a list of its own. Steps only; a
-step that is done is deleted. Where a step changes a design, the change goes in
+it: OSC from Wrist seen on `claw-pi` first, then the workspace, then soldering, then clean up,
+then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
+commissioning second to last, results and clean-up last. The full-scale rig is not here: it
+gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
 [`DESIGN.md`](DESIGN.md), and the PoC's measurements go in [`POC-RESULTS.md`](POC-RESULTS.md).
 Wrist's firmware is specified in [`CONTROL_LOOP.md`](CONTROL_LOOP.md); its open decisions are
 steps here.
 
 ---
 
+## OSC from Wrist, seen on `claw-pi`
+
+The target: Wrist's board on the access point, sending its `sys/…` messages, and `ngrep` on
+`claw-pi` showing them arrive. `memory-pi` is out of action, so `claw-pi` is where they are
+seen. The access point, Wrist's address and where its OSC goes all come from `clockwork.dot`.
+
+- Settle `sys/…` in `wrist.oscquery.json`: its addresses, type tags and rate.
+- Settle the OSC port: `clockwork.dot` has `wlan0:?` for both the brain's and the OSC
+  bridge's.
+- Rust: `cortex-build` reads `clockwork.dot` into Rust constants: the networks, with the
+  access point's SSID, passphrase and channel; each device's addresses; the OSC edges. It
+  fails on an address two devices share.
+- `claw-pi`'s access point from the dot: the deploy renders `claw-ap.nmconnection` from what
+  `cortex-build` read, in place of `etc/claw-wifi.env`.
+- C++: Wrist's build reads `clockwork.dot` into a C++ header, as `cortex-build` does for Rust:
+  the WiFi, Wrist's address and gateway, and each OSC recipient's address and port. It fails
+  where `cortex-build` fails.
+- `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy.sh`, the
+  OSC encoders generated from `wrist.oscquery.json` at build time; built with `arduino-cli`,
+  the core and libraries pinned in a `sketch.yaml` profile. Flashed from `claw-pi`, with
+  Wrist's board on its USB: `deploy.sh` copies the image across and runs `esptool` there.
+  Delete the bench sketch, `wrist/bench/`, once the firmware moves the motor.
+- `wrist/` firmware, first: WiFi at the header's address, with modem sleep off; the `sys/…`
+  messages to each OSC recipient in the dot.
+- On `claw-pi`: `ngrep` installed by the deploy, and
+  `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.3'` showing the messages.
+  Only those to `claw-pi`'s own address arrive: with `memory-pi` off the network nothing
+  answers ARP for `10.0.10.2`, so Wrist's packets to it never leave the board.
+
 ## The workspace
 
 - The workspace already patches `Face`; it patches `Wrist` once its definition exists. Change
   the E1.31 output's unicast address from `10.8.0.3` to `10.0.10.1`, so the Mac works on the
   access point for this show; the brain binds what the workspace says.
-- Import `fixtures/wrist.qxf` into QLC+ and patch it at 500 as `Wrist [10.0.10.3 <its MAC>]`.
-  Confirm the mask compiles to Blackout for Mode and holds Amplitude.
 
 ## Soldering
 
@@ -42,6 +69,7 @@ steps here.
   cables.
 - Delete `fixtures/dendrite.oscquery.json`, and `fixtures/wrist.xml`, a copy of the old
   `wrist.qxf`.
+- Rename `claw-pi` to `chaos-pi`.
 
 ## Wrist's board: sensing and telemetry
 
@@ -57,11 +85,10 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   feed, contacts rated for at least 50 V DC.
 - Revive `memory-pi` per README; broker at `10.0.10.2`, `recorder/greptime` saying `ok`.
 - Settle the OSCQuery files, `wrist.oscquery.json` and `face.oscquery.json`. Open:
-  - `health/…` and `sys/…` specified for every client, and a file for the brain;
+  - `health/…` specified for every client, `sys/…` for every client but Wrist, and a file
+    for the brain;
   - booleans as `T`/`F` throughout;
   - whether Wrist serves its file over HTTP and mDNS.
-- Settle where Wrist's firmware gets `memory-pi`'s address: the brain's is the workspace's
-  unicast address, `memory-pi`'s has no single source yet.
 - The OSC bridge on `memory-pi` (DESIGN §3.9): Wrist's bundles and events decoded from
   `wrist.oscquery.json` and ingested alongside MQTT; its unit and deploy in
   `etc-memory-pi/`; the schema into README.
@@ -70,20 +97,10 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
   results and protections, `brain/show` and `brain/run` as annotations. Grafana stays on
   loopback; the Mac reaches it over the SSH jump, now across the access point.
-- `cortex-build`: read the `[ip mac]` bracket off a fixture's name (DESIGN §1.1) before the
-  name becomes a constant; fail on a malformed bracket and on an address or MAC two fixtures
-  share; hand both to firmware builds, which fail for a fixture without them; and render the
-  static leases for every bracketed fixture as a `dhcp-host` drop-in for `claw-ap`, which
-  the deploy installs.
-- `cortex-build`: generate a C++ header for Wrist's firmware from the workspace and
-  `wrist.qxf`: the universe, the port, Wrist's start address, its IP, and Mode's bands, so
-  the firmware holds no second copy of the patch; the WiFi from `etc/claw-wifi.env`.
-- `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy.sh`, the
-  OSC encoders generated from `wrist.oscquery.json` at build time; flashed over USB; built
-  with `arduino-cli`, the core and libraries pinned in a `sketch.yaml` profile. Delete the
-  bench sketch, `wrist/bench/`, once the firmware moves the motor.
-- `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: WiFi at the address from the
-  header, with modem sleep off; the sACN receiver, its 2.5 s timeout and Stream-Terminated;
+- C++: Wrist's build reads `clockwork.qxw` and `wrist.qxf` into its header, as
+  `cortex-build`'s ingest does for Rust: the universe, the port, Wrist's start address and
+  Mode's bands, so the firmware holds no second copy of the patch.
+- `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: the sACN receiver, its 2.5 s timeout and Stream-Terminated;
   Blackout only, ENA released; the ADXL345 and the HX711; the lock-in running; the state and
   waveform bundles and the events; LittleFS; the LED.
 - Once the HX711 reads right at 10 samples a second, and not before, in case the board does

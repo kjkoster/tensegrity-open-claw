@@ -270,6 +270,41 @@ DMX receivers: they ignore the data and fall back to their own internal show whi
 reporting a healthy signal, which reads as a wiring fault and is not one. The padding sets the
 ~43 Hz ceiling the 40 Hz frame rate sits under.
 
+### OSC: one file per device, three ways to send
+
+A device's OSC is its OSCQuery file in `fixtures/` (§1.4), written in OSCQuery's own
+attributes: `FULL_PATH`, `CONTENTS`, `TYPE`, `ACCESS`, and where they help `RANGE`, `UNIT` and
+`DESCRIPTION`. Every level of a path is a node of its own. A container has `CONTENTS` and no
+`TYPE`; a leaf is an OSC address, with `TYPE` and `ACCESS`. The build rejects a `FULL_PATH`
+that is not its parent's path and its own key.
+
+**The address space is by subject, with the device beneath it**, as MQTT's topics were:
+
+| root | holds |
+|---|---|
+| `/<device>/…` | the device's own loop variables and raw inputs |
+| `/dmx/<device>/…` | where it sits on the universe, as the patch says, and how fresh its frames are |
+| `/sys/<device>/…` | what it runs on |
+
+**One value per message.** A value's name comes from its leaf's name and path, so nothing
+names arguments, and a message that carries several values has no names for them. Values that belong together are
+sent together by sharing a rate, not by sharing a message.
+
+**Each leaf is sent one way**, and a leaf with none or with two is a build error:
+
+| attribute | sent | for |
+|---|---|---|
+| `"CLOCKWORK_CHAOS_ON_EVENT": "connect"` | each time the device joins the WiFi | what does not change while it runs: the patch, the MAC, the reset reason |
+| `"CLOCKWORK_CHAOS_ON_EVENT": "data"` | once, when a new reading arrives | a sensor with a rate of its own, so each sample is sent once and none is repeated |
+| `"CLOCKWORK_CHAOS_AT_RATE_HZ": <n>` | `n` times a second | a state, so a listener that starts late or loses a packet is one period behind |
+
+On connect, not at boot: a device boots and joins in seconds, before the Pi that listens has
+started, and a message sent to nobody is gone. OSC has no retention, so a listener that starts
+while the device stays connected hears the connect messages only at its next connect.
+
+Leaves at the same rate go out in one bundle, so a bundle is never declared: it follows from
+the rate.
+
 ### 2.3 The crates
 
 | | |
