@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — build the brain here for claw-pi, rsync it and what the Pi runs beside it, then
-#             run remote-deploy.sh there to install it and restart what changed.
+# deploy-chaos-pi.sh — build the brain here for claw-pi, rsync it and what the Pi runs beside
+#                      it, then run remote-deploy.sh there to install it and restart what
+#                      changed.
 #
-# Run from the repo root on the Mac (riverrain):  ./deploy.sh
+# Run from the repo root on the Mac (riverrain):  ./deploy-chaos-pi.sh
 # Stops at the first error so you can see how far it got.
 #
 set -euo pipefail
@@ -24,6 +25,19 @@ step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 step "draw clockwork.svg"
 dot -Tsvg clockwork.dot -o clockwork.svg
 
+# --- Render the Pi's network configuration ---------------------------------
+# The access point, the wired segment and where Stem finds its broker are templates, filled
+# from what `clockwork.dot` says about the Pi, so no address or passphrase is written twice.
+# The dot calls the Pi `chaos_pi`, its new name; the ssh alias is still `claw-pi`. Rendered
+# afresh into a directory of their own under the git-ignored `target/`, so a template that
+# was removed leaves nothing behind, and before the build, so a dot that does not render
+# leaves the Pi untouched.
+step "render $PI's configuration from clockwork.dot"
+RENDERED="target/$PI"
+rm -rf "$RENDERED"
+python3 -I clockwork/pi_network.py clockwork.dot chaos_pi "$RENDERED" \
+    pi/chaos-pi/claw-ap.nmconnection pi/chaos-pi/claw-eth0.nmconnection stem/stem.service
+
 # --- Build the brain -------------------------------------------------------
 # Here rather than on the Pi: the Mac builds in seconds what the Pi took minutes over, and the
 # Pi then needs no toolchain, no crate index and no sources. The build reads `clockwork.qxw` and
@@ -40,22 +54,31 @@ cargo build --release --target "$TARGET"
 #   brain/          the binary and its systemd unit
 #   stem/           Stem's daemon, the Python modules every health daemon shares, and their
 #                    unit and requirements; not the `stem` crate, which is built in here
-#   etc/            what the deploy installs onto the Pi that belongs to no daemon: the
-#                    access point's and the wired segment's configuration, the uplink
-#                    watchdog (its script, its unit and its timer), the boot configuration,
-#                    and remote-deploy.sh, which does the installing
+#   pi/chaos-pi/    what the deploy installs onto the Pi that belongs to no daemon: the
+#                    uplink watchdog (its script, its unit and its timer), the boot
+#                    configuration, and remote-deploy.sh, which does the installing
+#   pi/deploy-lib.sh what both Pis' remote deploys share
+#   rendered/       what was rendered from the dot above: the access point's and the wired
+#                    segment's profiles, and Stem's unit
+#
+# The templates stay here: with their placeholders unfilled they are nothing the Pi can use.
 #
 # --checksum, not the default size+mtime check, so a file whose contents did not change is not
-# copied again. --delete for the directories, so a file removed here also leaves the Pi.
+# copied again. --delete for the directories, so a file removed here also leaves the Pi. rendered/ is
+# the owner's alone: the access point's profile holds the WiFi's passphrase.
 step "rsync to $PI:$PI_DIR"
 # rsync creates only the last directory of a destination, so a freshly set-up Pi needs these.
-ssh "$PI" "mkdir -p $PI_DIR/brain $PI_DIR/stem $PI_DIR/etc"
+ssh "$PI" "mkdir -p $PI_DIR/brain $PI_DIR/stem $PI_DIR/pi/chaos-pi $PI_DIR/rendered"
 rsync -az --checksum \
     "brain/brain.service" "target/$TARGET/release/brain" "$PI:$PI_DIR/brain/"
 rsync -az --checksum --delete \
     --exclude=src --exclude=Cargo.toml --exclude=target --exclude=__pycache__ \
+    --exclude=stem.service \
     "stem/" "$PI:$PI_DIR/stem/"
-rsync -az --checksum --delete "etc/" "$PI:$PI_DIR/etc/"
+rsync -az --checksum --delete --exclude='*.nmconnection' \
+    "pi/chaos-pi/" "$PI:$PI_DIR/pi/chaos-pi/"
+rsync -az --checksum "pi/deploy-lib.sh" "$PI:$PI_DIR/pi/"
+rsync -az --checksum --delete --chmod=D700,F600 "$RENDERED/" "$PI:$PI_DIR/rendered/"
 
 # --- Boot configuration ---------------------------------------------------
 # The rig's settings live in their own file beside config.txt, included from it, so the rest
@@ -74,7 +97,7 @@ BOOT_CONFIG="config-claw.txt"
 INCLUDE_LINE="include $BOOT_CONFIG"
 
 changed=$(rsync -c --itemize-changes --rsync-path="sudo rsync" \
-    "etc/$BOOT_CONFIG" "$PI:$BOOT_DIR/$BOOT_CONFIG")
+    "pi/chaos-pi/$BOOT_CONFIG" "$PI:$BOOT_DIR/$BOOT_CONFIG")
 if [ -n "$changed" ]; then
     echo "$BOOT_DIR/$BOOT_CONFIG changed — reboot $PI for it to take effect"
 else
@@ -92,7 +115,7 @@ fi
 
 # --- Install and restart on the Pi ----------------------------------------
 step "run remote deploy on $PI"
-ssh "$PI" "bash $PI_DIR/etc/remote-deploy.sh"
+ssh "$PI" "bash $PI_DIR/pi/chaos-pi/remote-deploy.sh"
 
 step "deploy complete"
 say "The installation of the Open Claw has completed. Go check it out"

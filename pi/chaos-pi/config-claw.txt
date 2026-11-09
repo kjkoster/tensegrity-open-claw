@@ -1,6 +1,6 @@
 # The rig's own boot configuration, included from /boot/firmware/config.txt by its last line,
-# `include config-claw.txt`. deploy.sh installs this file beside it and adds that line if it
-# is missing; everything else in config.txt stays as Raspberry Pi OS ships it.
+# `include config-claw.txt`. deploy-chaos-pi.sh installs this file beside it and adds that line
+# if it is missing; everything else in config.txt stays as Raspberry Pi OS ships it.
 #
 # Read at boot only: a change here takes a reboot to land.
 

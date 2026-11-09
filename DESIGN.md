@@ -25,18 +25,11 @@ fixture, with a named field per channel, into that rig's own crate.
 workspace's first universe. That output describes the console's own transmission, but a rig
 has one universe and relays a takeover onto it, so those numbers are the rig's too: what the
 brain listens for, what it sends, and what a wireless fixture listens for. The address the
-output unicasts to is the one the brain's receiver binds.
+output unicasts to is not the rig's: it has to be the brain's, as `clockwork.dot` has it.
 
-**A networked fixture's addresses are in its name.** A fixture on the rig's network is named
-`Name [ip mac]` in the workspace — `Wrist [10.0.10.3 aa:bb:cc:dd:ee:ff]`: one space before the
-bracket, one between the two, the IPv4 address and then the MAC in lower case. QLC+ has no
-field for either and rewrites the file from its own model on every save, dropping anything it
-does not know, so the name is the one place that survives and sits on the fixture it belongs
-to. The build reads the bracket off before the name becomes a Rust constant and fails on a
-malformed one or on an address or a MAC two fixtures share. A fixture with no bracket is
-allowed; a firmware build for one fails, because a fixture that joins the network has to be
-found there. From the one bracket come the address compiled into that fixture's firmware and
-the static lease the access point's DHCP serves it as a backup, so the two cannot disagree.
+**The workspace holds no network addresses.** The rig's IP space — every device's address,
+the services it runs and the ports they listen on — is in `clockwork.dot`, and a networked
+fixture's address is compiled into its firmware from there.
 
 **The running brain never reads the workspace**, not even as a filename: the build consumes it.
 A rig has exactly one, so naming the rig in the log already says which file the binary was
@@ -316,10 +309,11 @@ the rate.
 | `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
 
 **Beside the crates**: `stem/` also holds Stem's daemon, its broker configuration and the
-Python modules every health daemon shares; `etc/` is what `claw-pi`'s deploy installs that
-belongs to no crate; `etc-memory-pi/` is everything `memory-pi` runs. A daemon's systemd unit
-lives in its own directory. Each Pi has its own deploy script, sharing `etc/deploy-lib.sh`, so
-either deploys while the other is down.
+Python modules every health daemon shares; `pi/chaos-pi/` is what `claw-pi`'s deploy installs
+that belongs to no crate; `pi/memory-pi/` is everything `memory-pi` runs. A daemon's systemd
+unit lives in its own directory. Each Pi has its own deploy script, sharing `pi/deploy-lib.sh`,
+so either deploys while the other is down. `clockwork/` holds what reads `clockwork.dot` at
+build time: the dot's reader, and the renderer that fills the Pis' configuration from it.
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`; its `main.rs` includes the
 generated patch and calendar, wires in the components it uses, and writes the show.
@@ -379,11 +373,11 @@ It runs in **AP mode** so fixtures and laptops join its own network rather than 
 the site has, uses its Ethernet port as a wired segment for a laptop, and runs `brain` as a
 systemd service.
 
-**Everything that must be found by address has a fixed one, below `.100`.** Each network gives
-the Pi `.1` and hands out `.100`–`.199` by DHCP as a convenience for laptops; a device the rig
-talks to by address sets its own on itself — a second Pi in its configuration, a wireless
-fixture from its workspace name (§1.1), with a static lease for its MAC as a backup. Both
-networks route their clients out over 4G.
+**Everything that must be found by address has a fixed one, outside the DHCP range.** Both
+are in `clockwork.dot`. Each network hands out its range by DHCP as a convenience for
+laptops; a device the rig talks to by address sets its own on itself — a second Pi from a
+profile rendered from the dot, a wireless fixture from its firmware's header, generated from
+the dot. Both networks route their clients out over 4G.
 
 ---
 
@@ -410,8 +404,8 @@ workspace patches them.
 | the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
 | the telemetry client and the health contract | `cortex::telemetry`, the `stem` crate |
 | Stem (§3.1) | `stem/` |
-| Memory (§3.9) | `etc-memory-pi/` |
-| the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `etc/` |
+| Memory (§3.9) | `pi/memory-pi/` |
+| the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `pi/chaos-pi/` |
 
 | Component | In the code |
 |---|---|
@@ -723,7 +717,7 @@ so a re-enumeration under a running brain showed as the flaky hub port it usuall
 
 The rig's long memory: everything published on the broker, kept in a time-series database on an
 external SSD so a show can be read back afterwards — and the broker itself. It runs on a Pi of
-its own, `memory-pi`, configured entirely from `etc-memory-pi/`.
+its own, `memory-pi`, configured entirely from `pi/memory-pi/`.
 
 **A Pi of its own, because `claw-pi` has no room for it.** A 3B+ with 905 MB, swap on its SD
 card, and the frame loop has no room for a database that flushes and compacts in bursts. A Pi
@@ -733,8 +727,8 @@ card, and the frame loop has no room for a database that flushes and compacts in
 costs the telemetry and never a frame. Everything on it reconnects for as long as it takes,
 because both Pis power up together and `memory-pi` is up long before the access point.
 
-**On the access point, at an address it sets itself**, from a profile built from the same
-`claw-wifi.env` as the access point so the two cannot disagree; routed out over 4G by
+**On the access point, at an address it sets itself**, from a profile rendered from the same
+`clockwork.dot` as the access point's, so the two cannot disagree; routed out over 4G by
 `claw-pi`. The Mac reaches it only by jumping through `claw-pi`: a tunnel of its own would buy
 nothing, because a dead `claw-pi` leaves little to do remotely anyway.
 

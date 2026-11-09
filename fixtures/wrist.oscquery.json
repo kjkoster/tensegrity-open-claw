@@ -46,6 +46,23 @@
               "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
               "UNIT": ["count"],
               "CLOCKWORK_CHAOS_ON_EVENT": "data"
+            },
+            "tare": {
+              "FULL_PATH": "/wrist/load/tare",
+              "DESCRIPTION": "The coded-in tare: the raw reading with no tension on the wire.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
+              "UNIT": ["count"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "scale": {
+              "FULL_PATH": "/wrist/load/scale",
+              "DESCRIPTION": "The coded-in scale: the tension one count above the tare stands for, so the force is (raw − tare) · scale. NaN until it is measured.",
+              "TYPE": "f",
+              "ACCESS": 1,
+              "UNIT": ["N/count"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
             }
           }
         },

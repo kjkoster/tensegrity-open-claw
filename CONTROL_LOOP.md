@@ -144,7 +144,7 @@ Only loop variables and raw inputs are sent. Nothing is computed for telemetry: 
 
 The file holds only what the firmware sends so far: the mode, the alarm, the load cell, the tick interval, where Wrist sits on the universe and how fresh its frames are, and what it runs on. To come with the modes that use them, each value its own message: homed and locked; `osc/omega`, `osc/phase`, `pll/err`, `amp/a`, `drive/A`, `drive/phase_off`, `adapt/regime`, `motor/x`; the accelerometer's three axes and the sway, on each reading; the persisted tuning values `f_est`, `Q_est`, axis and `phase_off`, which are what the firmware has learned, and reading them is how the coded-in defaults get updated by hand; and the transitions, pluck results and protections as they happen.
 
-Nothing comes in over OSC. Calibration constants are coded in (§10); the raw readings needed to derive them are in the telemetry. **Load-cell calibration** (once per rig, in Blackout): unhook the wire, average `load/raw` from the database → `tare`; hang a known mass, average → `scale_g = (raw − tare)/F_known`; put both in the code and rebuild.
+Nothing comes in over OSC. Calibration constants are coded in (§10); the raw readings needed to derive them are in the telemetry. **Load-cell calibration** (once per rig, in Blackout): unhook the wire, average `load/raw` from the database → `tare`; hang a known mass `m`, average → `scale = m·g/(raw − tare)`, in N per count, so the force is `(raw − tare)·scale`; put both in the code and rebuild.
 
 ## 8. Persisted (LittleFS)
 
@@ -164,7 +164,7 @@ Nothing comes in over OSC. Calibration constants are coded in (§10); the raw re
 | `x_pre`, `x_max`, `margin` | per band set, in steps | travel must stay inside the wrap |
 | `A_max`, `A_seed`, `A_brake` | steps | `A_max` set for the show (5–10 mm on the model); must stay ≤ `x_max − x_pre` |
 | `F_slack`, `F_max` | N | from band set |
-| `tare`, `scale_g` | raw counts, N/count | measured once per rig (§7) |
+| `tare`, `scale` | raw counts, N/count | measured once per rig (§7) |
 | `f_est`, `Q_est`, axis, `φ_off` defaults | | starting points only; overridden by persisted values |
 | `a_quiet`, `a_lock_min`, `e_lock` | sensor units, 20° | tune on the model |
 | `K_p`, `K_i` | from `f/100` bandwidth | |

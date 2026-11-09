@@ -1,5 +1,6 @@
 # memory-pi's connection to claw-pi's access point, as a NetworkManager profile. A template:
-# the deploy fills the @…@ placeholders from claw-wifi.env and installs the result.
+# deploy-memory-pi.sh fills the @…@ placeholders from memory_pi's wlan0 in clockwork.dot
+# (clockwork/pi_network.py), and the deploy installs the result.
 
 [connection]
 id=claw
@@ -12,18 +13,19 @@ autoconnect-priority=10
 autoconnect-retries=0
 
 [wifi]
-ssid=@SSID@
+ssid=@WLAN0_SSID@
 band=bg
-channel=@CHANNEL@
+channel=@WLAN0_CHANNEL@
 
 [wifi-security]
 key-mgmt=wpa-psk
-psk=@PSK@
+psk=@WLAN0_PSK@
 
 [ipv4]
 method=manual
-address1=10.0.10.2/24,10.0.10.1
-dns=10.0.10.1;
+address1=@WLAN0_ADDRESS@,@WLAN0_GATEWAY@
+# The gateway is claw-pi, whose access point relays DNS.
+dns=@WLAN0_GATEWAY@;
 
 [ipv6]
 method=disabled

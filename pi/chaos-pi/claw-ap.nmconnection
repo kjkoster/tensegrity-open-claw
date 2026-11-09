@@ -1,0 +1,36 @@
+# claw-pi's WiFi access point, as a NetworkManager profile. A template: deploy-chaos-pi.sh
+# fills the @…@ placeholders from chaos_pi's wlan0 in clockwork.dot (clockwork/pi_network.py),
+# and the deploy installs the result.
+
+[connection]
+id=claw-ap
+type=wifi
+interface-name=wlan0
+
+[wifi]
+mode=ap
+ssid=@WLAN0_SSID@
+band=bg
+channel=@WLAN0_CHANNEL@
+
+[wifi-security]
+key-mgmt=wpa-psk
+proto=rsn
+pairwise=ccmp
+group=ccmp
+# Protected management frames off: the Pi's brcmfmac chip mishandles them in AP mode.
+pmf=1
+psk=@WLAN0_PSK@
+
+[ipv4]
+# Shared: NetworkManager hands out addresses, relays DNS and routes the clients out through the
+# default route. Everything that must be found by address sets its own, outside the DHCP
+# range; DHCP is a convenience for laptops.
+method=shared
+address1=@WLAN0_ADDRESS@
+shared-dhcp-range=@WLAN0_DHCP_RANGE@
+# sACN multicast leaves through the AP, not the 4G uplink's default route.
+route1=224.0.0.0/4
+
+[ipv6]
+method=disabled

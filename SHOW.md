@@ -136,7 +136,7 @@ constants are `CONTROL_LOOP.md`'s; its parts are in `OWNED-DEVICES.md`. The brai
 its mode and amplitude, and reads its OSC for the face. How this show sets it up:
 
 **Patch.** `fixtures/wrist.qxf`, mode "4 Channel", at the top of the universe, address 500,
-named `Wrist [10.0.10.3 <its MAC>]`.
+named `Wrist`. Its address on the access point is in `clockwork.dot`, the rig's IP space.
 
 | ch | name | group | this show's use |
 |---|---|---|---|
@@ -182,14 +182,13 @@ matter. The three placements tried in E0 are the top node, a mid-height node, an
 ### 3.3 Memory and the dashboard
 
 `memory-pi` as the README has it, with one provisioned dashboard for this show,
-`etc-memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
+`pi/memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
 transitions, pluck results and protections as annotations, and `brain/show` and `brain/run` as
 annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
 lamps and to `memory-pi`, whose OSC bridge ingests it alongside MQTT, so the trace runs on
 while the brain is down. The Mac is on the access point for the sessions
 and reaches Grafana over the SSH jump as today; QLC+'s output for this show unicasts to
-`10.0.10.1` for the same reason, which the brain's receiver binds because the workspace says
-so.
+the brain's address on the access point for the same reason, as `clockwork.dot` has it.
 
 ## 4. The experiments, in order
 

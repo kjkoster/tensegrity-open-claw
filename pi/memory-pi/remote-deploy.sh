@@ -7,16 +7,19 @@ set -euo pipefail
 
 # Where the sources landed, asked of this script's own location rather than spelled out, so it
 # cannot disagree with the path deploy-memory-pi.sh rsyncs to.
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
-. "$REPO/etc/deploy-lib.sh"
+. "$REPO/pi/deploy-lib.sh"
 
 # --- WiFi ------------------------------------------------------------------
 # claw-pi's access point is memory-pi's only network, at a fixed address. Loaded but not
 # brought up: this deploy arrives over that very link, and switching it now would cut the
-# deploy off halfway. The profile takes over at the next boot.
+# deploy off halfway. The profile takes over at the next boot. Rendered from clockwork.dot by
+# deploy-memory-pi.sh; 0600, root's, as NetworkManager requires of a profile holding a secret.
 step "install WiFi connection"
-wifi_profile "$REPO/etc-memory-pi/claw.nmconnection" claw
+CHANGED=
+install_changed 0600 "$REPO/rendered/claw.nmconnection" \
+    /etc/NetworkManager/system-connections/claw.nmconnection
 sudo nmcli connection reload
 echo "reboot memory-pi for a changed WiFi connection to take effect"
 
@@ -30,7 +33,7 @@ echo "reboot memory-pi for a changed WiFi connection to take effect"
 # of it; a changed device or file system type cannot be, and waits for a reboot. A /tank that is
 # not mounted yet — the first deploy, or an SSD plugged in after boot — is mounted here.
 step "mount the SSD on /tank"
-tank_line="$(grep -v -e '^#' -e '^$' "$REPO/etc-memory-pi/fstab-tank")"
+tank_line="$(grep -v -e '^#' -e '^$' "$REPO/pi/memory-pi/fstab-tank")"
 if grep -qxF "$tank_line" /etc/fstab; then
     echo "/etc/fstab already mounts /tank"
 else
@@ -75,11 +78,11 @@ echo "broker restarted"
 # beside their importer, as on claw-pi: the daemon is run by absolute path, which puts
 # /usr/local/bin first on its import path.
 step "install and restart the health daemon"
-sudo install -m 0755 "$REPO/etc-memory-pi/memory.py" /usr/local/bin/memory.py
+sudo install -m 0755 "$REPO/pi/memory-pi/memory.py" /usr/local/bin/memory.py
 sudo install -m 0644 "$REPO/stem/rig_mqtt.py" /usr/local/bin/rig_mqtt.py
 sudo install -m 0644 "$REPO/stem/rig_board.py" /usr/local/bin/rig_board.py
-sudo install -m 0644 "$REPO/etc-memory-pi/memory.service" /etc/systemd/system/memory.service
-python_daemon /opt/memory/venv "$REPO/etc-memory-pi/requirements.txt"
+sudo install -m 0644 "$REPO/pi/memory-pi/memory.service" /etc/systemd/system/memory.service
+python_daemon /opt/memory/venv "$REPO/pi/memory-pi/requirements.txt"
 sudo systemctl daemon-reload
 sudo systemctl enable memory
 sudo systemctl restart memory
@@ -94,7 +97,7 @@ echo "memory daemon restarted"
 # The data directory is made only on a mounted /tank: the mount step above has already failed
 # the deploy otherwise, and a directory made on the empty mount point would sit on the SD card.
 step "install and restart GreptimeDB"
-. "$REPO/etc-memory-pi/greptime.version"
+. "$REPO/pi/memory-pi/greptime.version"
 if [ "$(cat /opt/greptimedb/VERSION 2>/dev/null)" = "$GREPTIME_VERSION" ]; then
     echo "GreptimeDB $GREPTIME_VERSION already installed"
 else
@@ -118,8 +121,8 @@ if ! id greptime >/dev/null 2>&1; then
 fi
 sudo install -d -o greptime -g greptime -m 0750 /tank/greptimedb
 sudo install -d -m 0755 /etc/greptimedb
-sudo install -m 0644 "$REPO/etc-memory-pi/greptimedb.toml" /etc/greptimedb/greptimedb.toml
-sudo install -m 0644 "$REPO/etc-memory-pi/greptimedb.service" /etc/systemd/system/greptimedb.service
+sudo install -m 0644 "$REPO/pi/memory-pi/greptimedb.toml" /etc/greptimedb/greptimedb.toml
+sudo install -m 0644 "$REPO/pi/memory-pi/greptimedb.service" /etc/systemd/system/greptimedb.service
 sudo systemctl daemon-reload
 sudo systemctl enable greptimedb
 sudo systemctl restart greptimedb
@@ -129,9 +132,9 @@ echo "GreptimeDB restarted"
 # After Greptime, which it writes to. rig_mqtt.py is already in /usr/local/bin from the health
 # daemon's step.
 step "install and restart the recorder"
-sudo install -m 0755 "$REPO/etc-memory-pi/recorder.py" /usr/local/bin/recorder.py
-sudo install -m 0644 "$REPO/etc-memory-pi/recorder.service" /etc/systemd/system/recorder.service
-python_daemon /opt/recorder/venv "$REPO/etc-memory-pi/recorder-requirements.txt"
+sudo install -m 0755 "$REPO/pi/memory-pi/recorder.py" /usr/local/bin/recorder.py
+sudo install -m 0644 "$REPO/pi/memory-pi/recorder.service" /etc/systemd/system/recorder.service
+python_daemon /opt/recorder/venv "$REPO/pi/memory-pi/recorder-requirements.txt"
 sudo systemctl daemon-reload
 sudo systemctl enable recorder
 sudo systemctl restart recorder
@@ -150,7 +153,7 @@ if [ ! -f /etc/apt/keyrings/grafana.asc ]; then
     curl -fsSL https://apt.grafana.com/gpg.key |
         sudo install -m 0644 /dev/stdin /etc/apt/keyrings/grafana.asc
 fi
-sudo install -m 0644 "$REPO/etc-memory-pi/grafana/grafana.sources" \
+sudo install -m 0644 "$REPO/pi/memory-pi/grafana/grafana.sources" \
     /etc/apt/sources.list.d/grafana.sources
 if dpkg-query -W -f='${Status}' grafana 2>/dev/null | grep -q "install ok installed"; then
     echo "grafana already installed"
@@ -159,9 +162,9 @@ else
     sudo apt-get install -y grafana
 fi
 sudo install -d -m 0755 /etc/systemd/system/grafana-server.service.d
-sudo install -m 0644 "$REPO/etc-memory-pi/grafana/grafana-server.conf" \
+sudo install -m 0644 "$REPO/pi/memory-pi/grafana/grafana-server.conf" \
     /etc/systemd/system/grafana-server.service.d/claw.conf
-sudo install -o root -g grafana -m 0640 "$REPO/etc-memory-pi/grafana/datasources.yaml" \
+sudo install -o root -g grafana -m 0640 "$REPO/pi/memory-pi/grafana/datasources.yaml" \
     /etc/grafana/provisioning/datasources/greptime.yaml
 sudo systemctl daemon-reload
 sudo systemctl enable grafana-server

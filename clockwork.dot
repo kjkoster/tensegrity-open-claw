@@ -27,7 +27,8 @@
 //   an edge                 from the title of the service that connects to the port it connects
 //                           to, labelled with what flows. Data flows the same way, except where
 //                           a subscriber connects to fetch it: `dir=back` turns that arrow round
-//                           to show the flow. sACN always names its universe. sACN is unicast only:
+//                           to show the flow. sACN carries the one universe clockwork.qxw
+//                           sets, so its edges do not name it. sACN is unicast only:
 //                           one edge per sender and recipient, sent to the recipient's
 //                           address on the network they share. Edges sit in one
 //                           subgraph per protocol, named after it, which also sets its colour
@@ -38,7 +39,7 @@ digraph clockwork {
     node [shape=record, fontname="Helvetica", fontsize=10];
     edge [fontname="Helvetica", fontsize=9];
 
-    networks [label="networks|<wifi> wifi 10.0.10.0/24 gateway 10.0.10.2 dhcp 10.0.10.100–10.0.10.199 ssid \"closed claw DMX\" psk \"close-that-claw\" channel 6|<wired> wired 10.0.1.0/24 gateway 10.0.1.1 dhcp 10.0.1.100–10.0.1.199|<wireguard> wireguard 10.8.0.0/24|<4g> 4g dhcp"];
+    networks [label="networks|<wifi> wifi 10.0.10.0/24 gateway 10.0.10.2 dhcp 10.0.10.100–10.0.10.199 ssid \"Clockwork Chaos\" psk \"chaotic-clockwork\" channel 6|<wired> wired 10.0.1.0/24 gateway 10.0.1.1 dhcp 10.0.1.100–10.0.1.199|<wireguard> wireguard 10.8.0.0/24|<4g> 4g dhcp"];
 
     // ── Devices ──────────────────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ digraph clockwork {
     subgraph cluster_memory_pi {
         label="memory-pi";
 
-        memory_pi_if [label="addresses|wlan0 10.0.10.30"];
+        memory_pi_if [label="addresses|wlan0 10.0.10.3"];
 
         node [shape=plain];
 
@@ -116,7 +117,7 @@ digraph clockwork {
     subgraph cluster_wrist {
         label="wrist";
 
-        wrist_if [label="addresses|wifi 10.0.10.3"];
+        wrist_if [label="addresses|wifi 10.0.10.4"];
 
         node [shape=plain];
 
@@ -167,8 +168,8 @@ digraph clockwork {
 
     subgraph sacn {
         edge [color="#2ca02c", fontcolor="#2ca02c", penwidth=2.5];
-        mac_qlc:title        -> chaos_pi_brain:sacn [xlabel="sACN universe 1, unicast"];
-        chaos_pi_brain:title -> wrist_firmware:sacn [xlabel="sACN universe 1, unicast"];
+        mac_qlc:title        -> chaos_pi_brain:sacn [xlabel="sACN, unicast"];
+        chaos_pi_brain:title -> wrist_firmware:sacn [xlabel="sACN, unicast"];
     }
 
     subgraph osc {

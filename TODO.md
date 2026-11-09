@@ -21,28 +21,26 @@ seen. The access point, Wrist's address and where its OSC goes all come from `cl
   is where the facts are recorded, and the build and the deploy compile config from it. For
   now: the address and port the brain's OSC receiver binds, and the address and port of each
   sACN recipient it sends to. More is read as more comes to depend on it.
-- `claw-pi`'s access point from the dot: the deploy renders `claw-ap.nmconnection` from what
-  `cortex-build` read, in place of `etc/claw-wifi.env`.
 - C++: Wrist's build reads `clockwork.dot` into a C++ header, as `cortex-build` does for Rust:
   the WiFi, Wrist's address and gateway, and each OSC recipient's address and port. It fails
   where `cortex-build` fails.
-- `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy.sh`, the
+- `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy-chaos-pi.sh`, the
   OSC encoders generated from `wrist.oscquery.json` at build time; built with `arduino-cli`,
   the core and libraries pinned in a `sketch.yaml` profile. Flashed from `claw-pi`, with
-  Wrist's board on its USB: `deploy.sh` copies the image across and runs `esptool` there.
+  Wrist's board on its USB: `deploy-chaos-pi.sh` copies the image across and runs `esptool` there.
   Delete the bench sketch, `wrist/bench/`, once the firmware moves the motor.
 - `wrist/` firmware, first: WiFi at the header's address, with modem sleep off; the `sys/…`
   messages to each OSC recipient in the dot.
 - On `claw-pi`: `ngrep` installed by the deploy, and
-  `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.3'` showing the messages.
-  Only those to `claw-pi`'s own address arrive: with `memory-pi` off the network nothing
-  answers ARP for `10.0.10.2`, so Wrist's packets to it never leave the board.
+  `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'` showing the messages.
+  Only those to `claw-pi`'s own address, `10.0.10.2`, arrive: with `memory-pi` off the
+  network nothing answers ARP for `10.0.10.3`, so Wrist's packets to it never leave the board.
 
 ## The workspace
 
 - The workspace already patches `Face`; it patches `Wrist` once its definition exists. Change
-  the E1.31 output's unicast address from `10.8.0.3` to `10.0.10.1`, so the Mac works on the
-  access point for this show; the brain binds what the workspace says.
+  the E1.31 output's unicast address from `10.8.0.3` to the brain's on the access point in
+  `clockwork.dot`, so the Mac works on the access point for this show.
 
 ## Soldering
 
@@ -81,7 +79,7 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   bar's ends are clamped; Velcro dots; a luggage scale and string; a known mass for the load cell.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
   feed, contacts rated for at least 50 V DC.
-- Revive `memory-pi` per README; broker at `10.0.10.2`, `recorder/greptime` saying `ok`.
+- Revive `memory-pi` per README; broker at `10.0.10.3`, `recorder/greptime` saying `ok`.
 - Settle the OSCQuery files, `wrist.oscquery.json` and `face.oscquery.json`. Open:
   - `health/…` specified for every client, `sys/…` for every client but Wrist, and a file
     for the brain;
@@ -89,8 +87,8 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   - whether Wrist serves its file over HTTP and mDNS.
 - The OSC bridge on `memory-pi` (DESIGN §3.9): Wrist's bundles and events decoded from
   `wrist.oscquery.json` and ingested alongside MQTT; its unit and deploy in
-  `etc-memory-pi/`; the schema into README.
-- Provision the PoC dashboard from `etc-memory-pi/grafana/headless-hug-poc.json` with
+  `pi/memory-pi/`; the schema into README.
+- Provision the PoC dashboard from `pi/memory-pi/grafana/headless-hug-poc.json` with
   `allowUiUpdates: true`, so panels can be edited in the UI and exported back to the file;
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
   results and protections, `brain/show` and `brain/run` as annotations. Grafana stays on
@@ -167,7 +165,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## Results, decisions, clean-up
 
 - `POC-RESULTS.md`: every experiment's numbers by `brain/run`, the dashboard panels and the
-  SQL behind them committed under `etc-memory-pi/grafana/`, and the answers to the three
+  SQL behind them committed under `pi/memory-pi/grafana/`, and the answers to the three
   questions, with the measurement behind each.
 - `DESIGN.md`: correct §3.10 by what was measured.
 - Tag `<YYYY-MM-DD>-headless-hug-poc`; empty this file for the next show.

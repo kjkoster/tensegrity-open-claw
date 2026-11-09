@@ -11,8 +11,10 @@ After=network.target
 # keep reporting when that daemon is exactly what has gone wrong.
 ExecStart=/opt/stem/venv/bin/python3 /usr/local/bin/stem.py
 # The broker is Stem's, but runs on memory-pi, at the address it sets itself on the access
-# point.
-Environment=RIG_MQTT_HOST=10.0.10.2
+# point. A template: deploy-chaos-pi.sh fills the @…@ placeholders from Stem's MQTT edge in
+# clockwork.dot (clockwork/pi_network.py), and the deploy installs the result.
+Environment=RIG_MQTT_HOST=@STEM_MQTT_ADDRESS@
+Environment=RIG_MQTT_PORT=@STEM_MQTT_PORT@
 Restart=always
 RestartSec=5
 # No WatchdogSec, and Stem pets nothing. Its death costs telemetry and must never cost uptime,

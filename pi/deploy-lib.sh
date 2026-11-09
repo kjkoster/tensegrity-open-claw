@@ -1,6 +1,6 @@
 # deploy-lib.sh — what both Pis' remote deploys share, sourced by each of them: claw-pi's
-# etc/remote-deploy.sh and memory-pi's etc-memory-pi/remote-deploy.sh. One copy, so a fix here
-# reaches both Pis.
+# pi/chaos-pi/remote-deploy.sh and memory-pi's pi/memory-pi/remote-deploy.sh. One copy, so a
+# fix here reaches both Pis.
 #
 # Expects REPO to be set by the script sourcing it, to where the sources landed on the Pi.
 
@@ -70,29 +70,5 @@ python_daemon() {
     # difference between a deploy that needs the uplink and one that does not.
     sudo "$venv/bin/pip" install -r "$requirements"
     sudo install -m 0644 "$requirements" "$venv/requirements.txt"
-    CHANGED=1
-}
-
-# Installs a NetworkManager profile template with the rig's WiFi filled in from claw-wifi.env,
-# the one place it is defined. Bash substitution rather than sed, so no character in the
-# passphrase can break it; quoted, so not even `&`. 0600, root's, as NetworkManager requires
-# of a profile holding a secret. Installed only when it differs, setting CHANGED as
-# `install_changed` does.
-wifi_profile() {
-    local template="$1" name="$2" profile target
-    . "$REPO/etc/claw-wifi.env"
-    profile="$(<"$template")"
-    profile="${profile//@SSID@/"$CLAW_SSID"}"
-    profile="${profile//@PSK@/"$CLAW_PSK"}"
-    profile="${profile//@CHANNEL@/"$CLAW_CHANNEL"}"
-    # Compared and installed straight from the rendered text, so the passphrase never lands in
-    # a file of its own on the way to root's copy.
-    target="/etc/NetworkManager/system-connections/$name.nmconnection"
-    if printf '%s\n' "$profile" | sudo cmp -s - "$target"; then
-        return 0
-    fi
-    sudo rm -f "$target"
-    printf '%s\n' "$profile" | sudo install -m 0600 /dev/stdin "$target"
-    echo "installed $target"
     CHANGED=1
 }

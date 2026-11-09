@@ -58,7 +58,10 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 // `health/`. The broker runs on memory-pi, beside the recordings, at the fixed address it sets
 // itself on this Pi's access point, so the Pi that drives the show carries none of the
 // telemetry. The port and the keepalive are the rig's, in the `stem` crate.
-pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 0, 10, 2);
+//
+// Written by hand, and must match memory-pi's address in `clockwork.dot` until `cortex-build`
+// reads the dot and generates it.
+pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 0, 10, 3);
 
 // How long a connection attempt may take before it counts as failed and backs off. The broker
 // is across the WiFi, and a memory-pi that is off would otherwise leave the attempt to the

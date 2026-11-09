@@ -28,20 +28,22 @@ binary. Once per Mac: `rustup target add aarch64-unknown-linux-musl`.
 - SSH alias **`claw-pi`** → `10.8.0.3` over WireGuard, user `kjkoster`, key `~/.ssh/id_rsa`
   (`IdentitiesOnly yes`). The Mac is a peer at `10.8.0.4` routing that single `/32`, not a
   general VPN. The tunnel's config is not versioned here.
-- SSH alias **`memory-pi`** → `10.0.10.2`, jumping through `claw-pi` (why: DESIGN §3.9). In
+- SSH alias **`memory-pi`** → `10.0.10.3`, jumping through `claw-pi` (why: DESIGN §3.9). In
   `~/.ssh/config`:
 
   ```
   Host memory-pi
-      HostName 10.0.10.2
+      HostName 10.0.10.3
       User kjkoster
       ProxyJump claw-pi
   ```
 
+The Pi's addresses, as `clockwork.dot` sets them, where it calls the Pi `chaos-pi`:
+
 | Interface | Address | Purpose |
 |---|---|---|
 | `eth0` | `10.0.1.1/24`, DHCP `.100`–`.199` | the wired segment, for a laptop |
-| `wlan0` | `10.0.10.1/24`, DHCP `.100`–`.199` | the WiFi access point |
+| `wlan0` | `10.0.10.2/24`, DHCP `.100`–`.199` | the WiFi access point |
 | `wg0` | `10.8.0.3/32` | WireGuard, remote access over 4G |
 | `wwan0` | DHCP | 4G uplink |
 
@@ -50,13 +52,15 @@ unicast.
 
 ## Networking
 
-- **NetworkManager runs every connection on both Pis** from profiles in the repo. The rig's
-  WiFi — SSID, passphrase, channel — is defined once, in `etc/claw-wifi.env`, and each Pi's
-  deploy fills it into its profiles.
-- **The access point**, `etc/claw-ap.nmconnection`, and **the wired segment**,
-  `etc/claw-eth0.nmconnection`, are both in shared mode: DHCP for laptops, DNS relayed, clients
-  routed out over 4G. Anything that must be found by address sets its own, below `.100`
-  (DESIGN §2.6). A deploy that changes a profile brings it up again, which drops that
+- **NetworkManager runs every connection on both Pis** from profiles in the repo. The
+  profiles are templates: each Pi's deploy fills their `@…@` placeholders with what
+  `clockwork.dot` says about that Pi — the WiFi's SSID, passphrase and channel, the addresses,
+  gateways and DHCP ranges — using `clockwork/pi_network.py`, so each is written once, in the dot. A
+  placeholder the dot does not fill stops the deploy before anything reaches the Pi.
+- **The access point**, `pi/chaos-pi/claw-ap.nmconnection`, and **the wired segment**,
+  `pi/chaos-pi/claw-eth0.nmconnection`, are both in shared mode: DHCP for laptops, DNS relayed, clients
+  routed out over 4G. Anything that must be found by address sets its own, outside the DHCP
+  range (DESIGN §2.6). A deploy that changes a profile brings it up again, which drops that
   network's clients for a few seconds.
 
 ### 4G uplink
@@ -70,7 +74,7 @@ signal quality.
 > default route, `10.0.10.0/24` and `10.0.1.0/24` local) live only in
 > `/etc/NetworkManager/system-connections/cellular.nmconnection` on the Pi.
 
-**The watchdog** is `etc/4g-watchdog.sh`, installed to `/usr/local/sbin/` with its `.service`
+**The watchdog** is `pi/chaos-pi/4g-watchdog.sh`, installed to `/usr/local/sbin/` with its `.service`
 and `.timer`; only the timer is enabled, running a check every minute. Its configuration — the
 modem's USB vendor, ping targets, tunnel address, thresholds — is at the top of the script;
 change the repo's copy, since the next deploy overwrites the Pi's. On consecutive failed pings
@@ -102,9 +106,9 @@ the rig may depend on a clean shutdown.
 
 ### Boot configuration
 
-Every boot setting the rig needs is in [`etc/config-claw.txt`](etc/config-claw.txt), with the
+Every boot setting the rig needs is in [`pi/chaos-pi/config-claw.txt`](pi/chaos-pi/config-claw.txt), with the
 reason for each beside it. `config.txt` stays as Raspberry Pi OS ships it apart from a last
-line, `include config-claw.txt`. `deploy.sh` copies the file to `/boot/firmware/` on every
+line, `include config-claw.txt`. `deploy-chaos-pi.sh` copies the file to `/boot/firmware/` on every
 deploy, appends the include line if it is missing, and says when either changed. It never
 reboots: a changed boot configuration waits for your `sudo reboot`.
 
@@ -167,17 +171,20 @@ reverse the convention. Put a **120 Ω terminator** in the DMX out of the last d
 - **Disabled** for the DMX serial: `serial-getty@ttyAMA0.service`, `hciuart`.
 
 The deploy also installs `stem.service`, the watchdog's unit and timer, and the network
-profiles. Stem's broker runs on [`memory-pi`](#the-memory-pi-memory-pi), at `10.0.10.2`.
+profiles. Stem's broker runs on [`memory-pi`](#the-memory-pi-memory-pi), at `10.0.10.30`;
+Stem's unit is a template too, its broker's address filled from Stem's MQTT edge in the dot.
 
 ## Build & deploy
 
-From the Mac at the repo root: `./deploy.sh`
+From the Mac at the repo root: `./deploy-chaos-pi.sh`
 
-It builds `brain` on the Mac, rsyncs what the Pi runs — the binary and its unit, Stem's daemon
-and Python modules, and `etc/` — to `claw-pi:tensegrity-open-claw/`, then runs
-`etc/remote-deploy.sh` there. That installs each file, and restarts a service only when one of
+It renders the Pi's network profiles and Stem's unit from `clockwork.dot` into
+`target/claw-pi/`, builds `brain` on the Mac, rsyncs what the Pi runs — the binary and its
+unit, Stem's daemon and Python modules, `pi/chaos-pi/`, `pi/deploy-lib.sh` and the rendered files — to
+`claw-pi:tensegrity-open-claw/`, then runs
+`pi/chaos-pi/remote-deploy.sh` there. That installs each file, and restarts a service only when one of
 its files changed, saying which were left alone; a restart that fails stops the deploy with
-an error. The list of what ships is written out in `deploy.sh`, so adding something is a
+an error. The list of what ships is written out in `deploy-chaos-pi.sh`, so adding something is a
 decision.
 
 ### The patch
@@ -195,13 +202,9 @@ QLC+'s library. `<Address>` in the `.qxw` is 0-based: DMX address 1 is `<Address
 | repatch so the channel count and the mode disagree | fails: re-pick the mode in QLC+'s Fixture Manager |
 | overlap two fixtures' slots | fails, naming both and their spans |
 | name two fixtures so they yield the same Rust constant | fails |
-| name a networked fixture `Name [ip mac]`, e.g. `Wrist [10.0.10.3 aa:bb:cc:dd:ee:ff]` | its firmware gets that address, and the access point's DHCP a static lease for that MAC |
-| write the bracket any other way: not one space before it and one inside, not IPv4 then a lower-case MAC | fails, naming the fixture |
-| give two fixtures the same address or the same MAC | fails, naming both |
-| build a fixture's firmware when its name carries no bracket | fails: a fixture on the network needs both |
 | patch a fixture outside the first universe | fails |
 | change the E1.31 output's universe or port | the brain listens and sends there |
-| change the E1.31 output's unicast address | the brain's receiver binds that address |
+| change the E1.31 output's unicast address | nothing: it has to be the brain's address in `clockwork.dot`, set by hand |
 | switch the E1.31 output to multicast | fails: the brain only receives a console by unicast |
 | remove the E1.31 output from the first universe | fails |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |
@@ -297,20 +300,22 @@ rig: shutdown — releasing the sACN source (3 terminate frames)
 
 Stem's broker, GreptimeDB recording everything published on it onto an external SSD, and
 Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0` at
-**`10.0.10.2/24`**, set on the Pi itself by `etc-memory-pi/claw.nmconnection`.
+**`10.0.10.3/24`**, as `clockwork.dot` sets it, set on the Pi itself by
+`pi/memory-pi/claw.nmconnection`.
 
 ## Setting up a fresh `memory-pi`
 
 Headless, in the cabinet; the card only has to get it onto the access point once:
 
 - **Write the card with Raspberry Pi Imager**: 64-bit Raspberry Pi OS Lite, hostname
-  `memory-pi`, user `kjkoster` with the Mac's public key, key-only SSH, WiFi from
-  `etc/claw-wifi.env`, and country `NL`, without which the radio stays blocked.
+  `memory-pi`, user `kjkoster` with the Mac's public key, key-only SSH, the WiFi of the
+  `wifi` network in `clockwork.dot`'s `networks`, and country `NL`, without which the radio
+  stays blocked.
 - **Power it up with `claw-pi` running.** It takes a DHCP address; find it on `claw-pi`:
   `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases`
 - **Format the SSD** if it is new or wiped, which erases it: `sudo mkfs.ext4 -L memory /dev/sda1`
 - **Deploy** with the alias pointed at that DHCP address: `./deploy-memory-pi.sh`, then
-  `ssh memory-pi sudo reboot`, then the alias back to `10.0.10.2`.
+  `ssh memory-pi sudo reboot`, then the alias back to `10.0.10.3`.
 - **Remove Imager's network profiles**, including a DHCP one for `eth0`:
   `sudo rm /etc/netplan/90-NM-*.yaml && sudo netplan generate && sudo nmcli connection reload`
 
@@ -319,10 +324,10 @@ Headless, in the cabinet; the card only has to get it onto the access point once
 | Unit | What | Installed from |
 |---|---|---|
 | `mosquitto.service` | Stem's broker, port `1883` on every interface | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
-| `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `etc-memory-pi/memory.py`, venv in `/opt/memory/venv` |
-| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only: HTTP `4000`, gRPC `4001`, MySQL `4002` | the release pinned in `etc-memory-pi/greptime.version`, in `/opt/greptimedb` |
-| `recorder.service` | every live message into Greptime's `rig` database | `etc-memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
-| `grafana-server.service` | Grafana on `127.0.0.1:3000` | Grafana's apt repository, settings and data source from `etc-memory-pi/grafana/` |
+| `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `pi/memory-pi/memory.py`, venv in `/opt/memory/venv` |
+| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only: HTTP `4000`, gRPC `4001`, MySQL `4002` | the release pinned in `pi/memory-pi/greptime.version`, in `/opt/greptimedb` |
+| `recorder.service` | every live message into Greptime's `rig` database | `pi/memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
+| `grafana-server.service` | Grafana on `127.0.0.1:3000` | Grafana's apt repository, settings and data source from `pi/memory-pi/grafana/` |
 
 To watch the broker from the Mac:
 
@@ -335,10 +340,11 @@ mosquitto_sub -h localhost -v -t '#'
 
 From the Mac at the repo root: `./deploy-memory-pi.sh`
 
-It rsyncs `etc-memory-pi/`, `etc/claw-wifi.env`, `etc/deploy-lib.sh` and Stem's
-`rig_mqtt.py`, `rig_board.py` and `stem.conf`, then runs `etc-memory-pi/remote-deploy.sh`
-there. It assumes a fresh Pi and removes nothing, and it never touches `claw-pi`, as
-`deploy.sh` never touches `memory-pi`.
+It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, rsyncs
+`pi/memory-pi/`, the rendered profile, `pi/deploy-lib.sh` and Stem's `rig_mqtt.py`,
+`rig_board.py` and `stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. It assumes a
+fresh Pi and removes nothing but what an older deploy shipped, and it never touches `claw-pi`,
+as `deploy-chaos-pi.sh` never touches `memory-pi`.
 
 - **The first deploy is long**: Greptime's release (about 170 MB) and Grafana come over 4G,
   filling it so SSH to `claw-pi` times out meanwhile. Greptime downloads again only when its
@@ -349,7 +355,7 @@ there. It assumes a fresh Pi and removes nothing, and it never touches `claw-pi`
 
 ## The SSD on `/tank`
 
-One ext4 partition labelled `memory`, mounted on `/tank` from `etc-memory-pi/fstab-tank`, which
+One ext4 partition labelled `memory`, mounted on `/tank` from `pi/memory-pi/fstab-tank`, which
 the deploy puts in `/etc/fstab`; after a power cut ext4 replays its journal and is checked at
 boot before it mounts. The Pi boots without it; Greptime does not start without it.
 The deploy never unmounts it: a changed line is applied with a remount, a change of device
@@ -387,7 +393,7 @@ WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
 ORDER BY time
 ```
 
-Settings and the data source are provisioned from `etc-memory-pi/grafana/` on every deploy. A
+Settings and the data source are provisioned from `pi/memory-pi/grafana/` on every deploy. A
 dashboard made in the UI lives in Grafana's own database on the SD card; export it as JSON
 (**Share → Export**) for a copy off the Pi.
 
