@@ -113,6 +113,8 @@ pub async fn frame_task(
     let mut sequence: u8 = 0;
     let dt = 1.0 / cfg::FRAME_RATE_HZ as f64;
     let mut overridden = false;
+    // Which recipients' last send failed, one bit each, so each failure is logged once.
+    let mut failing = 0u32;
     let mut state = RigState::BootHold;
     rig.telemetry.publish("rig", state.word(), true);
 
@@ -186,10 +188,10 @@ pub async fn frame_task(
                         &cid,
                         dmx_slots,
                     );
-                    sacn_out::send_multicast(
+                    sacn_out::send_unicast(
                         &socket,
-                        rig.sacn.universe,
-                        rig.sacn.port,
+                        rig.sacn_recipients,
+                        &mut failing,
                         packet.as_bytes(),
                     );
                     sequence = sequence.wrapping_add(1);
@@ -213,7 +215,7 @@ pub async fn frame_task(
             &cid,
             &slots[..dmx_slots],
         );
-        sacn_out::send_multicast(&socket, rig.sacn.universe, rig.sacn.port, packet.as_bytes());
+        sacn_out::send_unicast(&socket, rig.sacn_recipients, &mut failing, packet.as_bytes());
         // The HAT is the Pi's own UART: a pulled DMX lead never reaches it, so a write that
         // fails is the serial setup, and it will fail again.
         hat.send(&slots)

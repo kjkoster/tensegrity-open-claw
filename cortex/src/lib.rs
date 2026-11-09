@@ -26,7 +26,7 @@ use qlc_plus::{PatchEntry, Sacn};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signal_hook::low_level::signal_name;
-use std::net::UdpSocket;
+use std::net::{SocketAddrV4, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -50,6 +50,9 @@ pub struct Rig {
     pub name: &'static str,
     /// The universe and port the workspace puts the rig on.
     pub sacn: Sacn,
+    /// Every fixture the brain sends its universe to by unicast, generated from the rig's
+    /// `clockwork.dot`. The wired fixtures are not here: they get the same frame from the HAT.
+    pub sacn_recipients: &'static [SocketAddrV4],
     /// The generated patch, as plain data, so the startup log can name what this binary was
     /// built against — and so the frame width can be derived from it.
     pub patch: &'static [PatchEntry],
@@ -145,9 +148,6 @@ pub fn run(mut rig: Rig) -> ! {
     embassy_time::Instant::now();
 
     let socket = UdpSocket::bind("0.0.0.0:0").expect("socket bind failed");
-    socket
-        .set_multicast_ttl_v4(1)
-        .expect("set multicast TTL failed");
     let cid = sacn_out::new_cid();
 
     // The external-takeover receiver: an OS thread of its own, because a blocking recv_from
@@ -157,12 +157,21 @@ pub fn run(mut rig: Rig) -> ! {
     let sacn = rig.sacn;
     sacn_in::spawn_receiver(cid, sacn, takeover_tx);
 
-    let group = sacn_out::multicast_addr(sacn.universe);
     let name = rig.name;
-    eprintln!(
-        "{name}: universe {} → {group}:{}  @ {FRAME_RATE_HZ} Hz",
-        sacn.universe, sacn.port
+    assert!(
+        rig.sacn_recipients.len() <= sacn_out::MAX_RECIPIENTS,
+        "{name}: {} sACN recipients, and the brain sends to at most {}",
+        rig.sacn_recipients.len(),
+        sacn_out::MAX_RECIPIENTS
     );
+    eprintln!(
+        "{name}: universe {} @ {FRAME_RATE_HZ} Hz → the wire and {} by unicast",
+        sacn.universe,
+        rig.sacn_recipients.len()
+    );
+    for recipient in rig.sacn_recipients {
+        eprintln!("{name}:   {recipient}");
+    }
 
     // The patch the build compiled in. Logged so a running binary can be checked against the
     // workspace that produced it: a fixture at the wrong address means the build never saw

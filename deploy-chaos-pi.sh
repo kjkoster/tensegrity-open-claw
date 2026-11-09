@@ -136,4 +136,4 @@ step "run remote deploy on $PI"
 ssh "$PI" "bash $PI_DIR/pi/chaos-pi/remote-deploy.sh"
 
 step "deploy complete"
-say "The installation of the Open Claw has completed. Go check it out"
+say "The installation of the chaos pi has completed. Go check it out"

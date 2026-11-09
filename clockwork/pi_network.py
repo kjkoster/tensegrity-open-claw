@@ -36,7 +36,7 @@ import sys
 # The dot's reader, beside this file, shared with wrist/generate.py. Put on the path by hand:
 # run with -I, Python adds no directory of its own, not even this one.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from dot import Dot, addresses, bound, fail, listener, macs, networks  # noqa: E402
+from dot import Dot, addresses, bound, fail, macs, networks, reach  # noqa: E402
 
 PLACEHOLDER = re.compile(r"@([A-Z0-9_]+)@")
 
@@ -73,20 +73,13 @@ def facts(dot, device):
         if on == device:
             add(key(interface, "mac"), lambda m=mac: m)
 
-    own = {net for _, net in held.values()}
     for tail, tail_port, head, head_port, _ in dot.edges:
         if dot.device_of(tail) != device or head_port is None:
             continue
         service = tail.removeprefix(f"{device}_")
 
-        def where(tail=tail, head=head, head_port=head_port):
-            if tail_port != "title":
-                fail(f"{dot.path}: the edge from {tail} must run from its title")
-            theirs = {net for _, net in addresses(dot, dot.device_of(head), nets).values()}
-            shared = sorted(own & theirs)
-            if len(shared) != 1:
-                fail(f"{dot.path}: {device} and {dot.device_of(head)} share {len(shared)} networks, not one, for {tail} -> {head}:{head_port}")
-            return listener(dot, nets, head, head_port, shared[0])
+        def where(tail=tail, tail_port=tail_port, head=head, head_port=head_port):
+            return reach(dot, nets, tail, tail_port, head, head_port)
 
         add(key(service, head_port, "address"), lambda w=where: w()[0])
         add(key(service, head_port, "port"), lambda w=where: w()[1])

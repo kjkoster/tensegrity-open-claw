@@ -9,5 +9,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-python3 -I generate.py ../clockwork.dot ../clockwork.qxw ../fixtures/wrist.oscquery.json generated.h
+python3 -I generate.py ../clockwork.dot ../clockwork.qxw ../fixtures/wrist.qxf \
+    ../fixtures/wrist.oscquery.json generated.h
 arduino-cli compile --profile nodemcu --warnings all --output-dir build .

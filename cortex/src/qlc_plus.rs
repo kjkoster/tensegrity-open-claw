@@ -129,10 +129,9 @@ pub struct Sacn {
     /// The address the console unicasts to, and the one address the receiver binds. The rig's
     /// `clockwork.dot` says where that is; the build fails a workspace that unicasts elsewhere.
     ///
-    /// Deliberately one address and not the wildcard. Binding a single address is what keeps
-    /// the daemon's own sACN multicast, which it transmits at frame rate, from being
-    /// delivered straight back to its own receiver. There are no multicast joins for the
-    /// same reason: a console on a tunnel with no multicast has to unicast here regardless.
+    /// Deliberately one address and not the wildcard, and no multicast joins: a console on a
+    /// tunnel with no multicast has to unicast here regardless, and a console on any other
+    /// network is not one the rig answers to.
     ///
     /// Two consequences worth knowing. A console arriving on any other interface cannot take
     /// over. And if the interface holding this address is down at startup the bind fails,

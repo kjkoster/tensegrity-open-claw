@@ -3,8 +3,8 @@
 **What this file is for.** The show file for the proof of concept: what the rig does, why, the
 fixtures it uses and how each is set up. The audience is us. The show is a set of experiments
 the rig runs on a one-metre model of the *Headless Hug* sculpture, stepped through from the
-cabinet door and watched live in Grafana on `memory-pi`. Its results go in
-[`POC-RESULTS.md`](POC-RESULTS.md). How to get from here to a running PoC is in
+cabinet door and watched live in Grafana on `memory-pi`. Its results are recorded by run, as
+§4 says. How to get from here to a running PoC is in
 [`TODO.md`](TODO.md). The component it introduces, Wrist, is described in
 [`DESIGN.md`](DESIGN.md), and its firmware in [`CONTROL_LOOP.md`](CONTROL_LOOP.md), not here;
 this file says only how this show uses it.
@@ -72,8 +72,8 @@ right│      │ done/abort    right│      │ done/abort
   aborted, so the right button repeats it. The left button is ignored while one runs.
 - Every state is published as `brain/show`, retained, as the code already does
   (`armed-pluck`, `pluck`, `armed-run`, `run`). Each start increments `brain/run`,
-  retained — a run counter, not a second state topic — so a Grafana annotation and a line in
-  `POC-RESULTS.md` name the same run.
+  retained — a run counter, not a second state topic — so a Grafana annotation and the
+  numbers recorded for a run name the same run.
 
 The experiments, each with what it is for. Their amplitudes and durations are named constants
 in `brain/src/show.rs`, with units.
@@ -193,7 +193,7 @@ WireGuard, as `clockwork.dot` has it.
 ## 4. The experiments, in order
 
 Each with what it needs working, what is read off the dashboard, and what decides it. The
-numbers go in `POC-RESULTS.md`, by `brain/run`.
+numbers are recorded by `brain/run`.
 
 **E0 — Sensing, by hand.** *Needs:* Wrist's board and the accelerometer, its telemetry in
 Memory, the dashboard. *Do:* with Wrist in Blackout, pluck the model a

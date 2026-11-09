@@ -34,6 +34,7 @@ fn main() {
     cortex::run(Rig {
         name: env!("CARGO_PKG_NAME"),
         sacn: patch::SACN,
+        sacn_recipients: network::SACN_RECIPIENTS,
         patch: &patch::PATCH,
         stop: patch::STOP,
         estop: Box::new(move || estop_state.snapshot().estop),

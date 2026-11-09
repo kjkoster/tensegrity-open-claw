@@ -1,29 +1,53 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: soldering first, then clean up,
+it: Wrist's motor in Manual from QLC+ first, then soldering, then clean up,
 then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
-[`DESIGN.md`](DESIGN.md), and the PoC's measurements go in [`POC-RESULTS.md`](POC-RESULTS.md).
+[`DESIGN.md`](DESIGN.md), and the PoC's measurements are recorded by `brain/run`.
 Wrist's firmware is specified in [`CONTROL_LOOP.md`](CONTROL_LOOP.md); its open decisions are
 steps here.
 
 ---
 
+## Wrist's motor in Manual, from QLC+ on the Mac
+
+The target: QLC+ on the Mac takes the rig over through the brain, the brain sends its universe
+to Wrist by unicast, and Wrist turns the shaft at the speed and in the direction the faders set,
+per Manual in `CONTROL_LOOP.md` §4. Blackout, the e-stop and sACN loss each leave it limp. The
+shaft free, no wire on it: Manual needs neither homing nor the accelerometer.
+
+- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
+  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
+  The dot has sACN unicast only; Wrist's edge is the first. What it sends is the frame after
+  the takeover and the e-stop, as the wired DMX is.
+- C++: Wrist's header gains Mode's, Direction's and Speed's bands from `wrist.qxf`, beside the
+  universe and start address it already reads from `clockwork.qxw`, so the firmware holds no
+  second copy of the patch.
+- `wrist/` firmware, per `CONTROL_LOOP.md`: the sACN receiver, on the port the dot gives Wrist,
+  its 2.5 s timeout and Stream-Terminated; ENA's fail-safe; the step generator in the Timer1
+  NMI; Blackout and Manual, ramping at `a_manual` to the speed Speed sets, capped at `v_max`.
+  The motor run first, and the constants and the code then made to match what it does:
+  `dir_cw`, `a_manual`, `v_max`.
+- Under takeover from QLC+ on the Mac: Mode to Manual, the shaft turning both ways at the
+  speeds the faders set, and stopping at Speed 0; Mode back to Blackout ramps to a stop and
+  leaves the shaft free. The e-stop pressed, the brain stopped, and QLC+ quit, each leave it
+  limp within the 2.5 s timeout or sooner.
+
 ## Soldering
 
-- On the bench, into `OWNED-DEVICES.md` and the firmware's constants: the status LED and the
-  alarm on a forced stall, holding the shaft while `wrist/bench` plucks; once the wire is on,
-  the tension the unpowered shaft holds by its detent.
 - Find a plank to mount Wrist's board and its wiring on, instead of a housing.
-- Wire: the 4700 µF / 50 V at the motor once it arrives; the home switch and the ADXL345 on the pins in
-  `CONTROL_LOOP.md` §2.
-- If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
-  feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
 - Mount the motor supply on the DIN rail from the cabinet's mains inlet and fusing (add the
   inlet and fusing to `OWNED-DEVICES.md` if they are not there); its output through the 5 A
   fuse to a terminal block, which feeds the motor; label it 38 V.
+- The 4700 µF / 50 V at the motor, once it arrives.
+- With everything mounted on the plank, into `OWNED-DEVICES.md` and the firmware's constants:
+  the status LED, and the alarm's polarity on a forced stall, holding the shaft while the
+  motor runs; once the wire is on, the tension the unpowered shaft holds by its detent.
+- Wire the home switch and the ADXL345 on the pins in `CONTROL_LOOP.md` §2.
+- If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
+  feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
 
 ## Clean up
 
@@ -64,20 +88,13 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
   results and protections, `brain/show` and `brain/run` as annotations. Grafana stays on
   loopback; the Mac reaches it over the SSH jump, now across the access point.
-- C++: Wrist's build reads `clockwork.qxw` and `wrist.qxf` into its header, as
-  `cortex-build`'s ingest does for Rust: the universe, the port, Wrist's start address and
-  Mode's bands, so the firmware holds no second copy of the patch.
-- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
-  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
-  The dot has sACN unicast only; Wrist's edge is the first.
-- `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: the sACN receiver, its 2.5 s timeout and Stream-Terminated;
-  Blackout only, ENA released; the ADXL345 and the HX711; the lock-in running; the state and
-  waveform bundles and the events; LittleFS; the LED.
+- `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: the ADXL345 and the HX711; the
+  lock-in running; the state and waveform bundles and the events; LittleFS; the LED.
 - Once the HX711 reads right at 10 samples a second, and not before, in case the board does
   not survive it: lift the chip's RATE leg (pin 15) off its ground pad and tie it to DVDD
   (pin 16), for 80 a second; confirm the readings again.
-- E0 from `SHOW.md` §4. Numbers into `POC-RESULTS.md`; the placement decided; the static
-  pull test done.
+- E0 from `SHOW.md` §4, its numbers recorded by run; the placement decided; the static pull
+  test done.
 
 ## Wrist's motor, driven from QLC+
 
@@ -90,13 +107,9 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
   wire's pay-out end; the wire wrapped a few turns round the bare shaft, tail tied off, then
   cable, hook, bands, hook and wire to the node. Nothing fixed to the sculpture but the wire
   and the accelerometer.
-- `wrist/` firmware, motor half, per `CONTROL_LOOP.md`: the step generator in the Timer1 NMI;
-  ENA's fail-safe; the velocity clamp and soft limits; Homing, Pluck, Run with the PLL and
-  the drive phase's adaptation, RampDown; every protection in its §5.
-- Delete the bench sketch, `wrist/bench/`, once the firmware moves the motor.
-- Check that `attach.sh` resetting Wrist as it attaches is still acceptable with the motor
-  running: the board restarts mid-move, and ENA has to leave the motor limp through the
-  restart. If not, attach without the reset.
+- `wrist/` firmware, motor half, per `CONTROL_LOOP.md`: the velocity clamp and soft limits;
+  Homing, Pluck, Run with the PLL and the drive phase's adaptation, RampDown; every
+  protection in its §5.
 - Calibrate the load cell per `CONTROL_LOOP.md` §7; measure the rest position, the travel and
   the tension limits for the band set; all into the firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
@@ -113,7 +126,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
   units.
 - Dashboard panels for each experiment: Pluck's f, Q and axis by run; Run's lock, drive phase,
   oscillator frequency, and sway amplitude against drive amplitude.
-- E3, E4, E5 from `SHOW.md` §4, each run into `POC-RESULTS.md`.
+- E3, E4, E5 from `SHOW.md` §4, each run's numbers recorded.
 
 ## The cabinet, alongside Wrist and the brain
 
@@ -127,7 +140,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## With the artist, once Wrist's motor runs from QLC+
 
 - E2, the three ways to pull, with the dashboard on the table; the choice and the reasons
-  into `POC-RESULTS.md`.
+  recorded.
 
 ## Commissioning the whole
 
@@ -143,8 +156,11 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 ## Results, decisions, clean-up
 
-- `POC-RESULTS.md`: every experiment's numbers by `brain/run`, the dashboard panels and the
-  SQL behind them committed under `pi/memory-pi/grafana/`, and the answers to the three
-  questions, with the measurement behind each.
+- The results: every experiment's numbers by `brain/run`; the model's height and mass at
+  the top, its static stiffness from the pull test, the guy wire and band set with their
+  preload, the backup guy or the preload below the detent hold, and the accelerometer's
+  placement and why; Wrist's control-tick timing and frame age per session; the dashboard
+  panels and the SQL behind them committed under `pi/memory-pi/grafana/`; the answers to the
+  three questions, with the measurement behind each; and what the PoC did not settle.
 - `DESIGN.md`: correct §3.10 by what was measured.
 - Tag `<YYYY-MM-DD>-headless-hug-poc`; empty this file for the next show.

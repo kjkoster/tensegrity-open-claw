@@ -55,3 +55,4 @@ step "run remote deploy on $PI"
 ssh "$PI" "bash $PI_DIR/pi/memory-pi/remote-deploy.sh"
 
 step "deploy complete"
+say "The installation of the memory pi has completed. Go check it out"

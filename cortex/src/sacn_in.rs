@@ -18,8 +18,7 @@
 //! feeds both the wire and the network.
 //!
 //! The socket binds one address — the one the workspace's console unicasts to, which is the
-//! Pi's WireGuard address — rather than the wildcard, so
-//! the brain's own multicast is never delivered back to its own receiver.
+//! Pi's WireGuard address — rather than the wildcard, and joins no multicast group.
 
 use crate::clock;
 use crate::config as cfg;
@@ -232,8 +231,7 @@ impl SourceTable {
 }
 
 /// The arbitration fields of an accepted packet. Slot bytes are deliberately not copied
-/// here: most packets the socket sees are the brain's own multicast looping back, and those
-/// are rejected on CID before the 512-byte copy is paid for.
+/// here, so a packet rejected on its header never pays for the 512-byte copy.
 struct Header {
     cid: [u8; CID_LEN],
     priority: u8,
@@ -405,9 +403,8 @@ fn receive(
             continue;
         };
 
-        // Belt and braces. Binding one unicast address already means the brain's own
-        // multicast is never delivered here, but that is a property of the bind address and
-        // this stays correct if it is ever widened.
+        // Belt and braces. The brain sends its own frames only to the fixtures, never to this
+        // address, but that is a property of the dot and this stays correct if it changes.
         if header.cid == *own_cid {
             continue;
         }

@@ -98,9 +98,10 @@ because channel names are free text and the one guessed harmless is the program 
 fires when held. A forced channel whose definition marks no such band fails the build: a
 guessed stop value is the one that becomes a visible event.
 
-The receiver binds the address the workspace's E1.31 output unicasts to, alone, rather than the
-wildcard. That is not just narrowing: it also stops the brain's own multicast being delivered
-back to its own receiver.
+The receiver binds the address `clockwork.dot` gives the brain's sACN port, alone, rather than
+the wildcard, and the workspace's E1.31 output has to unicast there. The brain sends its own
+universe by unicast too, to each fixture the dot gives a `sacn` edge from it, so nothing it
+sends comes back to its receiver.
 
 ### 1.3 MQTT is telemetry, never show
 

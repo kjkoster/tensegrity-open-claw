@@ -310,6 +310,19 @@ def bound(dot, nets, node, port):
     return address, number
 
 
+def reach(dot, nets, tail, tail_port, head, head_port):
+    """The address and port an edge from `tail` to `head:head_port` sends to: the head's
+    listener, on the one network the two devices share."""
+    if tail_port != "title":
+        fail(f"{dot.path}: the edge from {tail} must run from its title")
+    ours = {net for _, net in addresses(dot, dot.device_of(tail), nets).values()}
+    theirs = {net for _, net in addresses(dot, dot.device_of(head), nets).values()}
+    shared = sorted(ours & theirs)
+    if len(shared) != 1:
+        fail(f"{dot.path}: {dot.device_of(tail)} and {dot.device_of(head)} share {len(shared)} networks, not one, for {tail} -> {head}:{head_port}")
+    return listener(dot, nets, head, head_port, shared[0])
+
+
 def listener(dot, nets, node, port, network):
     """The address and port a service listens on at `port`, as reached over `network`."""
     interface, number = binding(dot, node, port)

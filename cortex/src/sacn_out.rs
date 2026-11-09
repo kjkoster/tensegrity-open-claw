@@ -1,7 +1,7 @@
-//! The sACN sender: E1.31 packet encoding and multicast transmission.
+//! The sACN sender: E1.31 packet encoding and unicast transmission.
 
 use crate::dmx::BLACKOUT;
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{SocketAddrV4, UdpSocket};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// E1.31 framing options bit (offset 112) that marks a stream as terminated. A
@@ -110,15 +110,39 @@ pub fn encode_release(
     encode(universe, sequence, priority, STREAM_TERMINATED, cid, &BLACKOUT[..dmx_slots])
 }
 
-/// The sACN multicast group address for the given universe.
-pub fn multicast_addr(universe: u16) -> Ipv4Addr {
-    Ipv4Addr::new(239, 255, (universe >> 8) as u8, universe as u8)
-}
-
-/// Sends a packet to the sACN multicast group for the given universe.
-pub fn send_multicast(socket: &UdpSocket, universe: u16, port: u16, packet: &[u8]) {
-    let dest = SocketAddrV4::new(multicast_addr(universe), port);
-    if let Err(e) = socket.send_to(packet, dest) {
-        eprintln!("sACN send error: {e}");
+/// Sends a packet to every recipient, by unicast.
+///
+/// Unicast, not the universe's multicast group: multicast over WiFi goes at the lowest basic
+/// rate, unacknowledged, and arrives bunched, and a fixture that is not joined to the group
+/// hears nothing. One send per recipient instead, each acknowledged by the access point.
+///
+/// A recipient that is off the network is no reason to stop the frame: the send fails or
+/// goes nowhere, and the next frame tries again. A failure is logged once until a send to it
+/// succeeds, so a fixture that is away does not fill the journal at frame rate. `failing` is
+/// one bit per recipient, owned by the caller, so sending allocates nothing.
+pub fn send_unicast(
+    socket: &UdpSocket,
+    recipients: &[SocketAddrV4],
+    failing: &mut u32,
+    packet: &[u8],
+) {
+    for (i, recipient) in recipients.iter().take(MAX_RECIPIENTS).enumerate() {
+        let bit = 1u32 << i;
+        match socket.send_to(packet, recipient) {
+            Ok(_) if *failing & bit != 0 => {
+                eprintln!("sacn: sending to {recipient} again");
+                *failing &= !bit;
+            }
+            Ok(_) => {}
+            Err(e) if *failing & bit == 0 => {
+                eprintln!("sacn: send to {recipient}: {e}");
+                *failing |= bit;
+            }
+            Err(_) => {}
+        }
     }
 }
+
+/// The most fixtures the brain sends to by unicast: one bit each in `send_unicast`'s record of
+/// which are failing. The brain refuses to start with more, rather than skip any.
+pub const MAX_RECIPIENTS: usize = u32::BITS as usize;

@@ -266,6 +266,8 @@ struct Dot {
     sacn_bind: SocketAddrV4,
     /// The broker the brain's MQTT client connects to, the port its `mqtt` edge goes to.
     mqtt: SocketAddrV4,
+    /// Every fixture the brain sends its universe to, one per `sacn` edge from it.
+    sacn_recipients: Vec<SocketAddrV4>,
 }
 
 /// The dot's reader, `clockwork/dot.py`, beside the dot; `facts.py` prints what it works out.
@@ -282,9 +284,30 @@ fn read_dot(network: &Network) -> Dot {
         clockwork.join("dot.py"),
         clockwork.join("pi_network.py"),
         clockwork.join("facts.py"),
+        clockwork.join("recipients.py"),
     ] {
         println!("cargo:rerun-if-changed={}", watched.display());
     }
+    // -I, so nothing in the environment or the working directory changes what runs.
+    let run = |script: &str, args: &[&str]| -> String {
+        let output = std::process::Command::new("python3")
+            .arg("-I")
+            .arg(clockwork.join(script))
+            .arg(network.dot)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!("cannot run python3 to read {}: {e}", network.dot.display())
+            });
+        if !output.status.success() {
+            panic!(
+                "reading {} failed:\n{}",
+                network.dot.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        String::from_utf8(output.stdout).expect("the dot's reader prints UTF-8")
+    };
 
     let service = network.service.to_uppercase().replace('-', "_");
     let names = [
@@ -293,23 +316,9 @@ fn read_dot(network: &Network) -> Dot {
         format!("{service}_MQTT_ADDRESS"),
         format!("{service}_MQTT_PORT"),
     ];
-    // -I, so nothing in the environment or the working directory changes what runs.
-    let output = std::process::Command::new("python3")
-        .arg("-I")
-        .arg(clockwork.join("facts.py"))
-        .arg(network.dot)
-        .arg(network.device)
-        .args(&names)
-        .output()
-        .unwrap_or_else(|e| panic!("cannot run python3 to read {}: {e}", network.dot.display()));
-    if !output.status.success() {
-        panic!(
-            "reading {} failed:\n{}",
-            network.dot.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let stdout = String::from_utf8(output.stdout).expect("facts.py prints UTF-8");
+    let mut args = vec![network.device];
+    args.extend(names.iter().map(String::as_str));
+    let stdout = run("facts.py", &args);
     let facts: BTreeMap<&str, &str> = stdout
         .lines()
         .filter_map(|line| line.split_once(' '))
@@ -328,9 +337,23 @@ fn read_dot(network: &Network) -> Dot {
             .unwrap_or_else(|e| panic!("{port} in {}: {e}", network.dot.display()));
         SocketAddrV4::new(address, port)
     };
+    // The service's node is its device's name and its own, as the dot names nodes.
+    let node = format!("{}_{}", network.device, network.service);
+    let sacn_recipients = run("recipients.py", &[&node, "sacn"])
+        .lines()
+        .map(|line| {
+            line.parse().unwrap_or_else(|e| {
+                panic!(
+                    "recipients.py printed {line:?} for {}: {e}",
+                    network.dot.display()
+                )
+            })
+        })
+        .collect();
     Dot {
         sacn_bind: socket(&names[0], &names[1]),
         mqtt: socket(&names[2], &names[3]),
+        sacn_recipients,
     }
 }
 
@@ -602,6 +625,24 @@ fn render_network(dot: &Dot, dot_name: &str, network: &Network) -> String {
         dot.mqtt.port()
     )
     .unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "/// Every fixture the {} sends its universe to by unicast, as {dot_name} has it.",
+        network.service
+    )
+    .unwrap();
+    writeln!(out, "pub const SACN_RECIPIENTS: &[core::net::SocketAddrV4] = &[").unwrap();
+    for recipient in &dot.sacn_recipients {
+        let [a, b, c, d] = recipient.ip().octets();
+        writeln!(
+            out,
+            "    core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {}),",
+            recipient.port()
+        )
+        .unwrap();
+    }
+    writeln!(out, "];").unwrap();
     out
 }
 
