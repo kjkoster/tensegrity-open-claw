@@ -121,8 +121,9 @@ bool readLoadCell(int32_t &value) {
 }
 
 void setup() {
-  // Transmit only: RX is the alarm input.
-  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY);
+  // Transmit only: RX is the alarm input. At 74880, the boot ROM's own rate, so its reset cause
+  // and any crash dump read in the same log as the firmware's lines.
+  Serial.begin(74880, SERIAL_8N1, SERIAL_TX_ONLY);
 
   // Idle levels are written before the pins become outputs, so no opto flashes on at start.
   digitalWrite(PIN_PUL, HIGH);

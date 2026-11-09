@@ -14,6 +14,7 @@ interface `<if>` and each edge from one of its services, `<service>`, to a port 
                         that hands out the leases.
   @<IF>_SSID@, @<IF>_PSK@, @<IF>_CHANNEL@
                         its network's WiFi, where the network is one.
+  @<IF>_MAC@            the interface's MAC, where the dot names one.
   @<SERVICE>_<PORT>_ADDRESS@, @<SERVICE>_<PORT>_PORT@
                         where the service sends to that port, on the network the two devices
                         share.
@@ -35,7 +36,7 @@ import sys
 # The dot's reader, beside this file, shared with wrist/generate.py. Put on the path by hand:
 # run with -I, Python adds no directory of its own, not even this one.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from dot import Dot, addresses, bound, fail, listener, networks  # noqa: E402
+from dot import Dot, addresses, bound, fail, listener, macs, networks  # noqa: E402
 
 PLACEHOLDER = re.compile(r"@([A-Z0-9_]+)@")
 
@@ -65,6 +66,12 @@ def facts(dot, device):
         for wifi in ("ssid", "psk", "channel"):
             if wifi in net:
                 add(key(interface, wifi), lambda n=net, w=wifi: n[w])
+
+    # Through `macs`, which refuses a MAC two interfaces share, rather than read off this
+    # device's record alone.
+    for mac, (on, interface) in macs(dot).items():
+        if on == device:
+            add(key(interface, "mac"), lambda m=mac: m)
 
     own = {net for _, net in held.values()}
     for tail, tail_port, head, head_port, _ in dot.edges:

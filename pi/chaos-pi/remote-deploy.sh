@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # remote-deploy.sh — runs ON claw-pi (pushed there by deploy-chaos-pi.sh, which built the brain).
-# Installs the brain and what the Pi runs beside it. Every service is restarted only when one
-# of its files changed (`install_changed`), so a deploy that touches only the brain restarts
-# only the brain.
+# Installs the brain and what the Pi runs beside it, then flashes the boards on its USB. Every
+# service is restarted only when one of its files changed (`install_changed`), so a deploy that
+# touches only the brain restarts only the brain.
 #
 set -euo pipefail
 
@@ -112,5 +112,53 @@ if [ -n "$CHANGED" ]; then
 else
     echo "Stem unchanged"
 fi
+
+# --- Boards on USB ---------------------------------------------------------
+# Last, so a board that stops the deploy does so with the rig already back up. deploy-chaos-pi.sh
+# built the firmware into binaries/<device>.bin and the board table, `<mac> <device>` per line,
+# into rendered/boards, from the MACs in clockwork.dot. Every board on USB is known by the MAC
+# its chip reports (boards.sh), so a board the dot does not name stops the deploy: firmware is
+# never written to a board on a guess.
+#
+# A board is flashed only when its image differs from the one last written to that MAC, so a
+# deploy that changed no firmware leaves every board's flash alone. Each board still restarts,
+# because asking a chip its MAC does that.
+#
+# esptool from Debian's package, which also brings the pyserial board-log.py reads with.
+step "flash boards on USB"
+if ! command -v esptool >/dev/null; then
+    sudo apt-get install -y esptool
+fi
+FLASHED=/var/lib/clockwork/flashed
+sudo mkdir -p "$FLASHED"
+boards="$(bash "$REPO/pi/chaos-pi/boards.sh")"
+if [ -z "$boards" ]; then
+    echo "no boards on USB"
+fi
+while read -r mac port; do
+    [ -n "$mac" ] || continue
+    device="$(awk -v mac="$mac" '$1 == mac { print $2 }' "$REPO/rendered/boards")"
+    if [ -z "$device" ]; then
+        echo "ERROR: the board on $port has MAC $mac, which no device in clockwork.dot has." >&2
+        echo "       Add \`mac $mac\` to its device's address in clockwork.dot and deploy again." >&2
+        exit 1
+    fi
+    image="$REPO/binaries/$device.bin"
+    if [ ! -f "$image" ]; then
+        echo "ERROR: the board on $port is $device's, and no firmware for $device was shipped." >&2
+        exit 1
+    fi
+    sum="$(sha256sum "$image" | cut -d ' ' -f 1)"
+    if [ "$(sudo cat "$FLASHED/$mac" 2>/dev/null)" = "$sum" ]; then
+        echo "$device ($mac) unchanged"
+        continue
+    fi
+    # The image Arduino's ESP8266 core builds is the whole flash from 0x0, its bootloader
+    # included. esptool resets the board into it once written. Its stdin is not the board list
+    # this loop reads.
+    esptool --port "$port" --baud 460800 write_flash 0x0 "$image" </dev/null
+    echo "$sum" | sudo tee "$FLASHED/$mac" >/dev/null
+    echo "flashed $device ($mac) on $port"
+done <<<"$boards"
 
 step "remote deploy complete"

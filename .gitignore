@@ -4,3 +4,5 @@ target
 __pycache__
 .agent-sandbox
 clockwork.svg
+generated.h
+wrist/build

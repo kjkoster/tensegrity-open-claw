@@ -187,6 +187,20 @@ its files changed, saying which were left alone; a restart that fails stops the 
 an error. The list of what ships is written out in `deploy-chaos-pi.sh`, so adding something is a
 decision.
 
+### The boards on `claw-pi`'s USB
+
+Wrist's firmware is built on every deploy, with `wrist/build.sh` (`arduino-cli`, the core
+pinned in `wrist/sketch.yaml`), and shipped to `binaries/wrist.bin`. Last, the remote deploy
+finds every board on the Pi's USB by the MAC its chip reports and flashes it with the firmware
+of the device whose `mac` that is in `clockwork.dot`; that restarts every board, flashed or
+not. A board is written only when its image changed. `esptool` is Debian's, installed by the
+deploy.
+
+- **A new board** stops the deploy, naming its MAC: add `mac <mac>` to its device's address
+  in `clockwork.dot`, e.g. `wifi 10.0.10.4 mac 5c:cf:7f:01:02:03`, and deploy again.
+- **Its serial log**: `./attach.sh` from the Mac, or `./attach.sh <device>`. It finds the
+  board the same way, restarts it so the log starts at boot, and runs until Ctrl-C.
+
 ### The patch
 
 The build reads `clockwork.qxw` and the `.qxf` definitions in `fixtures/` and compiles the patch in,

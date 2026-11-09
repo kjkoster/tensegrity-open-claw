@@ -212,17 +212,54 @@ def networks(dot):
     return found
 
 
+MAC = re.compile(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}")
+
+
+def interface_field(dot, device, field):
+    """One field of a device's `<dev>_if`: its interface, its address, the words after them
+    without `ap` and `mac <mac>`, and the MAC, or None where it names none."""
+    words = field.split()
+    if len(words) < 2:
+        fail(f"{dot.path}: {device}'s address {field!r} is not `interface address [network]`")
+    rest, mac = [], None
+    words_after = iter(words[2:])
+    for word in words_after:
+        if word == "ap":
+            continue
+        if word == "mac":
+            mac = next(words_after, None)
+            if mac is None or not MAC.fullmatch(mac):
+                fail(f"{dot.path}: {device}'s {words[0]} has `mac {mac or ''}`, not a MAC in lower case, `aa:bb:cc:dd:ee:ff`")
+            continue
+        rest.append(word)
+    return words[0], words[1], rest, mac
+
+
+def macs(dot):
+    """Every MAC the dot names, each to the (device, interface) it belongs to. A MAC two
+    interfaces share is an error: it is what tells one board from another."""
+    found = {}
+    for node in dot.nodes:
+        if not node.endswith("_if"):
+            continue
+        device = node[: -len("_if")]
+        for field in dot.record(node):
+            name, _, _, mac = interface_field(dot, device, field)
+            if mac is None:
+                continue
+            if mac in found:
+                fail(f"{dot.path}: {mac} is both {found[mac][0]}'s {found[mac][1]} and {device}'s {name}")
+            found[mac] = (device, name)
+    return found
+
+
 def addresses(dot, device, nets):
     """A device's addresses by interface: (address, network). A lease has no address. A fixed
     address must lie in its network's CIDR and outside its DHCP range, which a lease could
     otherwise hand to another device."""
     found = {}
     for field in dot.record(f"{device}_if"):
-        words = field.split()
-        if len(words) < 2:
-            fail(f"{dot.path}: {device}'s address {field!r} is not `interface address [network]`")
-        interface, address, rest = words[0], words[1], words[2:]
-        rest = [w for w in rest if w != "ap"]
+        interface, address, rest, _ = interface_field(dot, device, field)
         if address == "dhcp":
             if not rest:
                 fail(f"{dot.path}: {device}'s {interface} is a lease, and names no network")

@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: OSC from Wrist seen on `claw-pi` first, then soldering, then clean up,
+it: soldering first, then clean up,
 then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -10,30 +10,6 @@ Wrist's firmware is specified in [`CONTROL_LOOP.md`](CONTROL_LOOP.md); its open 
 steps here.
 
 ---
-
-## OSC from Wrist, seen on `claw-pi`
-
-The target: Wrist's board on the access point, sending its `sys/…` messages, and `ngrep` on
-`claw-pi` showing them arrive. `memory-pi` is out of action, so `claw-pi` is where they are
-seen. The access point, Wrist's address and where its OSC goes all come from `clockwork.dot`.
-
-- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
-  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
-  The dot has sACN unicast only; Wrist's edge is the first.
-- C++: Wrist's build reads `clockwork.dot` into a C++ header, as `cortex-build` does for Rust:
-  the WiFi, Wrist's address and gateway, and each OSC recipient's address and port. It fails
-  where `cortex-build` fails.
-- `wrist/`: C++ on the Arduino core for the ESP8266, built on the Mac by `deploy-chaos-pi.sh`, the
-  OSC encoders generated from `wrist.oscquery.json` at build time; built with `arduino-cli`,
-  the core and libraries pinned in a `sketch.yaml` profile. Flashed from `claw-pi`, with
-  Wrist's board on its USB: `deploy-chaos-pi.sh` copies the image across and runs `esptool` there.
-  Delete the bench sketch, `wrist/bench/`, once the firmware moves the motor.
-- `wrist/` firmware, first: WiFi at the header's address, with modem sleep off; the `sys/…`
-  messages to each OSC recipient in the dot.
-- On `claw-pi`: `ngrep` installed by the deploy, and
-  `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'` showing the messages.
-  Only those to `claw-pi`'s own address, `10.0.10.2`, arrive: with `memory-pi` off the
-  network nothing answers ARP for `10.0.10.3`, so Wrist's packets to it never leave the board.
 
 ## Soldering
 
@@ -59,6 +35,8 @@ seen. The access point, Wrist's address and where its OSC goes all come from `cl
 - Delete `fixtures/dendrite.oscquery.json`, and `fixtures/wrist.xml`, a copy of the old
   `wrist.qxf`.
 - Rename `claw-pi` to `chaos-pi`.
+- `ngrep` installed on `chaos-pi` by its deploy, for watching Wrist's OSC arrive:
+  `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'`.
 
 ## Wrist's board: sensing and telemetry
 
@@ -89,6 +67,9 @@ Blackout. The dashboard comes first because it is how everything after it is rea
 - C++: Wrist's build reads `clockwork.qxw` and `wrist.qxf` into its header, as
   `cortex-build`'s ingest does for Rust: the universe, the port, Wrist's start address and
   Mode's bands, so the firmware holds no second copy of the patch.
+- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
+  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
+  The dot has sACN unicast only; Wrist's edge is the first.
 - `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: the sACN receiver, its 2.5 s timeout and Stream-Terminated;
   Blackout only, ENA released; the ADXL345 and the HX711; the lock-in running; the state and
   waveform bundles and the events; LittleFS; the LED.
@@ -112,6 +93,10 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 - `wrist/` firmware, motor half, per `CONTROL_LOOP.md`: the step generator in the Timer1 NMI;
   ENA's fail-safe; the velocity clamp and soft limits; Homing, Pluck, Run with the PLL and
   the drive phase's adaptation, RampDown; every protection in its §5.
+- Delete the bench sketch, `wrist/bench/`, once the firmware moves the motor.
+- Check that `attach.sh` resetting Wrist as it attaches is still acceptable with the motor
+  running: the board restarts mid-move, and ENA has to leave the motor limp through the
+  restart. If not, attach without the reset.
 - Calibrate the load cell per `CONTROL_LOOP.md` §7; measure the rest position, the travel and
   the tension limits for the band set; all into the firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
