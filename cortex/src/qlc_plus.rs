@@ -126,7 +126,8 @@ pub struct PatchEntry {
 pub struct Sacn {
     pub universe: u16,
     pub port: u16,
-    /// The address the console unicasts to, and the one address the receiver binds.
+    /// The address the console unicasts to, and the one address the receiver binds. The rig's
+    /// `clockwork.dot` says where that is; the build fails a workspace that unicasts elsewhere.
     ///
     /// Deliberately one address and not the wildcard. Binding a single address is what keeps
     /// the daemon's own sACN multicast, which it transmits at frame rate, from being

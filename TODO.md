@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: OSC from Wrist seen on `claw-pi` first, then the workspace, then soldering, then clean up,
+it: OSC from Wrist seen on `claw-pi` first, then soldering, then clean up,
 then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -17,10 +17,9 @@ The target: Wrist's board on the access point, sending its `sys/…` messages, a
 `claw-pi` showing them arrive. `memory-pi` is out of action, so `claw-pi` is where they are
 seen. The access point, Wrist's address and where its OSC goes all come from `clockwork.dot`.
 
-- Rust: `cortex-build` reads from `clockwork.dot` what the build needs, and no more: the dot
-  is where the facts are recorded, and the build and the deploy compile config from it. For
-  now: the address and port the brain's OSC receiver binds, and the address and port of each
-  sACN recipient it sends to. More is read as more comes to depend on it.
+- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
+  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
+  The dot has sACN unicast only; Wrist's edge is the first.
 - C++: Wrist's build reads `clockwork.dot` into a C++ header, as `cortex-build` does for Rust:
   the WiFi, Wrist's address and gateway, and each OSC recipient's address and port. It fails
   where `cortex-build` fails.
@@ -35,12 +34,6 @@ seen. The access point, Wrist's address and where its OSC goes all come from `cl
   `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'` showing the messages.
   Only those to `claw-pi`'s own address, `10.0.10.2`, arrive: with `memory-pi` off the
   network nothing answers ARP for `10.0.10.3`, so Wrist's packets to it never leave the board.
-
-## The workspace
-
-- The workspace already patches `Face`; it patches `Wrist` once its definition exists. Change
-  the E1.31 output's unicast address from `10.8.0.3` to the brain's on the access point in
-  `clockwork.dot`, so the Mac works on the access point for this show.
 
 ## Soldering
 
@@ -126,7 +119,8 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: the calendar and test mode disabled, left in the code; the show always runs.
-- Brain: an OSC receiver for Wrist's bundles on the access point's address, decoded from
+- Brain: an OSC receiver for Wrist's bundles, binding where `clockwork.dot` has its `osc`
+  port, read by `cortex-build` as the sACN receiver's is, decoded from
   `wrist.oscquery.json`, feeding a seam; stale when no bundle has come for a set time.
 - The Director's states — `armed-pluck`, `pluck`, `armed-run`, `run` — with the button rules
   of `SHOW.md` §2.2, `brain/run`, and the lamp patterns of §2.3, Run's two sines included;

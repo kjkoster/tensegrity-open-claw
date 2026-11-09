@@ -187,8 +187,8 @@ transitions, pluck results and protections as annotations, and `brain/show` and 
 annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
 lamps and to `memory-pi`, whose OSC bridge ingests it alongside MQTT, so the trace runs on
 while the brain is down. The Mac is on the access point for the sessions
-and reaches Grafana over the SSH jump as today; QLC+'s output for this show unicasts to
-the brain's address on the access point for the same reason, as `clockwork.dot` has it.
+and reaches Grafana over the SSH jump as today; QLC+'s output unicasts to the brain over
+WireGuard, as `clockwork.dot` has it.
 
 ## 4. The experiments, in order
 

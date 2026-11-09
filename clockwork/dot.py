@@ -1,5 +1,6 @@
 """Reads `clockwork.dot`, the rig's IP space, for the generators that compile config from it:
-`wrist/generate.py` for Wrist's firmware and `pi_network.py` for the Pis.
+`wrist/generate.py` for Wrist's firmware, `pi_network.py` for the Pis, and `facts.py` for the
+Rust build.
 
 Only the subset of the DOT language the file uses: subgraphs, node, edge and attribute
 statements, quoted strings and HTML-like labels. A statement this parser does not know is an
@@ -167,6 +168,15 @@ class Dot:
             fail(f"{self.path}: {name} has no port {port!r}")
         return re.sub(r"<[^>]*>", "", m.group(1)).strip()
 
+    def ports(self, name):
+        """A service's ports, in the order its table lists them, without its title."""
+        if name not in self.nodes:
+            fail(f"{self.path}: no node {name!r}")
+        _, label, html = self.nodes[name]
+        if not html:
+            return []
+        return [p for p in re.findall(r'<td port="([^"]+)">', label) if p != "title"]
+
     def device_of(self, name):
         if name not in self.nodes:
             fail(f"{self.path}: no node {name!r}")
@@ -236,13 +246,36 @@ def addresses(dot, device, nets):
     return found
 
 
-def listener(dot, nets, node, port, network):
-    """The address and port a service listens on at `port`, as reached over `network`."""
+def binding(dot, node, port):
+    """The interface and the port number a service's cell at `port` names."""
     text = dot.cell(node, port)
     m = re.fullmatch(r"\S+ (udp|tcp) (\S+):(\d+)", text)
     if not m:
         fail(f"{dot.path}: {node}:{port} is {text!r}, not `protocol transport interface:port`")
-    interface, number = m.group(2), int(m.group(3))
+    return m.group(2), int(m.group(3))
+
+
+def bound(dot, nets, node, port):
+    """The address and port a service binds at `port`: its interface's fixed address, the
+    wildcard 0.0.0.0 for `*`, or 127.0.0.1 for `lo`."""
+    interface, number = binding(dot, node, port)
+    if interface == "*":
+        return ipaddress.IPv4Address("0.0.0.0"), number
+    if interface == "lo":
+        return ipaddress.IPv4Address("127.0.0.1"), number
+    device = dot.device_of(node)
+    held = addresses(dot, device, nets)
+    if interface not in held:
+        fail(f"{dot.path}: {node}:{port} binds {interface}, which {device} does not list")
+    address, _ = held[interface]
+    if address is None:
+        fail(f"{dot.path}: {node}:{port} binds {interface}, which is a lease and has no fixed address")
+    return address, number
+
+
+def listener(dot, nets, node, port, network):
+    """The address and port a service listens on at `port`, as reached over `network`."""
+    interface, number = binding(dot, node, port)
     device = dot.device_of(node)
     held = addresses(dot, device, nets)
     if interface == "*":

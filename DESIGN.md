@@ -25,7 +25,8 @@ fixture, with a named field per channel, into that rig's own crate.
 workspace's first universe. That output describes the console's own transmission, but a rig
 has one universe and relays a takeover onto it, so those numbers are the rig's too: what the
 brain listens for, what it sends, and what a wireless fixture listens for. The address the
-output unicasts to is not the rig's: it has to be the brain's, as `clockwork.dot` has it.
+output unicasts to is not the rig's: it has to be the brain's, as `clockwork.dot` has it, and
+the build fails a workspace that unicasts anywhere else.
 
 **The workspace holds no network addresses.** The rig's IP space — every device's address,
 the services it runs and the ports they listen on — is in `clockwork.dot`, and a networked

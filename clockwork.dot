@@ -52,7 +52,7 @@ digraph clockwork {
 
         chaos_pi_brain [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>brain</b></td></tr>
-            <tr><td port="sacn">sACN udp wlan0:5568</td></tr>
+            <tr><td port="sacn">sACN udp wg0:5568</td></tr>
             <tr><td port="osc">OSC udp wlan0:9001</td></tr>
         </table>>];
         chaos_pi_stem [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
@@ -168,7 +168,7 @@ digraph clockwork {
 
     subgraph sacn {
         edge [color="#2ca02c", fontcolor="#2ca02c", penwidth=2.5];
-        mac_qlc:title        -> chaos_pi_brain:sacn [xlabel="sACN, unicast"];
+        mac_qlc:title        -> chaos_pi_brain:sacn [xlabel="sACN, unicast over WireGuard"];
         chaos_pi_brain:title -> wrist_firmware:sacn [xlabel="sACN, unicast"];
     }
 

@@ -42,8 +42,6 @@ pub const CONNECTED: &str = "connected";
 pub const DISCONNECTED: &str = "disconnected";
 pub const GONE: &str = "gone";
 
-pub const PORT: u16 = 1883;
-
 /// The broker publishes a client's will once it has heard nothing for 1.5× this, so a dead
 /// client is declared gone inside 15 seconds. The same value as `rig_mqtt.KEEPALIVE_S`, and
 /// every client pings at half of it, so one lost ping is not a disconnection.

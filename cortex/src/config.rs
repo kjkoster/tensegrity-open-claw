@@ -1,9 +1,8 @@
 //! All tunables in one place. The festival tuning loop is "edit numbers, rebuild, restart".
 //!
 //! These describe the *cabinet* rather than the sculpture hanging off it: the Pi, the RS-485
-//! HAT, the serial device, the broker.
-
-use std::net::Ipv4Addr;
+//! HAT, the serial device, the broker. No addresses: those are the rig's, generated from its
+//! `clockwork.dot`.
 
 // ── Deployment (DMX / sACN) ──────────────────────────────────────────────────
 // Fixed 40 Hz, just under the ~43 Hz wire ceiling of a full 512-slot wired universe.
@@ -44,8 +43,8 @@ pub const SACN_SOURCE_TIMEOUT_US: u64 = 2_500_000;
 // unbounded storage, and an expiring entry frees a slot within the timeout above.
 pub const SACN_MAX_SOURCES: usize = 4;
 
-// Rebind backoff cap for the receive socket, while the WireGuard address it binds is not up
-// yet. Retrying rather than dying means the takeover path comes back the moment the tunnel
+// Rebind backoff cap for the receive socket, while the address it binds is not up yet.
+// Retrying rather than dying means the takeover path comes back the moment its interface
 // does, and the sculpture keeps breathing on the internal engine meanwhile.
 pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
@@ -55,13 +54,9 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 
 // ── Telemetry (the broker) ───────────────────────────────────────────────────
 // Stem owns the broker; every daemon holds its own client and announces itself under
-// `health/`. The broker runs on memory-pi, beside the recordings, at the fixed address it sets
-// itself on this Pi's access point, so the Pi that drives the show carries none of the
-// telemetry. The port and the keepalive are the rig's, in the `stem` crate.
-//
-// Written by hand, and must match memory-pi's address in `clockwork.dot` until `cortex-build`
-// reads the dot and generates it.
-pub const MQTT_ADDRESS: Ipv4Addr = Ipv4Addr::new(10, 0, 10, 3);
+// `health/`. The broker runs on memory-pi, beside the recordings, so the Pi that drives the
+// show carries none of the telemetry. Its address and port are the rig's, generated from
+// `clockwork.dot` into the rig crate; the keepalive is in the `stem` crate.
 
 // How long a connection attempt may take before it counts as failed and backs off. The broker
 // is across the WiFi, and a memory-pi that is off would otherwise leave the attempt to the

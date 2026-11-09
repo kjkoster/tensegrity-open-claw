@@ -178,8 +178,9 @@ impl Farewell {
 /// Spawns a client and returns the handles the rest of the process speaks through.
 ///
 /// `service` names the health topic, is the client ID, and prefixes every other topic this
-/// client publishes, so the tree says which part of the rig asserted a thing.
-pub fn spawn(service: &'static str) -> (Publisher, Farewell) {
+/// client publishes, so the tree says which part of the rig asserted a thing. `broker` is the
+/// rig's, generated from its `clockwork.dot`.
+pub fn spawn(service: &'static str, broker: SocketAddrV4) -> (Publisher, Farewell) {
     let (outgoing, incoming) = sync_channel(cfg::MQTT_QUEUE_DEPTH);
     let said = Arc::new(AtomicBool::new(false));
 
@@ -196,7 +197,14 @@ pub fn spawn(service: &'static str) -> (Publisher, Farewell) {
             let mut retained = BTreeMap::new();
             let mut backoff_s = 1u64;
             loop {
-                match session(service, &incoming, &thread_said, &mut retained, &mut backoff_s) {
+                match session(
+                    service,
+                    broker,
+                    &incoming,
+                    &thread_said,
+                    &mut retained,
+                    &mut backoff_s,
+                ) {
                     // The goodbye went out and the connection was closed cleanly, or nobody
                     // is left to say anything. There is nothing left to reconnect for.
                     Ok(()) => return,
@@ -221,12 +229,12 @@ pub fn spawn(service: &'static str) -> (Publisher, Farewell) {
 /// once nobody is left to say anything.
 fn session(
     service: &str,
+    address: SocketAddrV4,
     incoming: &Receiver<Command>,
     said: &AtomicBool,
     retained: &mut BTreeMap<String, String>,
     backoff_s: &mut u64,
 ) -> std::io::Result<()> {
-    let address = SocketAddrV4::new(cfg::MQTT_ADDRESS, stem::PORT);
     let mut stream = TcpStream::connect_timeout(
         &address.into(),
         Duration::from_secs(cfg::MQTT_CONNECT_TIMEOUT_S),

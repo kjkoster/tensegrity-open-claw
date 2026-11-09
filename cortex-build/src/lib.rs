@@ -28,7 +28,10 @@
 //!   * The E1.31 output describes the console's own transmission: where QLC+ sends when it
 //!     takes the rig over. The rig has one universe and relays a takeover onto it, so the
 //!     universe and the port that output names are the rig's own as well — the ones the
-//!     daemon listens and sends on, and the ones a wireless fixture listens on.
+//!     daemon listens and sends on, and the ones a wireless fixture listens on. Where it
+//!     unicasts is not the workspace's to decide: the rig's `clockwork.dot` says what address
+//!     and port the brain's receiver binds, and a workspace that sends elsewhere fails the
+//!     build.
 
 mod calendar;
 
@@ -38,7 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 
 /// The daemon sends exactly one universe. In the workspace that is the universe at 0-based
@@ -221,12 +224,14 @@ impl Patched {
 ///
 /// The workspace's scenes and other functions are QLC+'s own, for a console that takes the
 /// rig over, and are not read.
-pub fn ingest(workspace: &Path) {
+pub fn ingest(workspace: &Path, network: &Network) {
     let xml = read_workspace(workspace);
     let doc = parse_workspace(&xml, workspace);
     let engine = engine_of(&doc, workspace);
 
     let sacn = parse_sacn(engine, workspace);
+    let dot = read_dot(network);
+    check_console(&sacn, &dot, workspace, network);
     let mut patch = parse_patch(engine);
 
     // The workspace names a definition; the definition says what the channels mean. Both
@@ -242,7 +247,109 @@ pub fn ingest(workspace: &Path) {
         .unwrap_or_else(|| panic!("{} has no file name", workspace.display()));
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, source)).unwrap();
+    fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &dot, source, network)).unwrap();
+}
+
+/// Where the rig's brain sits in `clockwork.dot`, the rig's IP space: the file, the device it
+/// runs on and its service's node on that device, as the dot names them.
+pub struct Network<'a> {
+    pub dot: &'a Path,
+    /// The device's cluster name: `chaos_pi` for `subgraph cluster_chaos_pi`.
+    pub device: &'a str,
+    /// The service's node, without the device's prefix: `brain` for `chaos_pi_brain`.
+    pub service: &'a str,
+}
+
+/// What the build reads from the dot, and no more: more is read as more comes to depend on it.
+struct Dot {
+    /// The address and port the brain's sACN receiver binds, its `sacn` port.
+    sacn_bind: SocketAddrV4,
+    /// The broker the brain's MQTT client connects to, the port its `mqtt` edge goes to.
+    mqtt: SocketAddrV4,
+}
+
+/// The dot's reader, `clockwork/dot.py`, beside the dot; `facts.py` prints what it works out.
+/// One reader for the Pis' deploys, Wrist's build and this one, so all three refuse the same
+/// files, rather than a second parser here that would have to fail exactly where it does.
+fn read_dot(network: &Network) -> Dot {
+    let clockwork = network
+        .dot
+        .parent()
+        .unwrap_or_else(|| panic!("{} has no directory", network.dot.display()))
+        .join("clockwork");
+    for watched in [
+        network.dot.to_path_buf(),
+        clockwork.join("dot.py"),
+        clockwork.join("pi_network.py"),
+        clockwork.join("facts.py"),
+    ] {
+        println!("cargo:rerun-if-changed={}", watched.display());
+    }
+
+    let service = network.service.to_uppercase().replace('-', "_");
+    let names = [
+        format!("{service}_SACN_BIND_ADDRESS"),
+        format!("{service}_SACN_BIND_PORT"),
+        format!("{service}_MQTT_ADDRESS"),
+        format!("{service}_MQTT_PORT"),
+    ];
+    // -I, so nothing in the environment or the working directory changes what runs.
+    let output = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(clockwork.join("facts.py"))
+        .arg(network.dot)
+        .arg(network.device)
+        .args(&names)
+        .output()
+        .unwrap_or_else(|e| panic!("cannot run python3 to read {}: {e}", network.dot.display()));
+    if !output.status.success() {
+        panic!(
+            "reading {} failed:\n{}",
+            network.dot.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let stdout = String::from_utf8(output.stdout).expect("facts.py prints UTF-8");
+    let facts: BTreeMap<&str, &str> = stdout
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .collect();
+    let fact = |name: &str| -> &str {
+        facts
+            .get(name)
+            .unwrap_or_else(|| panic!("facts.py printed no {name} for {}", network.dot.display()))
+    };
+    let socket = |address: &str, port: &str| -> SocketAddrV4 {
+        let address: Ipv4Addr = fact(address)
+            .parse()
+            .unwrap_or_else(|e| panic!("{address} in {}: {e}", network.dot.display()));
+        let port: u16 = fact(port)
+            .parse()
+            .unwrap_or_else(|e| panic!("{port} in {}: {e}", network.dot.display()));
+        SocketAddrV4::new(address, port)
+    };
+    Dot {
+        sacn_bind: socket(&names[0], &names[1]),
+        mqtt: socket(&names[2], &names[3]),
+    }
+}
+
+/// The console's E1.31 output has to unicast where the brain's receiver binds. The dot says
+/// where that is; the workspace only has to agree, and QLC+ has no way to learn it but by hand.
+fn check_console(sacn: &Sacn, dot: &Dot, workspace: &Path, network: &Network) {
+    let console = SocketAddrV4::new(sacn.address, sacn.port);
+    if console != dot.sacn_bind {
+        panic!(
+            "the {SACN_PLUGIN} output in {} unicasts to {console}, but {} has the {} on {} \
+             binding its sACN receiver at {}. Set the output's unicast address and port to \
+             that in QLC+ and save.",
+            workspace.display(),
+            network.dot.display(),
+            network.service,
+            network.device,
+            dot.sacn_bind,
+        );
+    }
 }
 
 /// Reads one QLC+ workspace for its addressing and its fixtures' channels, and generates
@@ -456,13 +563,45 @@ fn parse_sacn(engine: roxmltree::Node, workspace: &Path) -> Sacn {
     sacn
 }
 
-/// Renders the whole of a rig's generated half, the patch, as one file included at the rig
-/// crate's root.
-fn render_rig(sacn: &Sacn, patch: &BTreeMap<u32, Patched>, source: &str) -> String {
+/// Renders the whole of a rig's generated half, the patch and the network, as one file
+/// included at the rig crate's root.
+fn render_rig(
+    sacn: &Sacn,
+    patch: &BTreeMap<u32, Patched>,
+    dot: &Dot,
+    source: &str,
+    network: &Network,
+) -> String {
+    let dot_name = network
+        .dot
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| panic!("{} has no file name", network.dot.display()));
     let mut out = String::new();
-    writeln!(out, "// Generated from {source}. Do not edit.").unwrap();
+    writeln!(out, "// Generated from {source} and {dot_name}. Do not edit.").unwrap();
     writeln!(out).unwrap();
     write_module(&mut out, "patch", &render_patch(sacn, patch));
+    write_module(&mut out, "network", &render_network(dot, dot_name, network));
+    out
+}
+
+/// The addresses the brain needs that are not the console's, from the dot.
+fn render_network(dot: &Dot, dot_name: &str, network: &Network) -> String {
+    let mut out = String::new();
+    let [a, b, c, d] = dot.mqtt.ip().octets();
+    writeln!(
+        out,
+        "/// The broker the {}'s MQTT client connects to, as {dot_name} has it.",
+        network.service
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "pub const MQTT: core::net::SocketAddrV4 = \
+         core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {});",
+        dot.mqtt.port()
+    )
+    .unwrap();
     out
 }
 

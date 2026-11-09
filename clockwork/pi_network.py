@@ -17,6 +17,10 @@ interface `<if>` and each edge from one of its services, `<service>`, to a port 
   @<SERVICE>_<PORT>_ADDRESS@, @<SERVICE>_<PORT>_PORT@
                         where the service sends to that port, on the network the two devices
                         share.
+  @<SERVICE>_<PORT>_BIND_ADDRESS@, @<SERVICE>_<PORT>_BIND_PORT@
+                        what one of the device's own services binds for its port `<port>`:
+                        the interface's fixed address, `0.0.0.0` for `*`, `127.0.0.1` for
+                        `lo`.
 
 Upper case, `-` as `_`: `@WLAN0_ADDRESS@`, `@STEM_MQTT_ADDRESS@`. A placeholder the dot does
 not fill is an error, as is one it fills two ways, so a template cannot install with a hole in
@@ -31,7 +35,7 @@ import sys
 # The dot's reader, beside this file, shared with wrist/generate.py. Put on the path by hand:
 # run with -I, Python adds no directory of its own, not even this one.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from dot import Dot, addresses, fail, listener, networks  # noqa: E402
+from dot import Dot, addresses, bound, fail, listener, networks  # noqa: E402
 
 PLACEHOLDER = re.compile(r"@([A-Z0-9_]+)@")
 
@@ -79,6 +83,14 @@ def facts(dot, device):
 
         add(key(service, head_port, "address"), lambda w=where: w()[0])
         add(key(service, head_port, "port"), lambda w=where: w()[1])
+
+    for node, (on, _, _) in dot.nodes.items():
+        if on != device:
+            continue
+        service = node.removeprefix(f"{device}_")
+        for port in dot.ports(node):
+            add(key(service, port, "bind_address"), lambda n=node, p=port: bound(dot, nets, n, p)[0])
+            add(key(service, port, "bind_port"), lambda n=node, p=port: bound(dot, nets, n, p)[1])
     return found
 
 

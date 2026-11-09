@@ -204,7 +204,7 @@ QLC+'s library. `<Address>` in the `.qxw` is 0-based: DMX address 1 is `<Address
 | name two fixtures so they yield the same Rust constant | fails |
 | patch a fixture outside the first universe | fails |
 | change the E1.31 output's universe or port | the brain listens and sends there |
-| change the E1.31 output's unicast address | nothing: it has to be the brain's address in `clockwork.dot`, set by hand |
+| change the E1.31 output's unicast address or port | fails unless they are where `clockwork.dot` has the brain's sACN receiver bind |
 | switch the E1.31 output to multicast | fails: the brain only receives a console by unicast |
 | remove the E1.31 output from the first universe | fails |
 | reference a `.qxf` that is not committed | fails, naming the manufacturer and model |

@@ -356,7 +356,7 @@ fn receive(
     publisher: &LatestTx<Takeover>,
 ) -> Result<(), Box<dyn Error>> {
     // One address, no multicast joins: see `Sacn::address`. The address not being there yet is
-    // the tunnel not being up, which the caller's backoff waits out. Any other bind failure,
+    // its interface not being up, which the caller's backoff waits out. Any other bind failure,
     // such as a second brain holding the port, will not go away by waiting.
     let address = SocketAddrV4::new(sacn.address, sacn.port);
     let socket = match UdpSocket::bind(address) {
