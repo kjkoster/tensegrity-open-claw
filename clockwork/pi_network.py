@@ -69,7 +69,7 @@ def facts(dot, device):
 
     # Through `macs`, which refuses a MAC two interfaces share, rather than read off this
     # device's record alone.
-    for mac, (on, interface) in macs(dot).items():
+    for mac, (on, interface, _) in macs(dot).items():
         if on == device:
             add(key(interface, "mac"), lambda m=mac: m)
 

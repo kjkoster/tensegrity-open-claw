@@ -29,13 +29,13 @@ const uint8_t PIN_LED = 2;      // D4, lit when low
 const int32_t LOAD_TARE = 0;            // raw counts
 const float LOAD_SCALE = NAN;           // N per count
 
-// Manual's motion, CONTROL_LOOP.md §10. First guesses, to be set to what the motor does: the
-// bench ran 200,000 steps/s² to 12,000 steps/s with the shaft free and no alarm, so these sit
-// well inside it. At 800 steps a revolution, 6000 steps/s is 7.5 revolutions a second, about
-// 190 mm/s of wire on an 8 mm shaft.
-const float V_MAX = 6000.0f;            // steps/s, Speed at the top of its band
+// Manual's motion, CONTROL_LOOP.md §10. The top speed is the step generator's ceiling, half its
+// 25 kHz tick: 15.6 revolutions a second at 800 steps a revolution, about where the motor's
+// torque falls off. The bench ran 200,000 steps/s² to 12,000 steps/s with the shaft free and no
+// alarm; the ramp is a first guess well inside that.
+const float V_MAX = 12500.0f;           // steps/s, Speed at the top of its band
 const float A_MANUAL = 20000.0f;        // steps/s², every change of speed
-// The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test.
+// The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test, 2026-11-09.
 const uint8_t DIR_CW = HIGH;
 // The driver wants enable settled this long before the first pulse.
 const uint32_t ENABLE_SETTLE_MS = 100;

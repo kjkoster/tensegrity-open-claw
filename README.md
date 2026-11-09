@@ -196,8 +196,10 @@ of the device whose `mac` that is in `clockwork.dot`; that restarts every board,
 not. A board is written only when its image changed. `esptool` is Debian's, installed by the
 deploy.
 
-- **A new board** stops the deploy, naming its MAC: add `mac <mac>` to its device's address
-  in `clockwork.dot`, e.g. `wifi 10.0.10.4 mac 5c:cf:7f:01:02:03`, and deploy again.
+- **A new board** stops the deploy, naming its MAC: add `mac <mac> chip <chip>` to its
+  device's address in `clockwork.dot`, the chip as esptool names it, e.g.
+  `wifi 10.0.10.4 mac 5c:cf:7f:01:02:03 chip esp8266`, and deploy again. The deploy flashes it
+  as that chip, and esptool refuses a board whose chip is another.
 - **Its serial log**: `./attach.sh` from the Mac, or `./attach.sh <device>`. It finds the
   board the same way, restarts it so the log starts at boot, and runs until Ctrl-C.
 

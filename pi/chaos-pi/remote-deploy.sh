@@ -115,10 +115,11 @@ fi
 
 # --- Boards on USB ---------------------------------------------------------
 # Last, so a board that stops the deploy does so with the rig already back up. deploy-chaos-pi.sh
-# built the firmware into binaries/<device>.bin and the board table, `<mac> <device>` per line,
-# into rendered/boards, from the MACs in clockwork.dot. Every board on USB is known by the MAC
-# its chip reports (boards.sh), so a board the dot does not name stops the deploy: firmware is
-# never written to a board on a guess.
+# built the firmware into binaries/<device>.bin and the board table, `<mac> <device> <chip>` per
+# line, into rendered/boards, from the MACs and chips in clockwork.dot. Every board on USB is
+# known by the MAC its chip reports (boards.sh), so a board the dot does not name stops the
+# deploy: firmware is never written to a board on a guess. esptool is told the chip rather than
+# left to detect it, and refuses a board whose chip is another.
 #
 # A board is flashed only when its image differs from the one last written to that MAC, so a
 # deploy that changed no firmware leaves every board's flash alone. Each board still restarts,
@@ -137,10 +138,12 @@ if [ -z "$boards" ]; then
 fi
 while read -r mac port; do
     [ -n "$mac" ] || continue
-    device="$(awk -v mac="$mac" '$1 == mac { print $2 }' "$REPO/rendered/boards")"
+    # `read` fails on a MAC the table does not have, leaving both empty; the check below says why.
+    read -r device chip < <(awk -v mac="$mac" '$1 == mac { print $2, $3 }' "$REPO/rendered/boards") || true
     if [ -z "$device" ]; then
         echo "ERROR: the board on $port has MAC $mac, which no device in clockwork.dot has." >&2
-        echo "       Add \`mac $mac\` to its device's address in clockwork.dot and deploy again." >&2
+        echo "       Add \`mac $mac chip <chip>\` to its device's address in clockwork.dot, the" >&2
+        echo "       chip as esptool names it (esp8266, esp32, …), and deploy again." >&2
         exit 1
     fi
     image="$REPO/binaries/$device.bin"
@@ -156,7 +159,7 @@ while read -r mac port; do
     # The image Arduino's ESP8266 core builds is the whole flash from 0x0, its bootloader
     # included. esptool resets the board into it once written. Its stdin is not the board list
     # this loop reads.
-    esptool --port "$port" --baud 460800 write_flash 0x0 "$image" </dev/null
+    esptool --chip "$chip" --port "$port" --baud 460800 write_flash 0x0 "$image" </dev/null
     echo "$sum" | sudo tee "$FLASHED/$mac" >/dev/null
     echo "flashed $device ($mac) on $port"
 done <<<"$boards"

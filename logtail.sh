@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# logtail.sh — follow the brain's log on claw-pi from here.
+# logtail.sh — follow the brain's log on chaos-pi from here.
 #
 # Run from anywhere on the Mac:  ./logtail.sh
 # Extra arguments go to journalctl, e.g. ./logtail.sh -n 200 for more history.
 #
 set -euo pipefail
 
-PI="claw-pi"               # ssh alias (key-based)
+PI="chaos-pi"               # ssh alias (key-based)
 
 # Timestamped to the millisecond, in the rig's local time: the Pi's clock is UTC, and an hour
 # off from every time the show is written in reads wrong. Pass -o cat for the bare lines.

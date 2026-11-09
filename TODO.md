@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: Wrist's motor in Manual from QLC+ first, then soldering, then clean up,
+it: soldering first, then clean up,
 then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -10,30 +10,6 @@ Wrist's firmware is specified in [`CONTROL_LOOP.md`](CONTROL_LOOP.md); its open 
 steps here.
 
 ---
-
-## Wrist's motor in Manual, from QLC+ on the Mac
-
-The target: QLC+ on the Mac takes the rig over through the brain, the brain sends its universe
-to Wrist by unicast, and Wrist turns the shaft at the speed and in the direction the faders set,
-per Manual in `CONTROL_LOOP.md` §4. Blackout, the e-stop and sACN loss each leave it limp. The
-shaft free, no wire on it: Manual needs neither homing nor the accelerometer.
-
-- Rust: the brain sends sACN by unicast to each recipient in `clockwork.dot`, at the address
-  and port `cortex-build` reads from the dot, instead of to the universe's multicast group.
-  The dot has sACN unicast only; Wrist's edge is the first. What it sends is the frame after
-  the takeover and the e-stop, as the wired DMX is.
-- C++: Wrist's header gains Mode's, Direction's and Speed's bands from `wrist.qxf`, beside the
-  universe and start address it already reads from `clockwork.qxw`, so the firmware holds no
-  second copy of the patch.
-- `wrist/` firmware, per `CONTROL_LOOP.md`: the sACN receiver, on the port the dot gives Wrist,
-  its 2.5 s timeout and Stream-Terminated; ENA's fail-safe; the step generator in the Timer1
-  NMI; Blackout and Manual, ramping at `a_manual` to the speed Speed sets, capped at `v_max`.
-  The motor run first, and the constants and the code then made to match what it does:
-  `dir_cw`, `a_manual`, `v_max`.
-- Under takeover from QLC+ on the Mac: Mode to Manual, the shaft turning both ways at the
-  speeds the faders set, and stopping at Speed 0; Mode back to Blackout ramps to a stop and
-  leaves the shaft free. The e-stop pressed, the brain stopped, and QLC+ quit, each leave it
-  limp within the 2.5 s timeout or sooner.
 
 ## Soldering
 
