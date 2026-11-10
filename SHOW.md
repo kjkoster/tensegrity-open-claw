@@ -145,27 +145,16 @@ named `Wrist`. Its address on the access point is in `clockwork.dot`, the rig's 
 | 3 | Direction | Nothing | in Manual only: 0–127 clockwise, 128–255 counter-clockwise |
 | 4 | Speed | Speed; stop band **Stopped** (0) | in Manual only: 0 stopped, 1–255 slow … `v_max` |
 
-**Motor.** The closed-loop stepper; its label, connector and limits are in
-`OWNED-DEVICES.md`. Its DIP switches for this show:
+**Motor.** The closed-loop stepper, set and supplied as `OWNED-DEVICES.md` has it. It runs at
+800 pulses per revolution: the model's fastest motion, about 8 rev/s, is 6.4 kHz of pulses,
+inside the 12.5 kHz the firmware can make; 1600 would not be.
 
-| switch | setting | why |
-|---|---|---|
-| SW1–SW4 | the 800 row of the table on the body | 800 pulses per revolution: the model's fastest motion, about 8 rev/s, is 6.4 kHz of pulses, inside the 12.5 kHz the firmware can make; 1600 would not be |
-| SW5 | as set at commissioning | the motor's direction (off counter-clockwise, on clockwise), set so positive reels the wire in |
-| SW6 | off, always | "internal debugging, do not switch on" |
-
-**Supply.** The motor supply at **38 V** (`OWNED-DEVICES.md` says why it runs there), through
-a 5 A fuse, with 4700 µF / 50 V across V+ and V− at the motor, fixed down rather than
-hanging from its leads, and both pins of each power pair connected. It is on order.
-If the e-stop button has a spare contact block, a relay on the motor's
+**Supply.** If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
 hardware fact as well as a DMX one, at the cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
 gets the relay regardless.
 
-**Board.** The NodeMCU on 5 V from the cabinet's USB charger, wired as `CONTROL_LOOP.md` §2
-has it, ENA through an S8050. Powered and running no code, the board leaves the motor free;
-unpowered, it leaves the driver enabled and the shaft held under power (both tested
-2026-11-07), so the motor's supply goes off before the board's.
+**Board.** Wrist's board, as `OWNED-DEVICES.md` has it, wired as `CONTROL_LOOP.md` §2 has it.
 
 **Wire and home.** As `CONTROL_LOOP.md` §2 has it, the wire running to the chosen node. The
 rest position, the travel and the tension limits for the band set are measured at
@@ -175,8 +164,8 @@ wire and the accelerometer.
 
 ### 3.2 The accelerometer
 
-An ADXL345 breakout Velcroed to the model, on a cable to Wrist's board run apart from the
-motor's. Wrist picks the sway axis at each Pluck, so the breakout's orientation does not
+The accelerometer (`OWNED-DEVICES.md`) Velcroed to the model, on a cable to Wrist's board run
+apart from the motor's. Wrist picks the sway axis at each Pluck, so its orientation does not
 matter. The three placements tried in E0 are the top node, a mid-height node, and a strut.
 
 ### 3.3 Memory and the dashboard

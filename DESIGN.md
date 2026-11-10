@@ -103,11 +103,13 @@ the wildcard, and the workspace's E1.31 output has to unicast there. The brain s
 universe by unicast too, to each fixture the dot gives a `sacn` edge from it, so nothing it
 sends comes back to its receiver.
 
-### 1.3 MQTT is telemetry, never show
+### 1.3 Telemetry; the show must go on
 
-Every topic on the broker reports; nothing the show does reads one. The show's inputs are its
-sensors and the clock. That keeps the broker optional — one that is down or slow costs the
-telemetry and never a frame — and keeps the show's behaviour explainable from its inputs alone.
+Telemetry reports; nothing the show does reads it. The show's inputs are its sensors and the
+clock. That keeps telemetry optional — a recorder that is down or slow costs the recording and
+never a frame — and keeps the show's behaviour explainable from its inputs alone. Telemetry is
+OSC (§2.7). A device's OSC to the brain is a sensor input (§1.4), not telemetry, even when the
+same message also goes to Memory (§3.9).
 
 ### 1.4 Inputs are state, handed in
 
@@ -124,7 +126,7 @@ is a stale snapshot, and what stale means is the show's decision.
 sensor's snapshot on the same kind of seam, so moving a sensor changes the transport and
 nothing after it. UDP, because a late reading is worthless and the newest wins; OSC, because it
 is the smallest typed message there is and a laptop with `oscsend` can stand in for the sensor;
-not MQTT, because a broker in the path would make it part of the show (§1.3). The sender sends
+no broker, because a broker in the path would be one more thing the show depends on. The sender sends
 each new reading once, so silence goes stale. The receiver binds the one address the sensors'
 network reaches, because a wildcard would also answer the 4G uplink's public address.
 
@@ -161,7 +163,7 @@ audience sees. The eyeball's reading would otherwise have needed a socket betwee
 processes on one Pi. These are written so a dead device costs what it provides: they report,
 retry with backoff and never block the frame loop; what cannot come back stops the brain
 (§1.7). Heavy work drops out of the real-time scheduling, so it slows itself and never a frame.
-They publish through the brain's broker connection (§3.1).
+Their telemetry goes out with the brain's (§2.7).
 
 Each thread sets its own core and scheduling as its first act, from `cortex::sched`, rather than
 the unit file setting one policy for the whole process, because the frame loop and the threads
@@ -212,13 +214,12 @@ and never upgrading is a pile of breaking changes that arrives all at once.
 ### 1.9 `no_std` and no allocator, wherever it can be
 
 Anything shared between the Pi and a microcontroller is `no_std` — always, not when a firmware
-happens to need it. `stem` set the pattern. Code that was `std` out of habit is what stops a
+happens to need it. Code that was `std` out of habit is what stops a
 part moving onto a microcontroller. A crate reaches for `std` only for what the Pi alone has —
 sockets, threads, the serial port, the filesystem — in the thinnest shell it can.
 
-The same for the heap: portable code works in fixed-size buffers its caller owns. `stem` writes
-each packet into one and returns its length; the sACN encoder and source table are arrays
-sized by the protocol and the configuration. An allocation in the frame loop is a porting job
+The same for the heap: portable code works in fixed-size buffers its caller owns. The sACN
+encoder and source table are arrays sized by the protocol and the configuration. An allocation in the frame loop is a porting job
 waiting to happen.
 
 ---
@@ -231,12 +232,12 @@ A **Raspberry Pi drives one DMX-512 universe**. It runs `brain`, which reads the
 runs the show, and clocks the universe out of an RS-485 HAT at 40 Hz to the wired fixtures.
 The same universe goes out as E1.31 sACN for the wireless fixtures, a monitor or a console, and
 an external override arrives the same way. The Pi is a WiFi access point, and reachable from
-the Mac over a WireGuard tunnel. Telemetry — the broker and its recordings — lives on a second
-Pi on that access point, Memory (§3.9), so the Pi that drives the show carries none of it.
+the Mac over a WireGuard tunnel. Telemetry's recordings live on a second Pi on that access
+point, Memory (§3.9), so the Pi that drives the show carries none of them.
 
 ```
     ┌── Mac ──────────────────────────────────────────┐
-    │  (builds brain; deploys; QLC+ for override)     │
+    │  (builds brain; QLC+ for override)              │
     └───────────────── network ───────────────────────┘
                                   │
     ┌── Raspberry Pi ──────────────┴──────────────────┐
@@ -265,7 +266,85 @@ DMX receivers: they ignore the data and fall back to their own internal show whi
 reporting a healthy signal, which reads as a wiring fault and is not one. The padding sets the
 ~43 Hz ceiling the 40 Hz frame rate sits under.
 
-### OSC: one file per device, three ways to send
+### 2.3 The crates
+
+| | |
+|---|---|
+| `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
+| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
+| `brain/` | the rig crate: the rig's patch, its show times, and its show |
+| `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
+
+**Beside the crates**: `stem/` holds Stem's daemon and the Python modules every health daemon
+shares; `pi/chaos-pi/` is what `chaos-pi` runs that belongs to no crate; `pi/memory-pi/` is
+everything `memory-pi` runs. A daemon's systemd unit lives in its own directory. `clockwork/`
+holds what reads `clockwork.dot` at build time: the dot's reader, and the renderer that fills
+the Pis' configuration from it.
+
+The rig crate's `build.rs` names its workspace and reads `shows.rs`; its `main.rs` includes the
+generated patch and calendar, wires in the components it uses, and writes the show.
+
+**`cortex` holds only what every rig shares.** A component a rig may or may not have is its own
+crate with its own configuration, which the rig crate depends on and wires in, so `cortex::run`
+and its `Rig` never grow a field for one rig's part.
+
+**Everything is built on the Mac.** The brain is cross-built for 64-bit ARM Linux, statically
+linked against musl: the Mac builds in seconds what the Pi took minutes over, and the Pi needs
+no toolchain and no sources. Firmware for a wireless fixture is built on the Mac for its own
+target, and reads its universe and port out of the workspace and its address out of
+`clockwork.dot` (§1.1).
+
+**Assets are compiled in.** A recording or a model a component needs goes into the binary at
+build time, so the binary is the whole show: no file to be missing at startup, no decoder at run
+time, and an unreadable asset is a build error naming it. The mouth's recordings and the
+eyeball's model were built this way (§3.6, §3.8).
+
+### 2.4 Software stack
+
+Standard Rust, `std`, on Raspberry Pi OS. Rust is preferred everywhere; a microcontroller whose
+Rust support falls short may force C++, and that is then a design choice stated in the
+component's section.
+
+- **A hand-rolled sACN encoder** on a UDP socket. The `sacn` crates were not a good fit; the
+  packet is small enough that owning it costs less than working around them.
+- **`zihatec-rs-485-dmx`** for DMX-512 framing — break/MAB timing and full-512 padding.
+- **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking producers
+  on their own OS threads feeding it through a lock-free latest-value seam. A blocking `recv` on
+  the executor's thread would stall the frame loop, so anything that blocks stays off it, and
+  anything that computes for long runs below it in scheduling (§1.6).
+
+### 2.5 The rig state machine
+
+The brain runs **two state machines, layered**, and keeps their states apart by name:
+
+- The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes out.
+  It lives in `cortex`'s frame loop, after the arbitration, and is in the brain's telemetry.
+- The **show state** says what the show asks for. It is the rig crate's Director, described in
+  [`SHOW.md`](SHOW.md).
+
+The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
+and runs on unchanged underneath a stop.
+
+The rig state runs boot hold → running ⇄ e-stop → shutdown. Boot hold leaves on the first
+frame: to running if the e-stop is released, or to an e-stop holding nothing, silent until
+release. Until a frame has gone out the brain does not know what the fixtures are doing, so
+silence, which their signal-loss behaviour answers by holding, is the only honest stop frame.
+Shutdown releases the sACN source on the frame loop's own send path, so there is only ever one
+sender. Neither boot hold nor shutdown can be returned to.
+
+### 2.6 The Pi controller
+
+A Raspberry Pi runs `brain` (the unit is in [`OWNED-DEVICES.md`](OWNED-DEVICES.md)). It runs
+in **AP mode** so fixtures and laptops join its own network rather than whatever WiFi the site
+has, and uses its Ethernet port as a wired segment for a laptop.
+
+**Everything that must be found by address has a fixed one, outside the DHCP range.** The
+fixed addresses and the ranges are both in `clockwork.dot`. Each network hands out its range by DHCP as a convenience for
+laptops; a device the rig talks to by address sets its own on itself — a second Pi from a
+profile rendered from the dot, a wireless fixture from its firmware's header, generated from
+the dot. Both networks route their clients out over 4G.
+
+### 2.7 OSC: one file per device, three ways to send
 
 A device's OSC is its OSCQuery file in `fixtures/` (§1.4), written in OSCQuery's own
 attributes: `FULL_PATH`, `CONTENTS`, `TYPE`, `ACCESS`, and where they help `RANGE`, `UNIT` and
@@ -273,7 +352,7 @@ attributes: `FULL_PATH`, `CONTENTS`, `TYPE`, `ACCESS`, and where they help `RANG
 `TYPE`; a leaf is an OSC address, with `TYPE` and `ACCESS`. The build rejects a `FULL_PATH`
 that is not its parent's path and its own key.
 
-**The address space is by subject, with the device beneath it**, as MQTT's topics were:
+**The address space is by subject, with the device beneath it:**
 
 | root | holds |
 |---|---|
@@ -300,87 +379,6 @@ while the device stays connected hears the connect messages only at its next con
 Leaves at the same rate go out in one bundle, so a bundle is never declared: it follows from
 the rate.
 
-### 2.3 The crates
-
-| | |
-|---|---|
-| `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
-| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
-| `brain/` | the rig crate: the rig's patch, its show times, and its show |
-| `stem/` | Stem as the Rust programs see it (§3.1): the health contract and the MQTT packets, purely `no_std` and allocation-free. It shares its directory with Stem's daemon and broker configuration |
-| `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
-
-**Beside the crates**: `stem/` also holds Stem's daemon, its broker configuration and the
-Python modules every health daemon shares; `pi/chaos-pi/` is what `chaos-pi`'s deploy installs
-that belongs to no crate; `pi/memory-pi/` is everything `memory-pi` runs. A daemon's systemd
-unit lives in its own directory. Each Pi has its own deploy script, sharing `pi/deploy-lib.sh`,
-so either deploys while the other is down. `clockwork/` holds what reads `clockwork.dot` at
-build time: the dot's reader, and the renderer that fills the Pis' configuration from it.
-
-The rig crate's `build.rs` names its workspace and reads `shows.rs`; its `main.rs` includes the
-generated patch and calendar, wires in the components it uses, and writes the show.
-
-**`cortex` holds only what every rig shares.** A component a rig may or may not have is its own
-crate with its own configuration, which the rig crate depends on and wires in, so `cortex::run`
-and its `Rig` never grow a field for one rig's part.
-
-**Everything is built on the Mac.** The brain is cross-built for 64-bit ARM Linux, statically
-linked against musl: the Mac builds in seconds what the Pi took minutes over, and the Pi needs
-no toolchain and no sources. Firmware for a wireless fixture is built on the Mac for its own
-target and reads its universe, port and address out of the workspace through `cortex-build`;
-Rust firmware shares `stem` by path.
-
-**Assets are compiled in.** A recording or a model a component needs goes into the binary at
-build time, so the binary is the whole show: no file to be missing at startup, no decoder at run
-time, and an unreadable asset is a build error naming it. The mouth's recordings and the
-eyeball's model were built this way (§3.6, §3.8).
-
-### 2.4 Software stack
-
-Standard Rust, `std`, on Raspberry Pi OS. Rust is preferred everywhere; a microcontroller whose
-Rust support falls short may force C++, and that is then a design choice stated in the
-component's section.
-
-- **A hand-rolled sACN encoder** on a UDP socket. The `sacn` crates were not a good fit; the
-  packet is small enough that owning it costs less than working around them.
-- **`zihatec-rs-485-dmx`** for DMX-512 framing — break/MAB timing and full-512 padding.
-- **Embassy** (`executor-thread` + `embassy-time`) for the frame loop, with blocking producers
-  on their own OS threads feeding it through a lock-free latest-value seam. A blocking `recv` on
-  the executor's thread would stall the frame loop, so anything that blocks stays off it, and
-  anything that computes for long runs below it in scheduling (§1.6).
-
-### 2.5 The rig state machine
-
-The brain runs **two state machines, layered**, and keeps their states apart by name:
-
-- The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes out.
-  It lives in `cortex`'s frame loop, after the arbitration, published on `brain/rig`.
-- The **show state** says what the show asks for. It is the rig crate's Director, described in
-  [`SHOW.md`](SHOW.md).
-
-The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
-and runs on unchanged underneath a stop.
-
-The rig state runs boot hold → running ⇄ e-stop → shutdown. Boot hold leaves on the first
-frame: to running if the e-stop is released, or to an e-stop holding nothing, silent until
-release. Until a frame has gone out the brain does not know what the fixtures are doing, so
-silence, which their signal-loss behaviour answers by holding, is the only honest stop frame.
-Shutdown releases the sACN source on the frame loop's own send path, so there is only ever one
-sender. Neither boot hold nor shutdown can be returned to.
-
-### 2.6 The Pi controller
-
-The deployed unit is a **Raspberry Pi 3B+**; a Pi 4 runs the same software with more headroom.
-It runs in **AP mode** so fixtures and laptops join its own network rather than whatever WiFi
-the site has, uses its Ethernet port as a wired segment for a laptop, and runs `brain` as a
-systemd service.
-
-**Everything that must be found by address has a fixed one, outside the DHCP range.** Both
-are in `clockwork.dot`. Each network hands out its range by DHCP as a convenience for
-laptops; a device the rig talks to by address sets its own on itself — a second Pi from a
-profile rendered from the dot, a wireless fixture from its firmware's header, generated from
-the dot. Both networks route their clients out over 4G.
-
 ---
 
 ## 3. Components
@@ -404,7 +402,7 @@ workspace patches them.
 | the calendar, with each show's civil dusk and dawn (§1.5) | `cortex::calendar`, `cortex-build`, the rig crate's `shows.rs` |
 | the QLC+ ingest (§1.1) | `cortex-build`, `cortex::qlc_plus` |
 | the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
-| the telemetry client and the health contract | `cortex::telemetry`, the `stem` crate |
+| the brain's telemetry, over OSC (§2.7) | `cortex::telemetry` |
 | Stem (§3.1) | `stem/` |
 | Memory (§3.9) | `pi/memory-pi/` |
 | the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `pi/chaos-pi/` |
@@ -422,29 +420,20 @@ workspace patches them.
 
 ### 3.1 Stem
 
-The telemetry backbone: the MQTT broker, Mosquitto, and a health daemon in Python. All of the
-rig's telemetry goes through it (§1.3). It is separate from `brain` (§1.6) so it stays alive and
-reporting when `brain` is down — precisely when health matters — and being Python and a broker,
-it has no place inside the brain anyway.
-
-**The broker belongs to Stem and runs on `memory-pi`** (§3.9), beside the recordings that read
-it, so the Pi that drives the show carries none of the telemetry. It is Debian's Mosquitto with
-an overlay in its include directory (`stem/stem.conf`), so a package upgrade cannot quietly
-revert the rig's settings. It keeps nothing on disk; every client replays its retained topics
-on each connect. Stem's daemon stays on `chaos-pi`, the hardware it reads.
+The health daemon of `chaos-pi`, in Python: it reads the Pi's hardware — the board, the 4G
+modem, the access point's stations — and sends it as OSC (§2.7). It is separate from `brain`
+(§1.6) so it stays alive and reporting when `brain` is down — precisely when health matters —
+and being Python, it has no place inside the brain anyway.
 
 **The daemon is deliberately the least capable process on the rig**: it reads the hardware and
-publishes it, nothing else, so its death costs telemetry and never uptime.
+sends it, nothing else, so its death costs telemetry and never uptime.
 
-Every process holds its own broker connection, announces itself on `health/<service>`, and
-leaves a will that says `gone`. A part inside the brain, like the face, lives and dies with it,
-so a will of its own would only repeat `health/brain`; it publishes its subtree through the
-brain's connection.
+**Liveness is a heartbeat.** Every device sends one over OSC, so a device that has gone is one
+whose heartbeat has stopped, and nothing watches anything else. A part inside the brain, like
+the face, lives and dies with it, so a heartbeat of its own would only repeat the brain's; its
+telemetry goes out with the brain's.
 
-**The Rust side of Stem is the `stem` crate**: the health contract and the packets, `no_std` so
-firmware can use them; each program brings its own transport, the brain's being
-`cortex::telemetry`. `stem/rig_mqtt.py` is the Python half, and `stem/rig_board.py` the board
-readers every Python health daemon shares.
+`stem/rig_board.py` holds the board readers every Python health daemon shares.
 
 ### 3.2 The 4G watchdog
 
@@ -479,8 +468,7 @@ when the pins are claimed so the first frame already knows it.
 
 **It cannot fall silent on its own.** The face polls as a task on the frame loop's executor, so
 it stops only when the frame loop does, and a panic in either ends the process. That is why
-there is no rule for a face that has stopped reporting, and why it has no broker connection of
-its own.
+there is no rule for a face that has stopped reporting, and why it has no heartbeat of its own.
 
 ### 3.4 The ear
 
@@ -490,11 +478,11 @@ the heads' dance. It drove the claw at ADE and was removed after it; the code is
 `last-version-with-ear` (`cortex/src/ear/`, and `cortex/src/sparkle.rs` for the mapping).
 
 It had no DMX channels, but it was part of the rig the way the face is — its own thread, its
-own state handed to the show, its own `ear/…` topics — so a dead interface showed as such
+own state handed to the show, its own `ear/…` telemetry — so a dead interface showed as such
 rather than as a show gone quiet for no visible reason.
 
 **Fast and lean.** Every feature was computed on every block, so the snapshot carried only what
-a show read plus diagnostics; a feature nobody read was work for nothing on a 1.2 GHz Pi. Its
+a show read plus diagnostics; a feature nobody read was work for nothing on the Pi. Its
 capture thread — negotiated parameters, xrun recovery in place, reopen with backoff, a USB
 probe published on every reopen — is the mouth's (§3.8) turned round. The interface was named
 by role, so swapping it was its ALSA card name and USB identity in the config.
@@ -502,8 +490,8 @@ by role, so swapping it was its ALSA card name and USB identity in the config.
 ### 3.5 The ball
 
 An ESP32-C3 on the Pi's WiFi, following the sACN universe, its firmware `no_std` Rust on
-Embassy. Removed after the ADE show; the last version, with the deploy's firmware build and
-board flashing, is on `last-version-with-ball` (`ball/`, `ball-dmx/`, `attach.sh`). Its
+Embassy. Removed after the ADE show; the last version, with its firmware build and board
+flashing, is on `last-version-with-ball` (`ball/`, `ball-dmx/`, `attach.sh`). Its
 definition, `fixtures/ball.qxf`, stays in the library.
 
 **A ball is a fixture in the patch like any other**, and its firmware is built from the
@@ -523,21 +511,21 @@ again. Deep sleep is a reset, so every wake is a boot, and every boot runs the s
 
 - The outputs start held off and the motor tripped.
 - sACN is followed from the moment the network is up, whatever comes next.
-- Telemetry goes out as always, the pack voltage read at boot among it; publishing never holds
+- Telemetry goes out as always, the pack voltage read at boot among it; sending never holds
   up sACN.
 - Five seconds after the lease — not boot, since joining takes seconds of its own — the ball
-  decides. That is plenty for a broker that is there, and waiting longer would not bring one
-  that is not; liveness is read off `health/ball` going `connected` every five minutes and a
-  fresh `ball/pack_v`.
+  decides. That is plenty for a universe that is there, and waiting longer would not bring one
+  that is not; liveness is read off its telemetry arriving every five minutes with a fresh
+  pack voltage.
 - If the universe asks it to sleep, or none was heard in those five seconds, it sleeps.
 - With the rig off there is no access point and the five seconds never start, so a join that
   has not succeeded after four retries and a margin, about a minute, also means sleep.
 
 Going to sleep is, in order: stop the motor and hold its pin low, since nothing drives it in
-deep sleep; say `disconnected` and wait for it to leave, the one place anything waits on
+deep sleep; send its last telemetry and wait for it to leave, the one place anything waits on
 telemetry; disconnect from the access point cleanly, so the next wake has no stale association
-to wait out; deep-sleep five minutes. A wake counter in RTC memory is published as
-`ball/wakes`, so a reset that was not a wake shows as the count starting over.
+to wait out; deep-sleep five minutes. A wake counter in RTC memory is in its telemetry, so a
+reset that was not a wake shows as the count starting over.
 
 No universe after a wake means the rig is off, and a ball staying awake for it would drain its
 pack when nobody is there. It counts only at that one decision: an awake ball that loses the
@@ -578,7 +566,7 @@ model costs the eyeball frames and never the rig one.
 the time it was seen, so a stalled camera is a stale snapshot, which the show turns into the
 safe default. The feed goes to a browser over HTTP, because that is what a human uses to aim a
 camera; it binds the WireGuard address alone, because a wildcard would show the space, and
-whoever is in it, to the 4G uplink's public address. Telemetry goes to MQTT through the brain.
+whoever is in it, to the 4G uplink's public address. Telemetry goes out with the brain's.
 
 **The show reads the least it needs**: arm angles rather than seventeen joints in the first
 life, one distance rather than boxes in the second. The estimator is expected to be replaced,
@@ -590,7 +578,7 @@ while a browser is connected.
 
 #### 3.6.1 The retina
 
-A network camera, an Axis M3105-LVE, set up over VAPIX and read as MJPEG, its newest frame
+A network camera (in [`OWNED-DEVICES.md`](OWNED-DEVICES.md)), set up over VAPIX and read as MJPEG, its newest frame
 handed to the eyeball. Removed with the eyeball after the Halloween show, on
 `last-version-with-retina` (`retina/`, and the camera's DHCP reservation in
 `etc/claw-eth0.dnsmasq.conf`).
@@ -611,13 +599,13 @@ inter-frame state and needs only a JPEG decoder.
 
 **The newest frame, always.** The detector sets the pace: a reader that kept every frame would
 queue them behind a slow model and lag the world, so it keeps only the newest, and a slow model
-shows as a lower frame rate on the broker rather than a show that reacts late.
+shows as a lower frame rate in the telemetry rather than a show that reacts late.
 
 **The camera's address is a reservation, not a setting**, in the dnsmasq NetworkManager runs for
 the wired segment, keyed on the camera's MAC, so a reset or replaced camera comes up where the
 retina looks with nothing set on it.
 
-#### In the brain: one distance
+#### 3.6.2 In the brain: one distance
 
 A person detector, not a pose model: a person is the bottom corner of their box on the near
 side — the leading foot, which a box merged over a bunch still puts on the one in front.
@@ -629,7 +617,7 @@ pixels, so the weights are exported at the camera's aspect ratio and well under 
 several times the frame rate, no work on padding — at the cost of people under about 25 pixels
 tall. The export is a script beside the model.
 
-**The models not taken.** YOLOX-Tiny is too slow beside the frame loop on a 3B+. YOLOv8 and
+**The models not taken.** YOLOX-Tiny is too slow beside the frame loop on the Pi. YOLOv8 and
 YOLO11 are AGPL. A crowd-trained detector separates a bunch of children better but has no clean
 first-party export, and the show reads only the front of a group. ONNX Runtime is four times
 faster on a Mac, but its crate downloads a prebuilt library; only Debian's package would do.
@@ -644,7 +632,7 @@ and is four points to measure and a matrix to get wrong.
 with a tape, and an empty space `+∞`, so every comparison falls the safe way. Debouncing and
 hysteresis are the show's policy; the eyeball reports each frame and tracks nobody.
 
-#### Beside the brain: arm angles
+#### 3.6.3 Beside the brain: arm angles
 
 A Python process on the Pi, OpenCV and numpy, a MoveNet pose model on TFLite or ONNX, sending
 the brain datagrams over UDP on loopback; three cores for the model, one for the DMX loop. The
@@ -655,7 +643,7 @@ landmarks cleared the threshold.
 ### 3.7 The ponytail
 
 A cheap fibre-optic light — plastic fibres lit by an LED array, a patterned plate turned by a
-stepper in front — retrofitted with a XIAO ESP32-S3 that followed sACN on the Pi's WiFi.
+stepper in front — retrofitted with an ESP32-S3 that followed sACN on the Pi's WiFi.
 Removed; on `last-version-with-ponytails`.
 
 Two personalities shared one sACN front end. **PWM** drove the RGBW array directly. **BLE
@@ -711,67 +699,56 @@ voice furthest into its recording gave way.
 muted the cue while the face reported it, at boot too. Sound is not part of the universe, so
 under a takeover the show's sound ran on.
 
-**It reported through the brain's connection** (§3.1): what the stream was actually opened at,
+**It reported through the brain's telemetry**: what the stream was actually opened at,
 xruns, why it was mute, and the interface as the USB bus saw it, republished on every reopen,
 so a re-enumeration under a running brain showed as the flaky hub port it usually is.
 
 ### 3.9 Memory
 
-The rig's long memory: everything published on the broker, kept in a time-series database on an
-external SSD so a show can be read back afterwards — and the broker itself. It runs on a Pi of
-its own, `memory-pi`, configured entirely from `pi/memory-pi/`.
+The rig's long memory: the telemetry every device sends, kept in a time-series database on an
+external SSD so a show can be read back afterwards. It runs on a Pi of its own, `memory-pi`.
 
-**A Pi of its own, because `chaos-pi` has no room for it.** A 3B+ with 905 MB, swap on its SD
-card, and the frame loop has no room for a database that flushes and compacts in bursts. A Pi
-3B is enough, because Greptime publishes 64-bit ARM binaries and runs in a few hundred MB.
+**A Pi of its own, because `chaos-pi` has no room for it.** The frame loop has no room beside a
+database that flushes and compacts in bursts. A small Pi is enough, because Greptime publishes
+64-bit ARM binaries and runs in a few hundred MB.
 
-**Never part of the show.** The show reads no topic (§1.3), so losing Memory, its SSD or its Pi
-costs the telemetry and never a frame. Everything on it reconnects for as long as it takes,
-because both Pis power up together and `memory-pi` is up long before the access point.
+**Never part of the show.** The show reads no telemetry (§1.3), so losing Memory, its SSD or its
+Pi costs the recording and never a frame. Everything on it waits for the network for as long as
+it takes, because both Pis power up together and `memory-pi` is up long before the access point.
 
 **On the access point, at an address it sets itself**, from a profile rendered from the same
 `clockwork.dot` as the access point's, so the two cannot disagree; routed out over 4G by
 `chaos-pi`. The Mac reaches it only by jumping through `chaos-pi`: a tunnel of its own would buy
 nothing, because a dead `chaos-pi` leaves little to do remotely anyway.
 
-**Six processes:**
+**Three processes:**
 
-- **Mosquitto**, Stem's broker (§3.1).
-- **The health daemon**, `memory.py`, Stem's counterpart for `memory-pi`. It shares Stem's board
-  readers through `stem/rig_board.py`, so a fix to a reading lands on both Pis, and adds the
-  SSD's free space and its end of the WiFi link.
-- **GreptimeDB**, standalone, from a pinned release with its SHA-256 in the repo, since no apt
-  source carries it; on loopback alone.
-- **The recorder**, `recorder.py`, writing every live message into Greptime over InfluxDB line
-  protocol in five-second batches. Greptime has no MQTT listener, and its documented route is
-  EMQX's rule engine, which would replace Mosquitto; a recorder is a page of Python.
-- **The OSC bridge**, ingesting the OSC a fixture sends to `memory-pi` directly, decoded from
-  that fixture's OSCQuery file (§1.4), alongside what the recorder takes off the broker, so a
-  fixture that speaks no MQTT is recorded without the brain in the path.
-- **Grafana**, from its apt repository, reading Greptime as a MySQL server, on loopback, its
-  settings and data source provisioned from the repo. No dashboard is provisioned by default;
-  one made in the UI lives in Grafana's own database.
+- **Memory itself**, `memory.py`. It ingests the OSC every device sends to `memory-pi`
+  directly, decoded from that device's OSCQuery file (§1.4), and writes it into Greptime in
+  batches, so a device is recorded without the brain in the path; Greptime has no OSC listener,
+  and a bridge is a page of Python. It is also Stem's counterpart for `memory-pi`: it shares
+  Stem's board readers through `stem/rig_board.py`, so a fix to a reading lands on both Pis,
+  and adds the SSD's free space and its end of the WiFi link.
+- **GreptimeDB**, standalone, on loopback alone.
+- **Grafana**, reading Greptime as a MySQL server, on loopback.
 
-**What is stored** is one table per first topic level, numbers and words in separate columns,
-flags as 1 and 0 so they draw as a line, timed when the recorder received them, kept forever:
-a few MB a day against 500 GB. The schema is in the README. **Not stored:** retained replays,
-which would write each state again on every connect; empty payloads, which delete a retained
-topic rather than say anything; and anything before the clock first synchronised, which would
-be filed under the stale boot time.
+**What is stored** is one table per first level of the OSC address, numbers and words in
+separate columns, flags as 1 and 0 so they draw as a line, timed when Memory received them,
+kept forever: a few MB a day. **Not stored:** anything before the clock first synchronised,
+which would be filed under the stale boot time.
 
-**The broker comes first.** Greptime and Grafana run at a lower priority, Greptime's writes at
+**Memory comes first.** Greptime and Grafana run at a lower priority, Greptime's writes at
 idle disk priority, and they are the first the kernel kills when memory runs out, so a
-compaction or a heavy dashboard cannot take the broker down on a 1 GB Pi. They are not capped
+compaction or a heavy dashboard cannot take Memory down on a small Pi. They are not capped
 in memory, because the Pi's kernel ships with the memory cgroup controller off and turning it
 on is a boot parameter on a file the repo cannot own; Grafana, a Go program that otherwise
 holds on to what it freed, gets a Go memory limit instead.
 
-**The SSD carries the recordings only.** The Pi boots from its SD card and mounts the SSD with
-`nofail` and a short device timeout, so a missing SSD costs the recordings and leaves the Pi up
-and reporting why. Greptime requires the mount, so it never writes into the empty mount point.
+**The SSD carries the recordings only.** The Pi boots from its SD card and does not wait for the
+SSD, so a missing SSD costs the recordings and leaves the Pi up and reporting why. Greptime requires the mount, so it never writes into the empty mount point.
 
 **Power is cut, never shut down.** Greptime writes its log to the SSD every ten seconds, so a
-power cut costs at most those seconds and what the recorder held: the recordings are read in
+power cut costs at most those seconds and what Memory held: the recordings are read in
 days, not seconds.
 
 ### 3.10 Wrist
@@ -780,12 +757,13 @@ A guy-wire drive that sways a structure at its own first natural frequency: an i
 closed-loop stepper reeling the wire through a series spring, an accelerometer on the structure
 and a load cell under the motor, all on one board that follows the universe and closes the sway
 loop itself. Its firmware is C++ on the Arduino core for the ESP8266, which the chip forces
-(§2.4); what it does, its pins and its constants are in [`CONTROL_LOOP.md`](CONTROL_LOOP.md).
+(§2.4).
 
 **A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told to
 move, which lets the e-stop, a takeover and signal loss cover the drive with no rule of their
-own, and lets an artist session drive it from a fader. The brain sets only a mode and an
-amplitude; Wrist renders the motion at its own rate, for the ball's reason: forty bunched
+own, and lets an artist session drive it from a fader. The frame sets a mode and an amplitude,
+and for turning the shaft by hand a direction and a speed; Wrist renders the motion at its own
+rate, for the ball's reason: forty bunched
 frames a second over WiFi cannot carry step pulses.
 
 **The loop closes in the fixture.** Sensor, oscillator and motor share one board, so nothing in
@@ -816,7 +794,9 @@ wire, and while frames arrive the rig is there to brake with.
 **Blackout means unhomed.** Released, the shaft can be turned by the wire, a hand or the
 structure settling, and the motor's encoder is inside its driver where Wrist cannot read it. So
 every exit from Blackout homes first, to a switch at the wire's pay-out end with the bands still
-stretched, so the wire is never slack; then Wrist takes up whatever the frame asks.
+stretched, so the wire is never slack; then Wrist takes up whatever the frame asks. The one
+exit that does not is Manual, which turns the shaft at the frame's direction and speed, to wind
+the wire or test the motor: it needs no home, and its position means nothing after it.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
 latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
@@ -829,7 +809,7 @@ not knowing.
 ordinary code would jitter with the radio's interrupts, so a timer at non-maskable priority
 makes them from a velocity the control tick sets.
 
-**Telemetry is OSC, out only.** No MQTT client: Wrist sends its loop variables and raw inputs
+**Telemetry is OSC, out only.** Wrist sends its loop variables and raw inputs
 as OSC bundles, and its transitions, pluck results and protections as events. Nothing is
 computed for telemetry; what can be derived is derived from the recording. The address space is
 `fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are

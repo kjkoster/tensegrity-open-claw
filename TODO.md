@@ -109,9 +109,6 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 - Reorganise: the two Pis, the hub, the modem, the SSD, the supply and its terminals each in
   their place; 5 V, 12 V and 38 V runs apart; signal leads away from mains. Photograph it for
   README's *Attached hardware*.
-- Once it is delivered: fit the battery for the brain's ESP32-S3 on-board RTC, powered through
-  the 4-pin J7 SH1.0 connector; the brain reads its time from the RTC at boot, and sets the
-  RTC by NTP via the Pi.
 
 ## With the artist, once Wrist's motor runs from QLC+
 

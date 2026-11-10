@@ -92,15 +92,12 @@ digraph clockwork {
             <tr><td port="title"><b>mosquitto</b></td></tr>
             <tr><td port="mqtt">MQTT tcp *:1883</td></tr>
         </table>>];
-        memory_pi_osc_bridge [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>osc-bridge</b></td></tr>
-            <tr><td port="osc">OSC udp wlan0:9001</td></tr>
-        </table>>];
         memory_pi_recorder [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>recorder</b></td></tr>
         </table>>];
         memory_pi_memory [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>memory</b></td></tr>
+            <tr><td port="osc">OSC udp wlan0:9001</td></tr>
         </table>>];
         memory_pi_greptime [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>greptime</b></td></tr>
@@ -179,7 +176,7 @@ digraph clockwork {
     subgraph osc {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
-        wrist_firmware:title -> memory_pi_osc_bridge:osc [xlabel="OSC"];
+        wrist_firmware:title -> memory_pi_memory:osc     [xlabel="OSC"];
     }
 
     subgraph mqtt {
@@ -225,6 +222,6 @@ digraph clockwork {
 
     subgraph undecided {
         edge [color="#000000", fontcolor="#000000", penwidth=1, style=dotted, arrowhead=empty];
-        memory_pi_osc_bridge:title -> memory_pi_greptime:http [xlabel="undecided"];
+        memory_pi_memory:title -> memory_pi_greptime:http [xlabel="undecided"];
     }
 }

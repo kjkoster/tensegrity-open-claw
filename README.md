@@ -96,7 +96,7 @@ What the cabinet holds whatever the show; the show's fixtures are in [`SHOW.md`]
 
 | Device | Interface | Notes |
 |---|---|---|
-| Zihatec RS422/485 HAT Rev D | 40-pin header + PL011 UART | wired DMX-512 out; see [the HAT](#zihatec-hat) |
+| The DMX HAT | 40-pin header + PL011 UART | wired DMX-512 out; see [the HAT](#the-dmx-hat) |
 | Cabinet door (the face) | GPIO (BCM) | e-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM; patched as the `Face` fixture |
 
 The cabinet has no off switch: the Pis are never shut down, only lose power, so nothing on
@@ -143,24 +143,11 @@ judges the [show times](#show-times) against the clock as it stands and corrects
 frame after NTP steps it; its log says `show: the clock is NTP-synchronised` (or `is not`) and
 prints the show table again when that changes.
 
-## Zihatec HAT
+## The DMX HAT
 
-`brain` generates the DMX break itself, so direction is manual, on GPIO18:
-
-| Switch | 1 | 2 | 3 | 4 | Meaning |
-|---|---|---|---|---|---|
-| **S1** | OFF | ON | OFF | ON | DE/RE via **GPIO18** (S1.4); auto DE/RE (S1.3) off; GPIO18 high = transmit |
-| **S2** | OFF | OFF | ON | ON | half-duplex: internal **Y→A, Z→B** |
-| **S3** | ON | OFF | ON | ON | termination **on** (HAT at bus end); 4k7 bias pull-down B / pull-up A |
-
-| K2 | Signal | 3-pin XLR |
-|---|---|---|
-| A | data+ | pin 3 |
-| B | data− | pin 2 |
-| Shield | gnd/shield | pin 1 |
-
-The HAT's pigtail is **female**; check each fixture's connector gender, since some makers
-reverse the convention. Put a **120 Ω terminator** in the DMX out of the last device.
+`brain` generates the DMX break itself, so direction is manual, on GPIO18; the HAT's switches
+and wiring are set for that, as `OWNED-DEVICES.md` has them. Its pigtail is female; check each
+fixture's connector gender, since some makers reverse the convention. Put a **120 Ω terminator** in the DMX out of the last device.
 
 ## systemd
 
