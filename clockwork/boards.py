@@ -4,7 +4,7 @@
 
     python3 -I clockwork/boards.py <clockwork.dot>
 
-`deploy-chaos-pi.sh` ships it to `claw-pi`, where a board on USB is known by the MAC its chip
+`deploy-chaos-pi.sh` ships it to `chaos-pi`, where a board on USB is known by the MAC its chip
 reports and flashed with `binaries/<device>.bin`, telling esptool the chip rather than have it
 guess; `attach.sh` finds a board's MAC in it. The MAC is the one the chip reports to
 `esptool read_mac`, which on an ESP8266 is also the one it joins the WiFi with, so it is

@@ -12,7 +12,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$REPO/pi/deploy-lib.sh"
 
 # --- WiFi ------------------------------------------------------------------
-# claw-pi's access point is memory-pi's only network, at a fixed address. Loaded but not
+# chaos-pi's access point is memory-pi's only network, at a fixed address. Loaded but not
 # brought up: this deploy arrives over that very link, and switching it now would cut the
 # deploy off halfway. The profile takes over at the next boot. Rendered from clockwork.dot by
 # deploy-memory-pi.sh; 0600, root's, as NetworkManager requires of a profile holding a secret.
@@ -75,7 +75,7 @@ echo "broker restarted"
 
 # --- Health daemon -----------------------------------------------------------
 # rig_mqtt.py and rig_board.py are Stem's, shipped here by deploy-memory-pi.sh. They install
-# beside their importer, as on claw-pi: the daemon is run by absolute path, which puts
+# beside their importer, as on chaos-pi: the daemon is run by absolute path, which puts
 # /usr/local/bin first on its import path.
 step "install and restart the health daemon"
 sudo install -m 0755 "$REPO/pi/memory-pi/memory.py" /usr/local/bin/memory.py
@@ -90,7 +90,7 @@ echo "memory daemon restarted"
 
 # --- GreptimeDB ----------------------------------------------------------------
 # From a pinned release rather than apt, which carries no GreptimeDB. Downloaded only when the
-# installed version differs from greptime.version — the tarball is close to 200 MB over claw-pi's
+# installed version differs from greptime.version — the tarball is close to 200 MB over chaos-pi's
 # 4G bundle — and installed only once its checksum matches. VERSION beside the binary records
 # what was installed, so an unchanged pin downloads nothing.
 #
@@ -142,7 +142,7 @@ echo "recorder restarted"
 
 # --- Grafana -------------------------------------------------------------------
 # From Grafana's apt repository. Its signing key is fetched once, and the package installed only
-# when it is missing — the package is large, and claw-pi's 4G bundle carries it — after which it
+# when it is missing — the package is large, and chaos-pi's 4G bundle carries it — after which it
 # upgrades with the rest of the system like any other package.
 #
 # The settings are a drop-in for its unit and the data source is provisioning, so both are

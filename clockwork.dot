@@ -16,7 +16,7 @@
 //                           network. "dhcp" for an address taken from a lease. The network
 //                           may be left out where the address lies in its CIDR; a lease
 //                           always names it. The device that is a WiFi network's access
-//                           point adds `ap`; there is one. A board flashed from claw-pi's
+//                           point adds `ap`; there is one. A board flashed from chaos-pi's
 //                           USB adds `mac <mac> chip <chip>`: its chip's MAC, in lower case,
 //                           by which the deploy knows which firmware it takes, and the chip as
 //                           esptool names it, which it is flashed as. No two devices share a

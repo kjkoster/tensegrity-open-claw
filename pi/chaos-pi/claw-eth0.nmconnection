@@ -1,4 +1,4 @@
-# claw-pi's wired segment, as a NetworkManager profile: a laptop when one is plugged in. A
+# chaos-pi's wired segment, as a NetworkManager profile: a laptop when one is plugged in. A
 # template: deploy-chaos-pi.sh fills the @…@ placeholders from chaos_pi's eth0 in
 # clockwork.dot (clockwork/pi_network.py), and the deploy installs the result.
 

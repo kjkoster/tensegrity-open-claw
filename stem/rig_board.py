@@ -1,8 +1,8 @@
 """What any of the rig's Pis is, and how it is holding up: the readings every health daemon
 shares.
 
-Stem reads claw-pi through this and memory's health daemon reads memory-pi, so a fix to how a
-reading is taken lands on both Pis. What only one Pi has — claw-pi's modem and access point,
+Stem reads chaos-pi through this and memory's health daemon reads memory-pi, so a fix to how a
+reading is taken lands on both Pis. What only one Pi has — chaos-pi's modem and access point,
 memory-pi's SSD — stays in that Pi's daemon.
 
 Every file and tool read here is part of every Pi running Raspberry Pi OS, so a reader that

@@ -8,34 +8,34 @@ own, in [`OWNED-DEVICES.md`](OWNED-DEVICES.md).
 
 The system is four parts:
 
-- **`claw-pi`** — a Raspberry Pi in the cabinet running the `brain` daemon. It reads its
+- **`chaos-pi`** — a Raspberry Pi in the cabinet running the `brain` daemon. It reads its
   sensors, runs the show, and sends one DMX universe at 40 Hz two ways: out of the RS-485 HAT
   as wired DMX-512, and over the network as E1.31 sACN.
 - **`memory-pi`** — a second Pi in the cabinet, on the first one's WiFi, running the telemetry
   broker and recording everything published on it.
 - **Wired fixtures** — on the HAT's DMX line.
-- **Wireless fixtures** — on `claw-pi`'s WiFi, following the sACN universe.
+- **Wireless fixtures** — on `chaos-pi`'s WiFi, following the sACN universe.
 
 ---
 
-# The Pi controller (`claw-pi`)
+# The Pi controller (`chaos-pi`)
 
 `brain` is cross-built on the Mac for `aarch64-unknown-linux-musl`; the Pi gets only the
 binary. Once per Mac: `rustup target add aarch64-unknown-linux-musl`.
 
 ## Access
 
-- SSH alias **`claw-pi`** → `10.8.0.3` over WireGuard, user `kjkoster`, key `~/.ssh/id_rsa`
+- SSH alias **`chaos-pi`** → `10.8.0.3` over WireGuard, user `kjkoster`, key `~/.ssh/id_rsa`
   (`IdentitiesOnly yes`). The Mac is a peer at `10.8.0.4` routing that single `/32`, not a
   general VPN. The tunnel's config is not versioned here.
-- SSH alias **`memory-pi`** → `10.0.10.3`, jumping through `claw-pi` (why: DESIGN §3.9). In
+- SSH alias **`memory-pi`** → `10.0.10.3`, jumping through `chaos-pi` (why: DESIGN §3.9). In
   `~/.ssh/config`:
 
   ```
   Host memory-pi
       HostName 10.0.10.3
       User kjkoster
-      ProxyJump claw-pi
+      ProxyJump chaos-pi
   ```
 
 The Pi's addresses, as `clockwork.dot` sets them, where it calls the Pi `chaos-pi`:
@@ -179,15 +179,15 @@ Stem's unit is a template too, its broker's address filled from Stem's MQTT edge
 From the Mac at the repo root: `./deploy-chaos-pi.sh`
 
 It renders the Pi's network profiles and Stem's unit from `clockwork.dot` into
-`target/claw-pi/`, builds `brain` on the Mac, rsyncs what the Pi runs — the binary and its
+`target/chaos-pi/`, builds `brain` on the Mac, rsyncs what the Pi runs — the binary and its
 unit, Stem's daemon and Python modules, `pi/chaos-pi/`, `pi/deploy-lib.sh` and the rendered files — to
-`claw-pi:tensegrity-open-claw/`, then runs
+`chaos-pi:tensegrity-open-claw/`, then runs
 `pi/chaos-pi/remote-deploy.sh` there. That installs each file, and restarts a service only when one of
 its files changed, saying which were left alone; a restart that fails stops the deploy with
 an error. The list of what ships is written out in `deploy-chaos-pi.sh`, so adding something is a
 decision.
 
-### The boards on `claw-pi`'s USB
+### The boards on `chaos-pi`'s USB
 
 Wrist's firmware is built on every deploy, with `wrist/build.sh` (`arduino-cli`, the core
 pinned in `wrist/sketch.yaml`), and shipped to `binaries/wrist.bin`. Last, the remote deploy
@@ -327,7 +327,7 @@ Headless, in the cabinet; the card only has to get it onto the access point once
   `memory-pi`, user `kjkoster` with the Mac's public key, key-only SSH, the WiFi of the
   `wifi` network in `clockwork.dot`'s `networks`, and country `NL`, without which the radio
   stays blocked.
-- **Power it up with `claw-pi` running.** It takes a DHCP address; find it on `claw-pi`:
+- **Power it up with `chaos-pi` running.** It takes a DHCP address; find it on `chaos-pi`:
   `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases`
 - **Format the SSD** if it is new or wiped, which erases it: `sudo mkfs.ext4 -L memory /dev/sda1`
 - **Deploy** with the alias pointed at that DHCP address: `./deploy-memory-pi.sh`, then
@@ -359,11 +359,11 @@ From the Mac at the repo root: `./deploy-memory-pi.sh`
 It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, rsyncs
 `pi/memory-pi/`, the rendered profile, `pi/deploy-lib.sh` and Stem's `rig_mqtt.py`,
 `rig_board.py` and `stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. It assumes a
-fresh Pi and removes nothing but what an older deploy shipped, and it never touches `claw-pi`,
+fresh Pi and removes nothing but what an older deploy shipped, and it never touches `chaos-pi`,
 as `deploy-chaos-pi.sh` never touches `memory-pi`.
 
 - **The first deploy is long**: Greptime's release (about 170 MB) and Grafana come over 4G,
-  filling it so SSH to `claw-pi` times out meanwhile. Greptime downloads again only when its
+  filling it so SSH to `chaos-pi` times out meanwhile. Greptime downloads again only when its
   pin changes, Grafana only when it is missing.
 - **Grafana upgrades with apt.** To choose when: `sudo apt-mark hold grafana`, `unhold` to
   upgrade.
@@ -399,7 +399,7 @@ login; editing takes `admin` / `admin` until Grafana asks for a new password. It
 with Grafana's time filter:
 
 ```sql
-SELECT greptime_timestamp AS time, 'claw-pi' AS metric, value
+SELECT greptime_timestamp AS time, 'chaos-pi' AS metric, value
 FROM stem
 WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
 UNION ALL

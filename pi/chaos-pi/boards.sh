@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# boards.sh — runs ON claw-pi. Finds the boards on its USB and the MAC each one's chip reports,
+# boards.sh — runs ON chaos-pi. Finds the boards on its USB and the MAC each one's chip reports,
 # so a board is known by its chip whatever port or cable it is on, and two boards whose USB
 # serial chips carry the same name are still told apart.
 #

@@ -1,4 +1,4 @@
-# claw-pi's WiFi access point, as a NetworkManager profile. A template: deploy-chaos-pi.sh
+# chaos-pi's WiFi access point, as a NetworkManager profile. A template: deploy-chaos-pi.sh
 # fills the @…@ placeholders from chaos_pi's wlan0 in clockwork.dot (clockwork/pi_network.py),
 # and the deploy installs the result.
 

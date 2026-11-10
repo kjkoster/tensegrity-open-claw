@@ -3,7 +3,7 @@
 # defaults is set here.
 
 # Nothing leaves the Pi but what the rig asks for: anonymous usage reports would go out over
-# claw-pi's 4G bundle.
+# chaos-pi's 4G bundle.
 enable_telemetry = false
 
 # A Pi 3B has four cores, and the defaults are sized for a server.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# remote-deploy.sh — runs ON claw-pi (pushed there by deploy-chaos-pi.sh, which built the brain).
+# remote-deploy.sh — runs ON chaos-pi (pushed there by deploy-chaos-pi.sh, which built the brain).
 # Installs the brain and what the Pi runs beside it, then flashes the boards on its USB. Every
 # service is restarted only when one of its files changed (`install_changed`), so a deploy that
 # touches only the brain restarts only the brain.

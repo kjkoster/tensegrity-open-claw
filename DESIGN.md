@@ -311,7 +311,7 @@ the rate.
 | `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
 
 **Beside the crates**: `stem/` also holds Stem's daemon, its broker configuration and the
-Python modules every health daemon shares; `pi/chaos-pi/` is what `claw-pi`'s deploy installs
+Python modules every health daemon shares; `pi/chaos-pi/` is what `chaos-pi`'s deploy installs
 that belongs to no crate; `pi/memory-pi/` is everything `memory-pi` runs. A daemon's systemd
 unit lives in its own directory. Each Pi has its own deploy script, sharing `pi/deploy-lib.sh`,
 so either deploys while the other is down. `clockwork/` holds what reads `clockwork.dot` at
@@ -431,7 +431,7 @@ it has no place inside the brain anyway.
 it, so the Pi that drives the show carries none of the telemetry. It is Debian's Mosquitto with
 an overlay in its include directory (`stem/stem.conf`), so a package upgrade cannot quietly
 revert the rig's settings. It keeps nothing on disk; every client replays its retained topics
-on each connect. Stem's daemon stays on `claw-pi`, the hardware it reads.
+on each connect. Stem's daemon stays on `chaos-pi`, the hardware it reads.
 
 **The daemon is deliberately the least capable process on the rig**: it reads the hardware and
 publishes it, nothing else, so its death costs telemetry and never uptime.
@@ -721,7 +721,7 @@ The rig's long memory: everything published on the broker, kept in a time-series
 external SSD so a show can be read back afterwards — and the broker itself. It runs on a Pi of
 its own, `memory-pi`, configured entirely from `pi/memory-pi/`.
 
-**A Pi of its own, because `claw-pi` has no room for it.** A 3B+ with 905 MB, swap on its SD
+**A Pi of its own, because `chaos-pi` has no room for it.** A 3B+ with 905 MB, swap on its SD
 card, and the frame loop has no room for a database that flushes and compacts in bursts. A Pi
 3B is enough, because Greptime publishes 64-bit ARM binaries and runs in a few hundred MB.
 
@@ -731,8 +731,8 @@ because both Pis power up together and `memory-pi` is up long before the access 
 
 **On the access point, at an address it sets itself**, from a profile rendered from the same
 `clockwork.dot` as the access point's, so the two cannot disagree; routed out over 4G by
-`claw-pi`. The Mac reaches it only by jumping through `claw-pi`: a tunnel of its own would buy
-nothing, because a dead `claw-pi` leaves little to do remotely anyway.
+`chaos-pi`. The Mac reaches it only by jumping through `chaos-pi`: a tunnel of its own would buy
+nothing, because a dead `chaos-pi` leaves little to do remotely anyway.
 
 **Six processes:**
 

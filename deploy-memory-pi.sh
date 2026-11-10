@@ -6,7 +6,7 @@
 # Run from the repo root on the Mac (riverrain):  ./deploy-memory-pi.sh
 # Stops at the first error so you can see how far it got.
 #
-# memory-pi alone: deploy-chaos-pi.sh is claw-pi's and never touches it, so either Pi deploys
+# memory-pi alone: deploy-chaos-pi.sh is chaos-pi's and never touches it, so either Pi deploys
 # while the other is down.
 #
 set -euo pipefail

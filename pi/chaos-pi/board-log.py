@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs ON claw-pi. Prints a board's serial log, from its first line, until Ctrl-C.
+"""Runs ON chaos-pi. Prints a board's serial log, from its first line, until Ctrl-C.
 
     python3 -I board-log.py <port>
 

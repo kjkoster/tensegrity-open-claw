@@ -1,4 +1,4 @@
-# deploy-lib.sh — what both Pis' remote deploys share, sourced by each of them: claw-pi's
+# deploy-lib.sh — what both Pis' remote deploys share, sourced by each of them: chaos-pi's
 # pi/chaos-pi/remote-deploy.sh and memory-pi's pi/memory-pi/remote-deploy.sh. One copy, so a
 # fix here reaches both Pis.
 #
@@ -66,7 +66,7 @@ python_daemon() {
     #
     # No --upgrade either. With it, every deploy re-queries the index for newer versions of
     # everything; without it, pip sees the requirements already satisfied and does not touch
-    # the network at all. Both Pis reach PyPI over claw-pi's 4G modem, so that is the
+    # the network at all. Both Pis reach PyPI over chaos-pi's 4G modem, so that is the
     # difference between a deploy that needs the uplink and one that does not.
     sudo "$venv/bin/pip" install -r "$requirements"
     sudo install -m 0644 "$requirements" "$venv/requirements.txt"

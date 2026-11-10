@@ -1,4 +1,4 @@
-# memory-pi's connection to claw-pi's access point, as a NetworkManager profile. A template:
+# memory-pi's connection to chaos-pi's access point, as a NetworkManager profile. A template:
 # deploy-memory-pi.sh fills the @…@ placeholders from memory_pi's wlan0 in clockwork.dot
 # (clockwork/pi_network.py), and the deploy installs the result.
 
@@ -24,7 +24,7 @@ psk=@WLAN0_PSK@
 [ipv4]
 method=manual
 address1=@WLAN0_ADDRESS@,@WLAN0_GATEWAY@
-# The gateway is claw-pi, whose access point relays DNS.
+# The gateway is chaos-pi, whose access point relays DNS.
 dns=@WLAN0_GATEWAY@;
 
 [ipv6]
