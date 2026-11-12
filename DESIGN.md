@@ -787,30 +787,33 @@ loss, because a head that stays put is safe; a drive held under power against a 
 structure is a tug-of-war with whatever else is happening. So on losing the universe Wrist
 releases at once, the one fixture whose signal-loss behaviour is not "hold", and this paragraph
 is why. A Blackout in the frame — the e-stop's mask included, which Wrist cannot tell apart
-from a requested one — first brakes the sway under power, driving in antiphase for a bounded
-time, then releases: a structure brought to rest is safer than one left swinging on a limp
-wire, and while frames arrive the rig is there to brake with.
+from a requested one — releases at once as well.
+
+**Wrist follows the desk and does not decide.** The mode in the frame is Wrist's mode, from
+any mode to any other, on the next tick: Blackout, Hold (enabled, the shaft locked), Pluck (one
+tug of the frame's size, direction and speed, then back and held) and Manual (the frame's
+direction and speed). No mode is entered or left by the firmware's own choice, no brake, no
+fallback; the one exception is the lost universe above. Every controlled change of speed goes
+through one ramp, the same in every mode. Wrist reports whether a pluck can start, so the show
+starts one only when it can.
 
 **Blackout means unhomed.** Released, the shaft can be turned by the wire, a hand or the
-structure settling, and the motor's encoder is inside its driver where Wrist cannot read it. So
-every exit from Blackout homes first, to a switch at the wire's pay-out end with the bands still
-stretched, so the wire is never slack; then Wrist takes up whatever the frame asks. The one
-exit that does not is Manual, which turns the shaft at the frame's direction and speed, to wind
-the wire or test the motor: it needs no home, and its position means nothing after it.
+structure settling, and the motor's encoder is inside its driver where Wrist cannot read it.
+Hold, Pluck and Manual need no home: each counts from where the shaft is. Run will need one;
+how it homes is decided with Run.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
 latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
 in-position signal. Wrist's other evidence is its own — the load cell's tension, the home switch
 closing mid-run on lost steps or a slipped wrap, a stale accelerometer, a move clamped at the
-travel limits — and every protection acts in the fixture, where the show cannot override it by
-not knowing.
+travel limits — and all of it is reported, not acted on: the desk decides.
 
 **Step pulses from a timer NMI.** The ESP8266 has one core, shared with WiFi; pulses timed in
 ordinary code would jitter with the radio's interrupts, so a timer at non-maskable priority
 makes them from a velocity the control tick sets.
 
 **Telemetry is OSC, out only.** Wrist sends its loop variables and raw inputs
-as OSC bundles, and its transitions, pluck results and protections as events. Nothing is
+as OSC bundles, whether a pluck can start among them, and its transitions as events. Nothing is
 computed for telemetry; what can be derived is derived from the recording. The address space is
 `fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
 coded in, worked out from raw readings in the telemetry.

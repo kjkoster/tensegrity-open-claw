@@ -4,21 +4,23 @@ Target: NodeMCU (ESP8266) driving a JD57 integrated closed-loop stepper. Languag
 
 ## 1. What it does
 
-1. **Pluck:** one fast tug on the guy wire, then estimate the structure's sway frequency `f` and quality factor `Q` from the ring-down.
-2. **Run:** phase-lock a local oscillator to the sway and drive the motor in phase with the structure's velocity at an amplitude the desk sets. The drive phase is adapted continuously; nothing is calibrated by hand.
-3. **Blackout:** coils released, identical to power loss. Also the idle state.
-4. **Manual:** turn the shaft at a speed and in a direction the desk sets, to wind the wire and to test the motor. Needs neither homing nor the accelerometer.
+1. **Blackout:** coils released, identical to power loss. Also the idle state.
+2. **Hold:** coils enabled, no steps: the shaft locked where it is.
+3. **Pluck:** one tug on the guy wire, of a size, direction and speed the desk sets, then back to where it began, and held there.
+4. **Manual:** turn the shaft at a speed and in a direction the desk sets, to wind the wire and to test the motor.
 
-Everything else is support for those four.
+None of the four needs homing or the accelerometer. **The firmware follows the desk and does not decide**: the mode in the frame is the mode, and no mode is entered or left by the firmware's own choice. The one exception is a lost universe, which is Blackout (§4).
+
+**Run**, later and not in the mode channel yet: phase-lock a local oscillator to the sway and drive the motor in phase with the structure's velocity at an amplitude the desk sets, the drive phase adapted continuously. The structure's sway frequency `f` and quality factor `Q`, which seed it, come from a ring-down; how that ring-down is recorded is decided with Run. §3 is Run's design.
 
 ## 2. Hardware
 
 Guy wire wrapped a few turns around the bare motor shaft (capstan; tail tied off) → short cable → hook → rubber bands in parallel → hook → wire to the structure. Motor sits on a bar-type load cell. One ADXL345 accelerometer on the structure.
 
 - Shaft **ASSUMPTION** 8 mm diameter: 25.1 mm of wire per revolution. Driver at 800 steps/rev: 31 µm per step.
-- `x` = wire position in steps, positive = reel in. `x = 0` at the homing switch (pay-out end, bands still stretched). `x_pre` = resting position. All drive motion is relative to `x_pre`.
+- `x` = shaft position in steps, counted by the step generator. In Hold, Pluck and Manual it has no home and means only distances. With Run: positive = reel in, `x = 0` at the homing switch (pay-out end, bands still stretched), `x_pre` = resting position, all drive motion relative to `x_pre`.
 - Bands are the series spring: motor position → force, wire never slack as long as `x ≥ 0`. Preload keeps the wire taut, so there is no backlash.
-- Load cell reads wire tension (motor's reaction force along the cell axis; wire leaves the shaft along that axis). Used for the two protections in §8 and for telemetry. Not in the phase loop.
+- Load cell reads wire tension (motor's reaction force along the cell axis; wire leaves the shaft along that axis). Telemetry only. Not in the phase loop.
 - **Unpowered, the shaft holds only by detent torque** (≈ 8–15 N of wire tension, **ASSUMPTION**; measure). If band preload is above that, Blackout unwinds the wraps and the motor guy goes slack. **DECISION:** fit a backup guy (fixed, slightly longer) so the structure stands without the motor guy, or keep preload below the detent hold.
 
 ### Pins (common anode at 3.3 V: GPIO sinks the opto cathode, LOW = opto on)
@@ -42,6 +44,8 @@ Board rules: GPIO15 low at boot (SCK idles low, fine); GPIO0/GPIO2 high at boot 
 Power: MCU on 5 V, sensors on its 3.3 V; motor on its own 42 V (**ASSUMPTION**); no ground tie, the optos are the only link. Keep the ADXL345 cable away from the motor cable.
 
 ## 3. The loop
+
+Run's, later; nothing in this section is built yet but the step generator and the HX711.
 
 ```mermaid
 flowchart LR
@@ -72,7 +76,9 @@ Control tick nominal 200 Hz, `dt` measured. Nothing in the loop crosses the netw
 - *Track* — **extremum seeking**, the part that follows wind, temperature and band drift while the show runs (locked, `A` unchanged for 5 cycles). Square-wave dither of `d = ±8°` on `φ_off`, period 30 cycles. At the end of each period, `g = (ā_high − ā_low) / (2d)` from the mean sway amplitude in the two halves; `φ_off += K_adapt·g`, step clamped to 5°. The sway amplitude at fixed drive is largest when the drive is in phase with velocity, so this climbs to the optimum and stays on it as it moves. Paused while `A` is changing (a changing drive moves `a` for reasons that have nothing to do with phase). Clamped to ±60° of the acquired value; falls back to *Acquire* if the clamp is hit repeatedly.
 - Persisted at most once a minute.
 
-**Step generation.** Timer1 as NMI at 25 kHz. Phase accumulator; a carry starts a pulse and the next tick ends it, so every pulse is 40 µs low and at least 40 µs high; DIR written only while stopped, between pulses, 10 µs before the next can start. Usable step rate ≤ 12.5 kHz = 390 mm/s of wire, which is also where motor torque falls off (~900 rpm). That is the hardware ceiling, not the setting: `v_max` is hard-coded to what the model needs, `≈ 1.2 × 2π·f_max·A_max` — about 150–200 mm/s for 5–10 mm at 3 Hz — so that a bad `f_est` or a desk snap cannot do more than the show would. Pluck uses its own, lower `v_pluck`. Write idle levels before switching pins to OUTPUT.
+**Step generation.** Timer1 as NMI at 25 kHz. Phase accumulator; a carry starts a pulse and the next tick ends it, so every pulse is 40 µs low and at least 40 µs high; DIR written only while stopped, between pulses, 10 µs before the next can start. Usable step rate ≤ 12.5 kHz = 390 mm/s of wire, which is also where motor torque falls off (~900 rpm). That is the hardware ceiling, not the setting: `v_max` is hard-coded to what the model needs, `≈ 1.2 × 2π·f_max·A_max` — about 150–200 mm/s for 5–10 mm at 3 Hz — so that a bad `f_est` or a desk snap cannot do more than the show would. Hold, Pluck and Manual use the step generator's ceiling. A signed step count `x` is kept in the NMI, and the NMI stops itself on a target count when one is set, so a late control tick cannot overshoot a move. Write idle levels before switching pins to OUTPUT.
+
+**The ramp.** One for every mode, so no mode has motion code of its own. A mode asks for a speed, or for a position to stop on; the motion stage changes the speed by at most `a_ramp·dt` a tick, takes a change of direction through zero, and, with a position to stop on, caps the speed at `√(2·a_ramp·remaining)` so the shaft stops on it. Every controlled change of speed goes through the ramp. Blackout is not a change of speed: it releases the coils at once, moving or not.
 
 **HX711.** 80 SPS (RATE pin high). The 25-clock readout runs with interrupts masked (~60 µs) because SCK high > 60 µs powers the chip down; the NMI is unaffected.
 
@@ -80,48 +86,44 @@ Control tick nominal 200 Hz, `dt` measured. Nothing in the loop crosses the netw
 
 ## 4. Modes
 
+**The mode is the frame's.** On every live frame, ch1 sets the mode, from any mode to any mode, on the next tick. The new mode takes over from wherever the shaft is and whatever it is doing, through the ramp (§3); nothing in between, no mode reached by way of another. After a lost universe, a stopped brain or a reboot, the first live frame sets the mode as any frame does.
+
+**sACN lost is Blackout**, at once: no frame for 2.5 s, or Stream-Terminated. The only mode the firmware enters by itself.
+
+Leaving Blackout enables the coils; no step is made for 100 ms after, as the driver asks. `x` has no home: it counts from boot and means only distances.
+
+**Blackout.** ENA released, rate 0, at once, moving or not. Sensors and telemetry keep running (the load-cell calibration readings are taken here). The idle state.
+
+**Hold.** Enabled; asks the ramp for speed 0. Turning when Hold begins, the shaft ramps to a stop and is held where it stopped.
+
+**Pluck.** One tug, once per entry:
+
 ```mermaid
 stateDiagram-v2
-    [*] --> Blackout
-    Blackout --> Homing : ch1 = Run or Pluck
-    Homing --> Run : ch1 = Run
-    Homing --> Pluck : ch1 = Pluck
-    Homing --> Blackout : abort
-    Pluck --> Run : ch1 = Run
-    Pluck --> RampDown : ch1 = RampDown or Blackout
-    Run --> RampDown : ch1 = RampDown or Blackout, or protection
-    RampDown --> Blackout : quiet and ch1 = Blackout
-    RampDown --> Run : ch1 = Run
-    RampDown --> Pluck : quiet and ch1 = Pluck
-    Run --> Blackout : sACN lost
-    Pluck --> Blackout : sACN lost
-    RampDown --> Blackout : sACN lost
-    Homing --> Blackout : sACN lost
-    Blackout --> Manual : ch1 = Manual
-    Manual --> Blackout : ch1 ≠ Manual, once stopped
-    Manual --> Blackout : sACN lost, or protection
+    direction LR
+    [*] --> Settle : enter Pluck, read ch2–ch4
+    Settle --> Out : standing, x0 = x
+    Out --> Dwell : at x0 ± A
+    Dwell --> Back : 0.5 s
+    Back --> Rest : at x0, 2.5 s after Dwell
 ```
 
-**Blackout.** `inc = 0`, ENA released. Position unknown from here on. Sensors, lock-in and telemetry keep running (the load-cell calibration readings are taken here). Entered by ch1 in Blackout's band or all channels zero (via RampDown if the motor was driving), and immediately by sACN loss (no frame for 2.5 s, or Stream-Terminated).
+- *Entry.* Ch2, ch3 and ch4 are read once, on the tick Pluck begins, and ignored for the rest of the pluck: `A` from Amplitude, the tug's direction from Direction, its speed `v` from Speed.
+- *Settle.* Turning, the shaft ramps to a stop; from Blackout, the 100 ms after enabling. `x0` is where it stands.
+- *Out.* To `x0 + A` in ch3's direction, at up to `v`, ramped up and down; a short tug never reaches `v`.
+- *Dwell.* Held at the target for 0.5 s.
+- *Back.* To `x0`, taking 2.5 s ramps included: the cruise speed is the one that, ramped at `a_ramp`, covers `A` in 2.5 s.
+- *Rest.* Held at `x0`, enabled, until the mode leaves Pluck. Another pluck needs the mode to leave Pluck and come back.
+- `A = 0` or `v = 0`: nothing moves; Settle goes straight to Rest.
+- The mode leaving Pluck at any point ends the pluck there; the new mode takes over from where the shaft is.
 
-**Homing.** Automatic on every exit from Blackout. Enable, 100 ms. If the switch is closed, reel in until it opens. Pay out slowly for at most `x_pre + margin` steps or until the switch closes. Reel in slowly to the switch edge; `x = 0`. Go to `x_pre`. Abort to Blackout if the load cell reads slack before the edge is found.
-
-**Pluck.** Requires quiet (`a < a_quiet`, otherwise RampDown first). Step from `x_pre` to `x_pre + A` at `v_pluck` and hold, where `A` is the amplitude from sACN channel 2 (a pluck is a one-way step of the same size as the drive would swing). For `T_record`: zero crossings of the sway signal → period → `f`; peak of each half cycle → log decrement → `Q = π/(2·δ_half)`. No buffer, no FFT; raw samples are in the telemetry for off-board analysis. Return to `x_pre` over several seconds. If at least `N_peaks_min` clean peaks: adopt `f_est`, `Q_est`, axis; persist. Pluck once per entry.
-
-**Run.** If `a < a_lock_min`, apply one step of `A` (as in Pluck) to get the structure moving. Then PLL + adaptation, drive at `A` from ch2 (held at `A_seed` until locked). If not locked after `T_capture`, go to Pluck and come back.
-
-**RampDown.** Driver on, PLL on, drive at 180° with `A_brake` until `a < a_quiet` or `T_ramp`; then whatever ch1 asks. Holding at `x_pre` while ch1 stays in the RampDown range.
-
-**Manual.** Entered from Blackout only: in any other mode, ch1 = Manual counts as Blackout, so the motor stops the usual way first. Entered whenever a live frame asks for it, after a lost universe, a stopped brain or a reboot as well: ch1 need not pass through Blackout first, so the shaft takes up the desk's speed again by itself. No homing; `x` counts from where Manual began and means nothing after it. Enable, 100 ms, then turn the shaft in ch3's direction at ch4's speed, ramping at `a_manual` to each new speed. A change of direction ramps to a stop and back up. Speed 0 holds the shaft, enabled. Leaving Manual ramps to a stop first, then releases into Blackout. Ch2 is ignored, as ch3 and ch4 are in every other mode.
+**Manual.** Turn the shaft in ch3's direction at ch4's speed, both followed live, through the ramp. Speed 0 holds the shaft, enabled. Ch2 is ignored.
 
 ## 5. Protections (all there are)
 
-- Soft limits `0 ≤ x ≤ x_max` in the velocity stage; a clamped move is logged. Not in Manual, where `x` has no home.
-- Load cell: `F < F_slack` or `F > F_max` → RampDown → Blackout.
-- ADXL345 stale > 100 ms → oscillator free-runs, PLL frozen; stale > 2 s → RampDown → Blackout.
 - sACN lost → Blackout, immediately.
-- Homing switch closing in Run or Pluck (lost steps, slipped wrap) → RampDown → Blackout.
-- ALM asserted → flag in telemetry, RampDown → Blackout (the driver has already freed the motor). Polarity by test; ignore the first second after enable.
+
+Nothing else acts: the firmware reports, the desk decides. ALM asserted (the driver has already freed the motor; polarity by test) and the load cell's tension are in the telemetry. Soft limits, a stale ADXL345 and the home switch come with Run.
 
 ## 6. sACN (in)
 
@@ -129,10 +131,10 @@ One universe (**DECISION:** number). 10–40 Hz, irregular; levels sampled per f
 
 | Ch | Function |
 |---|---|
-| 1 | Mode: 0–50 Blackout · 51–101 RampDown · 102–152 Run · 153–203 Pluck · 204–255 Manual |
-| 2 | Amplitude `A`: 0–255 → 0 … `A_max` steps. In Run the drive amplitude; in Pluck the size of the tug. |
-| 3 | Direction, in Manual only: 0–127 clockwise · 128–255 counter-clockwise, facing the shaft |
-| 4 | Speed, in Manual only: 0 stopped; 1–255 → slow … `v_max` |
+| 1 | Mode: 0–63 Blackout · 64–127 Hold · 128–191 Pluck · 192–255 Manual |
+| 2 | Amplitude `A`, in Pluck only, read at its start: 0–255 → 0 … `A_max` steps, the size of the tug |
+| 3 | Direction, in Manual, and in Pluck read at its start: 0–127 clockwise · 128–255 counter-clockwise, facing the shaft |
+| 4 | Speed, in Manual, and in Pluck read at its start: 0 stopped; 1–255 → slow … 12.5 kHz, the step generator's ceiling |
 
 `fixtures/wrist.qxf` is the source of these bands; this table is a rendering of it.
 
@@ -142,13 +144,23 @@ Always on, sent to each OSC recipient `clockwork.dot` names for Wrist, logged to
 
 Only loop variables and raw inputs are sent. Nothing is computed for telemetry: no Hz (`ω` is sent), no settle times (derive from transition timestamps in the database), no CPU estimate.
 
-The file holds only what the firmware sends so far: the mode, the alarm, the load cell, the tick interval, where Wrist sits on the universe and how fresh its frames are, and what it runs on. To come with the modes that use them, each value its own message: homed and locked; `osc/omega`, `osc/phase`, `pll/err`, `amp/a`, `drive/A`, `drive/phase_off`, `adapt/regime`, `motor/x`; the accelerometer's three axes and the sway, on each reading; the persisted tuning values `f_est`, `Q_est`, axis and `phase_off`, which are what the firmware has learned, and reading them is how the coded-in defaults get updated by hand; and the transitions, pluck results and protections as they happen.
+The file holds only what the firmware sends so far: the mode, the alarm, the load cell, the tick interval, where Wrist sits on the universe and how fresh its frames are, and what it runs on.
+
+**`/wrist/pluck`**, in the 10 Hz state bundle, says whether a pluck can be started, for a show to start one by:
+
+| value | when |
+|---|---|
+| `busy` | in Pluck, from its entry until the shaft is back at `x0` |
+| `can` | in Hold: Pluck in the next frame would tug |
+| `cannot` | at every other time: Blackout, Manual, and Pluck at Rest |
+
+To come with Run, each value its own message: homed and locked; `osc/omega`, `osc/phase`, `pll/err`, `amp/a`, `drive/A`, `drive/phase_off`, `adapt/regime`, `motor/x`; the accelerometer's three axes and the sway, on each reading; the persisted tuning values `f_est`, `Q_est`, axis and `phase_off`, which are what the firmware has learned, and reading them is how the coded-in defaults get updated by hand; and the transitions and ring-down results as they happen.
 
 Nothing comes in over OSC. Calibration constants are coded in (§10); the raw readings needed to derive them are in the telemetry. **Load-cell calibration** (once per rig, in Blackout): unhook the wire, average `load/raw` from the database → `tare`; hang a known mass `m`, average → `scale = m·g/(raw − tare)`, in N per count, so the force is `(raw − tare)·scale`; put both in the code and rebuild.
 
 ## 8. Persisted (LittleFS)
 
-`f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Written when a Pluck finishes; `φ_off` at most once a minute. Loaded at boot; the coded-in defaults are used only when nothing is persisted (first boot, or after a flash erase). Reported over OSC so the defaults can be updated by hand.
+With Run. `f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Written when a ring-down is measured; `φ_off` at most once a minute. Loaded at boot; the coded-in defaults are used only when nothing is persisted (first boot, or after a flash erase). Reported over OSC so the defaults can be updated by hand.
 
 ## 9. LED
 
@@ -159,20 +171,24 @@ Nothing comes in over OSC. Calibration constants are coded in (§10); the raw re
 | | Value | Note |
 |---|---|---|
 | `steps_per_rev` | 800 | DIP switches |
-| `v_max` | ≈ 150–200 mm/s for the 1 m model | hardware ceiling 390 mm/s (12.5 kHz); §3 |
-| `v_pluck` | ≈ 100 mm/s | reel-in direction; a step of `A_max` must stay shorter than a quarter period, so `A_max ≤ v_pluck·T/4` ≈ 8 mm at 3 Hz |
-| `x_pre`, `x_max`, `margin` | per band set, in steps | travel must stay inside the wrap |
-| `A_max`, `A_seed`, `A_brake` | steps | `A_max` set for the show (5–10 mm on the model); must stay ≤ `x_max − x_pre` |
-| `F_slack`, `F_max` | N | from band set |
+| `a_ramp` | steps/s² | the one ramp, every mode; sane but minimal: sharp enough for a tug, gentle enough for winding; first guess 100,000, by test; the bench ran 200,000 without an alarm, shaft free |
+| `A_max` | steps | the largest tug the band set takes, by test (5–10 mm on the model) |
+| Pluck's dwell, return | 0.5 s, 2.5 s | §4 |
+| sACN timeout | 2.5 s | E1.31 |
+| `dir_cw` | DIR level | the level that turns the shaft clockwise, facing it, with SW5 as set; by test |
 | `tare`, `scale` | raw counts, N/count | measured once per rig (§7) |
+
+With Run:
+
+| | Value | Note |
+|---|---|---|
+| `v_max` | ≈ 150–200 mm/s for the 1 m model | hardware ceiling 390 mm/s (12.5 kHz); §3 |
+| `x_pre`, `x_max`, `margin` | per band set, in steps | travel must stay inside the wrap |
+| `A_seed` | steps | must stay ≤ `x_max − x_pre`, as `A_max` must |
 | `f_est`, `Q_est`, axis, `φ_off` defaults | | starting points only; overridden by persisted values |
-| `a_quiet`, `a_lock_min`, `e_lock` | sensor units, 20° | tune on the model |
+| `a_lock_min`, `e_lock` | sensor units, 20° | tune on the model |
 | `K_p`, `K_i` | from `f/100` bandwidth | |
 | lock-in τ, dither, `K_adapt`, max step | 4 cycles, ±8° / 30 cycles, tune, 5° | |
-| `T_record`, `T_capture`, `T_ramp`, `N_peaks_min` | 30 s, 60 s, 30 s, 6 | |
-| sACN timeout | 2.5 s | E1.31 |
-| `a_manual` | steps/s² | Manual's ramp; the bench ran 200,000 without an alarm, shaft free |
-| `dir_cw` | DIR level | the level that turns the shaft clockwise, facing it, with SW5 as set; by test |
 
 ## 11. What to expect
 

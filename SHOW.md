@@ -40,7 +40,7 @@ down through a run of rubber bands to a motor beside the base, wrapped round the
 the motor on a load cell; the cabinet; a laptop on the access point showing the Grafana
 dashboard. On the cabinet door the left lamp says what the rig is doing, the two lamps together
 plot the drive and the sway while it runs, the two buttons drive the programme, the e-stop
-brakes the drive and lets it go limp.
+lets the drive go limp.
 
 ### 2.1 No calendar, no test mode
 
@@ -62,10 +62,10 @@ right│      │ done/abort    right│      │ done/abort
     Pluck ──┘                   Run ────┘
 ```
 
-- At boot the Director is in **armed Pluck**, Wrist in Blackout.
-- Armed, the brain sends Wrist's Mode as Blackout: Wrist's idle state, coils released. Ending
-  or aborting an experiment is that Blackout, which Wrist takes by braking the sway to quiet
-  first. Blackout is a Mode only: Amplitude is a size, and 0 means no size, not Blackout.
+- At boot the Director is in **armed Pluck**, Wrist in Blackout until the first frame.
+- Armed, the brain sends Wrist's Mode as Hold: coils enabled, the shaft locked where it is.
+  Ending or aborting an experiment is that Hold. Blackout is a Mode only: Amplitude is a size,
+  and 0 means no size, not Blackout.
 - The Director has no blackout state of its own. Wrist is otherwise in Blackout only when the
   e-stop's mask or a lost universe puts it there (§2.4).
 - **Running** an experiment returns to the same experiment armed when it finishes or is
@@ -80,18 +80,18 @@ in `brain/src/show.rs`, with units.
 
 | experiment | what the rig does | what it answers |
 |---|---|---|
-| **Pluck** | The brain sends Pluck at the pluck amplitude. Wrist homes, brakes the model to quiet if it is not, tugs once, records the ring-down for 30 s, adopts f and Q if the peaks are clean, persists them and returns to rest. The brain holds Pluck long enough for all of that, then finishes. | 3: resonance by free decay, no hands |
+| **Pluck** | Started by the right button only while Wrist's `/wrist/pluck` says `can`. The brain sends Pluck at the pluck amplitude, direction and speed, until `/wrist/pluck` leaves `can`, and on while it is `busy`: Wrist tugs once, dwells 0.5 s and returns to where it began over 2.5 s. When it says `cannot`, the brain sends Hold and the Pluck has finished; the ring-down is in the accelerometer's trace. It cannot be aborted: the right button is dark while it runs. | 3: resonance by free decay, no hands |
 | **Run** | The brain sends Run at the run amplitude for a few minutes, then finishes. Wrist homes, starts the model swinging if it is still, locks to the sway and drives in phase with its velocity, learning the drive's phase as it goes. | 2 and 3: the structure swings controllably at resonance, found and held by Wrist |
 
 Artist sessions and commissioning use QLC+'s takeover from any state, as on every show; the
-Director does not know and does not need a state for it. Mode and Amplitude on faders are how
-Wrist is driven at any amplitude, and in RampDown, which the programme never sends.
+Director does not know and does not need a state for it. Wrist's channels on faders are how
+it is driven at any amplitude, and in Manual, which the programme never sends.
 
 ### 2.3 The lamps
 
 | situation | left lamp | right lamp |
 |---|---|---|
-| armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | off |
+| armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | armed Pluck: green while `/wrist/pluck` is `can`, dark while it is `busy` or `cannot` or stale; armed Run: off |
 | Pluck | steady 100% | off |
 | Run | the driven sine | the measured sine |
 | finished | two 1 s fades up and down, then the armed pattern | off |
@@ -113,15 +113,14 @@ What is specific to this show is what Wrist does — set by this show's `.qxf` a
 firmware, in `CONTROL_LOOP.md`, used here:
 
 - **Pressed:** the mask puts Wrist's Mode in its no-function band, **Blackout**. Wrist cannot
-  tell that from a Blackout the show asks for: if it was driving, it brakes the sway under
-  power, for at most 30 s, then releases its coils, as if the motor's power had been removed.
-- **Released:** the live frame returns. Position was lost while the coils were released, so
-  Wrist homes, then takes up whatever the frame asks, a Run included. Nothing in the fixture
+  tell that from a Blackout the show asks for: it releases its coils at once, as if the
+  motor's power had been removed.
+- **Released:** the live frame returns, and Wrist takes up whatever it asks. Nothing in the fixture
   stops motion resuming on its own. The show runs on under the stop and reads the buttons, so
   an experiment aborted with the right button while the stop is pressed makes the release a
   Blackout, and nothing moves.
 - **Universe lost:** no frame for 2.5 s, or the brain ending its stream as it stops, and Wrist
-  releases its coils at once, with no brake.
+  releases its coils at once, as for a Blackout in the frame.
 - **Boot with the stop pressed:** nothing goes out, Wrist stays in Blackout, as every fixture
   does.
 
@@ -140,10 +139,10 @@ named `Wrist`. Its address on the access point is in `clockwork.dot`, the rig's 
 
 | ch | name | group | this show's use |
 |---|---|---|---|
-| 1 | Mode | Maintenance; no-function band **Blackout** (0–50) | Blackout 0–50 · RampDown 51–101 · Run 102–152 · Pluck 153–203 · Manual 204–255 |
-| 2 | Amplitude | Nothing | 0–255 → 0 … `A_max` steps: in Run the drive's amplitude, in Pluck the size of the tug |
-| 3 | Direction | Nothing | in Manual only: 0–127 clockwise, 128–255 counter-clockwise |
-| 4 | Speed | Speed; stop band **Stopped** (0) | in Manual only: 0 stopped, 1–255 slow … `v_max` |
+| 1 | Mode | Maintenance; no-function band **Blackout** (0–63) | Blackout 0–63 · Hold 64–127 · Pluck 128–191 · Manual 192–255; Run gets a band when it is built |
+| 2 | Amplitude | Nothing | in Pluck, read at its start: 0–255 → 0 … `A_max` steps, the size of the tug |
+| 3 | Direction | Nothing | in Manual, and in Pluck read at its start: 0–127 clockwise, 128–255 counter-clockwise |
+| 4 | Speed | Speed; stop band **Stopped** (0) | in Manual, and in Pluck read at its start: 0 stopped, 1–255 slow … the step generator's ceiling |
 
 **Motor.** The closed-loop stepper, set and supplied as `OWNED-DEVICES.md` has it. It runs at
 800 pulses per revolution: the model's fastest motion, about 8 rev/s, is 6.4 kHz of pulses,
@@ -151,7 +150,7 @@ inside the 12.5 kHz the firmware can make; 1600 would not be.
 
 **Supply.** If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
-hardware fact as well as a DMX one, at the cost of the brake; without one, Blackout over DMX is what the PoC has, and the full-scale rig
+hardware fact as well as a DMX one; without one, Blackout over DMX is what the PoC has, and the full-scale rig
 gets the relay regardless.
 
 **Board.** Wrist's board, as `OWNED-DEVICES.md` has it, wired as `CONTROL_LOOP.md` §2 has it.
@@ -194,11 +193,11 @@ top, grams per millimetre of deflection. *Decides:* whether the model has a usab
 reference numbers for everything after.
 
 **E1 — Wrist from a fader.** *Needs:* Wrist's motor side, the load cell calibrated, QLC+ on
-the access point. *Do:* under takeover, Mode to Pluck at a small Amplitude and watch it home
-and tug; Run, Amplitude up and down; RampDown, then Blackout; Run again and stop the brain,
+the access point. *Do:* under takeover, Hold, then Pluck at a small Amplitude and watch it
+tug and return; Run, Amplitude up and down, then Blackout; Run again and stop the brain,
 whose stream ends, and watch the coils release at once (stopping QLC+ only hands the universe
-back to the brain); e-stop while running and watch it brake, then release; release the stop
-and watch it home and resume. *Read:* the motor's position against the wire, the load cell against
+back to the brain); e-stop while running and watch it release at once; release the stop
+and watch it resume. *Read:* the motor's position against the wire, the load cell against
 the bands, the transitions; the accelerometer's trace clean while the motor runs. *Decides:*
 Wrist is a fixture.
 

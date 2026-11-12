@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: soldering first, then clean up,
+it: Wrist's pluck first, then Monday's test, then the brain's pluck, then soldering, then clean up,
 then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -11,13 +11,66 @@ steps here.
 
 ---
 
+## Wrist's pluck, from QLC+
+
+The target: the model plucked from QLC+ faders under takeover, by hand, without measuring it:
+there is no accelerometer yet. Blackout, Hold, Pluck and Manual as `CONTROL_LOOP.md` §4 has
+them; no Run. The firmware follows the desk and decides nothing but Blackout on a lost
+universe. The physical build waits for the model, in the next section.
+
+- `wrist/` firmware:
+  - the modes Blackout, Hold, Pluck and Manual, each entered from any mode on the next tick;
+    leaving Manual no longer ramps to a stop and releases;
+  - one ramp, `a_ramp`, for every controlled change of speed, so no mode has motion code of
+    its own; Blackout releases at once;
+  - a signed step count in the step generator, and a target the NMI stops itself on;
+  - Pluck: Amplitude, Direction and Speed read once at its start; out by `A` at Speed,
+    0.5 s dwell, back to the start in 2.5 s, held there until Mode leaves Pluck;
+  - `/wrist/pluck` in the state bundle: `busy`, `can` or `cannot`.
+- `fixtures/wrist.qxf`: Mode as Blackout 0–63 · Hold 64–127 · Pluck 128–191 · Manual 192–255,
+  RampDown and Run gone; Amplitude Pluck's, Direction and Speed Manual's and Pluck's.
+  `wrist.oscquery.json`: `/wrist/mode` as `blackout`, `hold`, `pluck`, `manual`, and
+  `/wrist/pluck`. The definition reinstalled in QLC+.
+
+## Test and dinner on Monday
+
+With the test sculpture, Monday 2026-11-16. Everything bought before then.
+
+- Buy: rubber bands, two hooks, a short cable and the guy wire; a plank and two G-clamps; for
+  the motor, four M4 bolts as long as the flange, what it bolts to, a washer and a nut, with
+  washers and nylon-insert locknuts.
+- The 4700 µF / 50 V at the motor, once it arrives.
+- Decide: a backup guy, or the bands' preload below the detent hold; into `SHOW.md` §3.1.
+- Build the bridge: plank across the model's base, clamped to the table; the motor bolted on
+  the load cell, the wire leaving the shaft along the cell's axis; the wire wrapped a few
+  turns round the bare shaft, tail tied off, then cable, hook, bands, hook and wire to the
+  node. Nothing fixed to the sculpture but the wire.
+- By test, into the firmware's constants: `A_max`, the largest tug the band set takes, and
+  `a_ramp`, sharp enough for a tug without an alarm. Which Direction reels in, noted for the
+  desk.
+- Pluck under takeover from QLC+: Hold, then Pluck; Amplitude small first, then up, watching
+  the model.
+
+## The brain plucks
+
+The target: the model plucked from the cabinet door's right button, through the brain's
+universe.
+
+- Brain: an OSC receiver for Wrist's state bundle, binding where `clockwork.dot` has its `osc`
+  port, read by `cortex-build` as the sACN receiver's is, decoded from
+  `wrist.oscquery.json`, feeding a seam; stale when no bundle has come for a set time.
+- Brain: Wrist's Mode is Pluck from a press of the right button while it is green until
+  `/wrist/pluck` leaves `can`, and while `/wrist/pluck` is `busy`; Hold otherwise. The right
+  button lit green while `/wrist/pluck` is `can`, dark while it is `busy` or `cannot`, or
+  stale. A press while it is dark does nothing. So: Hold → green → pressed → dark → Pluck →
+  `busy` … `cannot` → Hold → `can` → green.
+
 ## Soldering
 
 - Find a plank to mount Wrist's board and its wiring on, instead of a housing.
 - Mount the motor supply on the DIN rail from the cabinet's mains inlet and fusing (add the
   inlet and fusing to `OWNED-DEVICES.md` if they are not there); its output through the 5 A
   fuse to a terminal block, which feeds the motor; label it 38 V.
-- The 4700 µF / 50 V at the motor, once it arrives.
 - With everything mounted on the plank, into `OWNED-DEVICES.md` and the firmware's constants:
   the status LED, and the alarm's polarity on a forced stall, holding the shaft while the
   motor runs; once the wire is on, the tension the unpowered shaft holds by its detent.
@@ -43,9 +96,7 @@ steps here.
 The target: E0, the accelerometer's trace on the dashboard from Wrist's board, the motor in
 Blackout. The dashboard comes first because it is how everything after it is read.
 
-- Buy: a microswitch for home; rubber bands, two hooks, a short cable and the guy wire; a
-  plank, two G-clamps; for the motor, four M4 bolts as long as the flange, what it bolts to, a
-  washer and a nut, with washers and nylon-insert locknuts; for the load cell, four bolts in
+- Buy: a microswitch for home; for the load cell, four bolts in
   its threads (M4 or M5, try them), shorter than the threads are deep, and spacers so only the
   bar's ends are clamped; Velcro dots; a luggage scale and string; a known mass for the load cell.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
@@ -74,18 +125,13 @@ Blackout. The dashboard comes first because it is how everything after it is rea
 
 ## Wrist's motor, driven from QLC+
 
-The target: E1, Wrist homing, plucking, running and braking from QLC+ faders under takeover,
+The target: E1, Wrist homing, plucking and running from QLC+ faders under takeover,
 through the brain's universe, with the e-stop and signal loss leaving it limp.
 
-- Decide: a backup guy, or the bands' preload below the detent hold; into `SHOW.md` §3.1.
-- Build the bridge: plank across the model's base, clamped to the table; the motor bolted on
-  the load cell, the wire leaving the shaft along the cell's axis; the home switch at the
-  wire's pay-out end; the wire wrapped a few turns round the bare shaft, tail tied off, then
-  cable, hook, bands, hook and wire to the node. Nothing fixed to the sculpture but the wire
-  and the accelerometer.
-- `wrist/` firmware, motor half, per `CONTROL_LOOP.md`: the velocity clamp and soft limits;
-  Homing, Pluck, Run with the PLL and the drive phase's adaptation, RampDown; every
-  protection in its §5.
+- The home switch on the bridge, at the wire's pay-out end.
+- `wrist/` firmware, Run, designed first: its band in Mode, homing, the ring-down that
+  measures f and Q, the PLL and the drive phase's adaptation, the velocity clamp and soft
+  limits; then built per `CONTROL_LOOP.md`.
 - Calibrate the load cell per `CONTROL_LOOP.md` §7; measure the rest position, the travel and
   the tension limits for the band set; all into the firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
@@ -93,9 +139,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: the calendar and test mode disabled, left in the code; the show always runs.
-- Brain: an OSC receiver for Wrist's bundles, binding where `clockwork.dot` has its `osc`
-  port, read by `cortex-build` as the sACN receiver's is, decoded from
-  `wrist.oscquery.json`, feeding a seam; stale when no bundle has come for a set time.
+- Brain: the OSC receiver takes Wrist's waveform bundle as well.
 - The Director's states — `armed-pluck`, `pluck`, `armed-run`, `run` — with the button rules
   of `SHOW.md` §2.2, `brain/run`, and the lamp patterns of §2.3, Run's two sines included;
   the experiments' amplitudes and durations as constants in `brain/src/show.rs`, named, with
@@ -119,8 +163,8 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 - Power the cabinet up cold with nobody touching anything: both Pis, broker, OSC bridge,
   brain, Wrist on the AP in Blackout, dashboard live.
-- Press the e-stop in every state: Wrist brakes the sway, then releases within 30 s; release:
-  Wrist homes and takes up whatever the frame asks.
+- Press the e-stop in every state: Wrist releases at once; release: Wrist takes up whatever
+  the frame asks.
 - Power Wrist's board down and up mid-Run: the lamps go to steady 100% while its OSC is
   stale; it rejoins, homes and resumes the Run; the gap shows on the dashboard.
 - Stop the brain mid-Run: Wrist releases at once.
