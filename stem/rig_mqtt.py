@@ -166,7 +166,11 @@ class Telemetry:
             return
         print(f"{self.service}: connected", file=sys.stderr, flush=True)
         client.publish(health_topic(self.service), CONNECTED, retain=True)
-        for topic, payload in self.retained.items():
+        # A copy, because this runs on paho's network thread while the daemon's own thread can
+        # add a retained topic at any moment: iterating the live dict then dies with "dictionary
+        # changed size", and the exception ends paho's loop and every reconnect after it. A
+        # topic added after the copy is published by the thread that added it.
+        for topic, payload in list(self.retained.items()):
             client.publish(topic, payload, retain=True)
         for topic in self.subscriptions:
             client.subscribe(topic)

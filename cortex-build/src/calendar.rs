@@ -74,7 +74,7 @@ pub fn calendar(city: &str, shows: &[(&str, &str)]) {
                  are listed in order and must not overlap"
             );
         }
-        let dark = dark_stretches(&tz, coordinates, start, stop);
+        let dark = dark_stretches(coordinates, start, stop);
         resolved.push(Show { start, stop, dark });
     }
 
@@ -132,16 +132,20 @@ fn resolve(tz: &TimeZone, text: &str) -> Timestamp {
 
 /// Every stretch between civil dusk and the next civil dawn that falls inside the show.
 ///
-/// Starts from the evening before the show's first local date, because a show that opens
+/// Starts from the evening before the show's first solar date, because a show that opens
 /// after midnight opens inside the previous evening's dark.
+///
+/// The dates are the sun's, not the zone's: `SolarDay` takes its date as the day around mean
+/// solar noon at the site's longitude. A zone can run most of a day away from that, as Samoa's
+/// UTC+13 does at 172° west, and walking the zone's dates there skips the evening a show in
+/// the small hours opens in.
 fn dark_stretches(
-    tz: &TimeZone,
     coordinates: Coordinates,
     start: Timestamp,
     stop: Timestamp,
 ) -> Vec<(Timestamp, Timestamp)> {
-    let last = stop.to_zoned(tz.clone()).date();
-    let mut evening = start.to_zoned(tz.clone()).date().yesterday().unwrap();
+    let last = solar_date(coordinates, stop);
+    let mut evening = solar_date(coordinates, start).yesterday().unwrap();
     let mut stretches = Vec::new();
     while evening <= last {
         let morning = evening.tomorrow().unwrap();
@@ -154,6 +158,16 @@ fn dark_stretches(
         evening = morning;
     }
     stretches
+}
+
+/// The date an instant falls on in local mean solar time at the site: UTC shifted by four
+/// minutes per degree of longitude, east ahead.
+fn solar_date(coordinates: Coordinates, at: Timestamp) -> Date {
+    let offset = (coordinates.lon() * 240.0).round() as i64;
+    Timestamp::from_second(at.as_second() + offset)
+        .unwrap()
+        .to_zoned(TimeZone::UTC)
+        .date()
 }
 
 fn solar_event(coordinates: Coordinates, date: Date, event: SolarEvent) -> Timestamp {

@@ -66,6 +66,9 @@ const PUBLISH_RETAIN: u8 = 0x01;
 /// so its two flag bits are left clear.
 const CONNECT_FLAGS: u8 = 0x02 | 0x04 | 0x20;
 
+/// The largest remaining length four bytes of MQTT's variable-length integer can say.
+const MAX_REMAINING: usize = 268_435_455;
+
 const PROTOCOL_NAME: &str = "MQTT";
 const PROTOCOL_LEVEL: u8 = 0x04;
 
@@ -186,7 +189,12 @@ impl<'a> Writer<'a> {
 
     /// The fixed header: the packet type, then the remaining length as the variable-length
     /// integer MQTT uses, seven bits per byte with the top bit marking that another follows.
+    /// It has at most four bytes, so a packet longer than that can carry is too long whatever
+    /// the buffer.
     fn header(&mut self, kind: u8, mut remaining: usize) -> Result<(), TooLong> {
+        if remaining > MAX_REMAINING {
+            return Err(TooLong);
+        }
         self.byte(kind)?;
         loop {
             let mut byte = (remaining % 128) as u8;

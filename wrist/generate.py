@@ -16,7 +16,6 @@ Fails, naming the file and what is wrong, rather than writing a header from a gu
 is git-ignored: it is rebuilt from these files on every build, so it is never edited by hand.
 """
 
-import ipaddress
 import pathlib
 import re
 import sys
@@ -26,7 +25,7 @@ import xml.etree.ElementTree as ET
 # shared with cortex-build. Put on the path by hand: run with -I, Python adds no directory of
 # its own.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "clockwork"))
-from dot import Dot, addresses, fail, listener, networks  # noqa: E402
+from dot import Dot, addresses, fail, listener, networks, parse_address  # noqa: E402
 import oscquery  # noqa: E402
 
 DEVICE = "wrist"
@@ -71,7 +70,7 @@ def read_dot(path):
         "psk": net["psk"],
         "channel": int(net["channel"]),
         "address": address,
-        "gateway": ipaddress.IPv4Address(net["gateway"]),
+        "gateway": parse_address(dot, net["gateway"], f"the {network} network's gateway"),
         "netmask": net["cidr"].netmask,
         "sacn_port": sacn_port,
         "recipients": recipients,
@@ -126,7 +125,10 @@ def ident(text):
     words = re.findall(r"[a-z0-9]+", text.split(",")[0].lower())
     if not words or words[0][0].isdigit():
         fail(f"{text!r} cannot name a C++ constant")
-    return "_".join(words)
+    name = "_".join(words)
+    if name in KEYWORDS:
+        fail(f"{text!r} would be {name!r}, a C++ keyword, which cannot name a constant")
+    return name
 
 
 def read_definition(path, patch):
@@ -166,7 +168,19 @@ def read_definition(path, patch):
 # ── wrist.oscquery.json ──────────────────────────────────────────────────────────────────────
 
 TYPES = {"i": "int32_t", "f": "float", "s": "const char *", "T": "bool", "F": "bool"}
-KEYWORDS = {"default", "delete", "new", "class", "int", "float", "bool", "char", "true", "false", "return"}
+# C++17's keywords and alternative tokens, which can name neither a constant nor an enumerator.
+KEYWORDS = {
+    "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break",
+    "case", "catch", "char", "char16_t", "char32_t", "class", "compl", "const", "const_cast",
+    "constexpr", "continue", "decltype", "default", "delete", "do", "double", "dynamic_cast",
+    "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto",
+    "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq",
+    "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register",
+    "reinterpret_cast", "return", "short", "signed", "sizeof", "static", "static_assert",
+    "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try",
+    "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile",
+    "wchar_t", "while", "xor", "xor_eq",
+}
 
 
 def camel(name):

@@ -27,7 +27,7 @@
   <!-- Below 64 the fixture takes its colour from the Red/Green/Blue channels. Above it,
        the built-in programs take over the emitters and the RGB channels stop having any
        effect — Speed then sets the program rate. -->
-  <Capability Min="0" Max="63">RGB control via the Red, Green and Blue channels</Capability>
+  <Capability Min="0" Max="63" Preset="NoFunction">RGB control via the Red, Green and Blue channels</Capability>
   <Capability Min="64" Max="127" Preset="GoboMacro" Res1="Others/rainbow.png">7 colour fade (rate on Speed)</Capability>
   <Capability Min="128" Max="191" Preset="GoboMacro" Res1="Others/rainbow.png">7 colour change (rate on Speed)</Capability>
   <Capability Min="192" Max="255" Preset="GoboMacro" Res1="Others/rainbow.png">3 colour change (rate on Speed)</Capability>

@@ -525,8 +525,23 @@ fn parse_sacn(engine: roxmltree::Node, workspace: &Path) -> Sacn {
                 workspace.display()
             )
         });
-    let parameters = child(universe, "Output")
-        .filter(|output| output.attribute("Plugin") == Some(SACN_PLUGIN))
+    // QLC+ patches a universe to several outputs, each its own `<Output>`, in any order: the
+    // E1.31 one is found among them, not assumed first. Two would be two sets of parameters,
+    // and which the rig is on is not a guess the build makes.
+    let mut sacn_outputs = universe.children().filter(|node| {
+        node.is_element()
+            && node.tag_name().name() == "Output"
+            && node.attribute("Plugin") == Some(SACN_PLUGIN)
+    });
+    let sacn_output = sacn_outputs.next();
+    if sacn_outputs.next().is_some() {
+        panic!(
+            "the first universe of {} has more than one {SACN_PLUGIN} output, and the universe \
+             number and the port come from that output. Keep one in QLC+'s Inputs/Outputs tab.",
+            workspace.display()
+        );
+    }
+    let parameters = sacn_output
         .and_then(|output| child(output, "PluginParameters"))
         .unwrap_or_else(|| {
             panic!(
@@ -1047,7 +1062,7 @@ fn assign_type_names(patch: &mut BTreeMap<u32, Patched>) {
         .map(|(model, _)| (*model).to_string())
         .collect();
 
-    let mut named: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut named: BTreeMap<String, (String, String, String)> = BTreeMap::new();
     for fixture in patch.values_mut() {
         let mut type_name = type_name_of(&fixture.model);
         if ambiguous.contains(&fixture.model) {
@@ -1061,14 +1076,19 @@ fn assign_type_names(patch: &mut BTreeMap<u32, Patched>) {
             );
         }
 
-        // Two different models can still collide once punctuation is stripped. Catch it here
-        // rather than emit a file that fails to compile for a reason nobody can read.
-        let shape = (fixture.model.clone(), fixture.mode.clone());
+        // Two different models can still collide once punctuation is stripped, and so can two
+        // manufacturers' models of one name. Catch it here rather than emit a file that fails
+        // to compile for a reason nobody can read.
+        let shape = (
+            fixture.manufacturer.clone(),
+            fixture.model.clone(),
+            fixture.mode.clone(),
+        );
         match named.get(&type_name) {
             Some(other) if *other != shape => panic!(
-                "{} {:?} and {} {:?} both map to the Rust type `{type_name}`. \
+                "{} {} {:?} and {} {} {:?} both map to the Rust type `{type_name}`. \
                  Rename one model in its .qxf.",
-                other.0, other.1, fixture.model, fixture.mode,
+                other.0, other.1, other.2, fixture.manufacturer, fixture.model, fixture.mode,
             ),
             _ => {
                 named.insert(type_name.clone(), shape);
@@ -1333,11 +1353,14 @@ fn parse_patch(engine: roxmltree::Node) -> BTreeMap<u32, Patched> {
                  QLC+'s Fixture Manager."
             );
         }
-        if address + channels > UNIVERSE_SLOTS {
+        // In 64 bits, so a hand-edited address near u32::MAX is past the end rather than an
+        // overflow, which would panic without saying why in a debug build and wrap past this
+        // check in a release one.
+        let end = u64::from(address) + u64::from(channels);
+        if end > u64::from(UNIVERSE_SLOTS) {
             panic!(
-                "fixture {id} {name:?} spans wire slots {}..{}, past the end of the universe",
-                address + 1,
-                address + channels
+                "fixture {id} {name:?} spans wire slots {}..{end}, past the end of the universe",
+                u64::from(address) + 1,
             );
         }
         let ident = ident_of(&name);

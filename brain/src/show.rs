@@ -12,8 +12,9 @@
 //! Wrist is plucked from the right button, whatever the state: Wrist is sent Hold, and the
 //! right lamp is lit while Wrist says a pluck can start. A press while it is lit sends Pluck
 //! until Wrist no longer says it can, and Pluck goes on being sent while Wrist says the pluck
-//! is busy; then Hold again. A press while the lamp is dark does nothing. The firmware decides
-//! nothing: the brain holds Pluck exactly as long as the pluck runs.
+//! is busy; then Hold again. A press while the lamp is dark does nothing, and a press Wrist
+//! still says it can after a second of is let go of: the Pluck never reached it. The firmware
+//! decides nothing: the brain holds Pluck exactly as long as the pluck runs.
 //!
 //! The show state is the brain's own: `brain/show` and `brain/testmode`, retained, published
 //! on every change, and logged with what caused it.
@@ -34,6 +35,12 @@ const PULSE_SECS: f64 = 4.0;
 const TEST_MODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// How long what Wrist says is believed: ten of its state bundles.
 const WRIST_STALE_AFTER: Duration = Duration::from_secs(1);
+/// How many frames a press waits for Wrist to leave `can`: as long as what Wrist says is
+/// believed. Wrist leaves `can` on the first Pluck frame it reads and says so in its next state
+/// bundle, a tenth of a second later. Still saying it after this, it has not been sent the
+/// press's Pluck — a desk holding the universe, frames lost on the way — and a press that waited
+/// on would pluck whenever a frame next got through, unattended.
+const PLUCK_PRESS_FRAMES: u32 = (WRIST_STALE_AFTER.as_millis() as u64 * FRAME_RATE_HZ / 1000) as u32;
 /// Pluck's tug: a quarter of Wrist's largest, until the band set has been tried at more; as
 /// sharp as Wrist's ramp makes it; clockwise, facing the shaft, which reels the wire in, by
 /// test.
@@ -71,8 +78,9 @@ pub struct Show {
     frames: u32,
     /// The face's right-button count as last read; the face counts from zero, and so does this.
     seen_right_presses: u32,
-    /// A press of the lit right button, held until Wrist no longer says a pluck can start.
-    pluck_pressed: bool,
+    /// A press of the lit right button, held until Wrist no longer says a pluck can start, or
+    /// for `PLUCK_PRESS_FRAMES` if it goes on saying so: the frames it has been held.
+    pluck_pressed: Option<u32>,
     /// Whether Wrist was sent Pluck in the last frame, so a change can be logged.
     plucking: bool,
 }
@@ -92,7 +100,7 @@ impl Show {
             state,
             frames: 0,
             seen_right_presses: 0,
-            pluck_pressed: false,
+            pluck_pressed: None,
             plucking: false,
         }
     }
@@ -139,18 +147,26 @@ impl Show {
         self.seen_right_presses = face.right_presses;
 
         let can = wrist == Some(Pluck::Can);
-        if pressed && can {
-            self.pluck_pressed = true;
+        let mut expired = false;
+        if let Some(held) = &mut self.pluck_pressed {
+            *held += 1;
+            expired = *held > PLUCK_PRESS_FRAMES;
+        }
+        if pressed && can && self.pluck_pressed.is_none() {
+            self.pluck_pressed = Some(0);
         }
         // Until Wrist has seen the Pluck frame it goes on saying it can; after, the pluck is
-        // Wrist's to say.
-        if !can {
-            self.pluck_pressed = false;
+        // Wrist's to say. One that never sees it is let go of.
+        if !can || expired {
+            self.pluck_pressed = None;
         }
-        let pluck = self.pluck_pressed || wrist == Some(Pluck::Busy);
+        let pressing = self.pluck_pressed.is_some();
+        let pluck = pressing || wrist == Some(Pluck::Busy);
         if pluck != self.plucking {
-            let why = if self.pluck_pressed {
+            let why = if pressing {
                 "right button"
+            } else if expired {
+                "Wrist never saw the press"
             } else if pluck {
                 "Wrist busy"
             } else {
@@ -159,7 +175,7 @@ impl Show {
             eprintln!("show: Wrist {} — {why}", if pluck { "Pluck" } else { "Hold" });
             self.plucking = pluck;
         }
-        (pluck, can && !self.pluck_pressed)
+        (pluck, can && !pressing)
     }
 
     /// The state this frame moves to, if it moves, and why.

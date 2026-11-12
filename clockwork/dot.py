@@ -78,6 +78,10 @@ class Dot:
         self.take("id")
         self.expect("{")
         self.statements(None)
+        # A stray `}` part-way through closes the graph early, and without this everything
+        # after it would be silently dropped.
+        if self.at < len(self.toks):
+            fail(f"{self.path}: {self.toks[self.at][1]!r} after the graph's closing brace")
 
     def peek(self, offset=0):
         i = self.at + offset
@@ -183,6 +187,23 @@ class Dot:
         return self.nodes[name][0]
 
 
+def parse_address(dot, text, what):
+    """`text` as an IPv4 address, or a failure naming the file and `what` it was to be."""
+    try:
+        return ipaddress.IPv4Address(text)
+    except ValueError:
+        fail(f"{dot.path}: {what} {text!r} is not an IPv4 address")
+
+
+def parse_network(dot, text, what):
+    """`text` as an IPv4 network with no host bits set, or a failure naming the file and `what`
+    it was to be."""
+    try:
+        return ipaddress.IPv4Network(text)
+    except ValueError as e:
+        fail(f"{dot.path}: {what} {text!r} is not an IPv4 network: {e}")
+
+
 def networks(dot):
     """Every network by name: its CIDR, its DHCP range as a (first, last) pair, and the other
     attributes after it as text."""
@@ -193,7 +214,7 @@ def networks(dot):
             fail(f"{dot.path}: the network {field!r} has no CIDR, nor `dhcp`")
         net = {"name": words[0]}
         if words[1] != "dhcp":
-            net["cidr"] = ipaddress.IPv4Network(words[1])
+            net["cidr"] = parse_network(dot, words[1], f"the {net['name']} network's CIDR")
         rest = words[2:]
         while rest:
             key = rest.pop(0)
@@ -204,7 +225,7 @@ def networks(dot):
             ends = re.split(r"[–-]", net["dhcp"])
             if len(ends) != 2 or "cidr" not in net:
                 fail(f"{dot.path}: the {net['name']} network's DHCP range {net['dhcp']!r} is not `first–last` in a CIDR")
-            first, last = (ipaddress.IPv4Address(e) for e in ends)
+            first, last = (parse_address(dot, e, f"the {net['name']} network's DHCP range end") for e in ends)
             if first not in net["cidr"] or last not in net["cidr"] or first > last:
                 fail(f"{dot.path}: the {net['name']} network's DHCP range {net['dhcp']!r} is not inside {net['cidr']}")
             net["dhcp"] = (first, last)
@@ -277,7 +298,7 @@ def addresses(dot, device, nets):
                 fail(f"{dot.path}: {device}'s {interface} is a lease, and names no network")
             found[interface] = (None, rest[0])
             continue
-        address = ipaddress.IPv4Address(address)
+        address = parse_address(dot, address, f"{device}'s {interface} address")
         if rest:
             network = rest[0]
         else:

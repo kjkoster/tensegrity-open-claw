@@ -80,7 +80,7 @@ in `brain/src/show.rs`, with units.
 
 | experiment | what the rig does | what it answers |
 |---|---|---|
-| **Pluck** | Started by the right button only while Wrist's `/wrist/pluck` says `can`. The brain sends Pluck at the pluck amplitude, direction and speed, until `/wrist/pluck` leaves `can`, and on while it is `busy`: Wrist tugs once, dwells 0.5 s and returns to where it began over 2.5 s. When it says `cannot`, the brain sends Hold and the Pluck has finished; the ring-down is in the accelerometer's trace. It cannot be aborted: the right button is dark while it runs. | 3: resonance by free decay, no hands |
+| **Pluck** | Started by the right button only while Wrist's `/wrist/pluck` says `can`. The brain sends Pluck at the pluck amplitude, direction and speed, until `/wrist/pluck` leaves `can`, and on while it is `busy`; a press `/wrist/pluck` still answers `can` to after a second is dropped, because its Pluck never reached Wrist (a desk holding the universe), and the right button lights again: Wrist tugs once, dwells 0.5 s and returns to where it began over 2.5 s. When it says `cannot`, the brain sends Hold and the Pluck has finished; the ring-down is in the accelerometer's trace. It cannot be aborted: the right button is dark while it runs. | 3: resonance by free decay, no hands |
 | **Run** | The brain sends Run at the run amplitude for a few minutes, then finishes. Wrist homes, starts the model swinging if it is still, locks to the sway and drives in phase with its velocity, learning the drive's phase as it goes. | 2 and 3: the structure swings controllably at resonance, found and held by Wrist |
 
 Artist sessions and commissioning use QLC+'s takeover from any state, as on every show; the
