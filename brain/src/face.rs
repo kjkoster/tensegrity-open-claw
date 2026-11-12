@@ -6,11 +6,12 @@
 //! from the frame that actually goes out. So a console that takes the rig over drives them,
 //! and the e-stop darkens them with everything else.
 //!
-//! Holding both buttons for two seconds is a chord. A press is counted the moment its button
-//! goes down, so it acts at once; the price is that a chord counts a press of the button it was
-//! begun with too. Presses and chords are counters rather than flags, so a show that reads the
-//! state once per frame cannot miss one that came and went between two frames. What a press
-//! means is the show's to say.
+//! Holding both buttons for two seconds is a chord. A press is counted when its button comes
+//! back up, and only if the other button was not down at any moment of it, so a chord, or a
+//! chord begun and abandoned, never counts as a press; the price is that a press acts on
+//! release. Presses and chords are counters rather than flags, so a show that reads the state
+//! once per frame cannot miss one that came and went between two frames. What a press means is
+//! the show's to say.
 //!
 //! Inputs are polled rather than interrupt-driven, because there are no capacitors on the
 //! lines: a contact bounces, and a level is only believed once it has held for a few
@@ -63,7 +64,8 @@ pub struct FaceState {
     /// Chords so far. Like the presses below, a count whose differences are what mean
     /// anything.
     pub chords: u32,
-    /// Presses of each button so far, each counted as the button settles down.
+    /// Presses of each button so far, each counted as the button settles back up, unless the
+    /// other button was down during it.
     pub left_presses: u32,
     pub right_presses: u32,
 }
@@ -203,6 +205,9 @@ async fn input_task(mut face: Face) -> ! {
     // sample that completes the period. It starts out decided, by the read in `claim`.
     let mut estop_quiet = SETTLE_SAMPLES;
     let mut chord = Chord::default();
+    // Whether each button, left and right, has been down at the same moment as the other since
+    // it last went down: such a press is part of a chord, not a press.
+    let mut together = (false, false);
     loop {
         ticker.next().await;
         let contacts = &mut face.contacts;
@@ -226,17 +231,29 @@ async fn input_task(mut face: Face) -> ! {
             estop_quiet = 0;
         }
 
-        if face.left_button.poll(&face.telemetry) && face.left_button.pressed() {
-            face.state.left_presses = face.state.left_presses.wrapping_add(1);
-        }
-        if face.right_button.poll(&face.telemetry) && face.right_button.pressed() {
-            face.state.right_presses = face.state.right_presses.wrapping_add(1);
-        }
-        chord.observe(
-            &mut face.state,
-            face.left_button.pressed(),
-            face.right_button.pressed(),
+        // Both buttons are sampled every tick, as the contacts are above.
+        let changed = (
+            face.left_button.poll(&face.telemetry),
+            face.right_button.poll(&face.telemetry),
         );
+        let left = face.left_button.pressed();
+        let right = face.right_button.pressed();
+        if left && right {
+            together = (true, true);
+        }
+        if changed.0 && !left {
+            if !together.0 {
+                face.state.left_presses = face.state.left_presses.wrapping_add(1);
+            }
+            together.0 = false;
+        }
+        if changed.1 && !right {
+            if !together.1 {
+                face.state.right_presses = face.state.right_presses.wrapping_add(1);
+            }
+            together.1 = false;
+        }
+        chord.observe(&mut face.state, left, right);
         face.states.publish(face.state);
 
         let frame = face.frames.snapshot();

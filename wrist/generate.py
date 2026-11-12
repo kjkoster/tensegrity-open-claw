@@ -17,16 +17,17 @@ is git-ignored: it is rebuilt from these files on every build, so it is never ed
 """
 
 import ipaddress
-import json
 import pathlib
 import re
 import sys
 import xml.etree.ElementTree as ET
 
-# The dot's reader, in clockwork/, shared with pi_network.py there. Put on the path by hand:
-# run with -I, Python adds no directory of its own.
+# The dot's reader, in clockwork/, shared with pi_network.py there, and the OSCQuery file's,
+# shared with cortex-build. Put on the path by hand: run with -I, Python adds no directory of
+# its own.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "clockwork"))
 from dot import Dot, addresses, fail, listener, networks  # noqa: E402
+import oscquery  # noqa: E402
 
 DEVICE = "wrist"
 SERVICE = "wrist_firmware"
@@ -168,45 +169,6 @@ TYPES = {"i": "int32_t", "f": "float", "s": "const char *", "T": "bool", "F": "b
 KEYWORDS = {"default", "delete", "new", "class", "int", "float", "bool", "char", "true", "false", "return"}
 
 
-def leaves(node, path, key, found):
-    """Walks the tree, checking it as DESIGN.md's OSC section states, and collects the leaves."""
-    full = node.get("FULL_PATH")
-    want = "/" if key is None else ("" if path == "/" else path) + "/" + key
-    if full != want:
-        fail(f"FULL_PATH {full!r} should be {want!r}")
-    if "CONTENTS" in node:
-        if "TYPE" in node:
-            fail(f"{full} has both CONTENTS and a TYPE")
-        for child_key, child in node["CONTENTS"].items():
-            leaves(child, full, child_key, found)
-        return found
-    kind = node.get("TYPE")
-    if kind not in TYPES:
-        fail(f"{full} has TYPE {kind!r}; the encoders know {', '.join(TYPES)}")
-    if "ACCESS" not in node:
-        fail(f"{full} has no ACCESS")
-    ways = [w for w in ("CLOCKWORK_CHAOS_ON_EVENT", "CLOCKWORK_CHAOS_AT_RATE_HZ") if w in node]
-    if len(ways) != 1:
-        fail(f"{full} is sent {len(ways)} ways; each leaf is sent exactly one")
-    if ways[0] == "CLOCKWORK_CHAOS_ON_EVENT":
-        how = node[ways[0]]
-        if how not in ("connect", "data"):
-            fail(f"{full} is sent on {how!r}; the events are connect and data")
-    else:
-        how = node[ways[0]]
-        if not isinstance(how, (int, float)) or how <= 0:
-            fail(f"{full} has a rate of {how!r}")
-    values = None
-    for r in node.get("RANGE", []):
-        if kind == "s" and "VALS" in r:
-            values = r["VALS"]
-            for v in values:
-                if not re.fullmatch(r"[a-z_][a-z0-9_]*", v) or v in KEYWORDS:
-                    fail(f"{full}: the value {v!r} cannot name a C++ enumerator")
-    found.append({"path": full, "name": full.strip("/").replace("/", "_"), "type": kind, "how": how, "values": values})
-    return found
-
-
 def camel(name):
     return "".join(p.capitalize() for p in name.split("_"))
 
@@ -258,15 +220,11 @@ def bundle(struct, fn, group, out):
 
 
 def encoders(path):
-    with open(path, encoding="utf-8") as f:
-        try:
-            tree = json.load(f)
-        except json.JSONDecodeError as e:
-            fail(f"{path}: {e}")
-    try:
-        found = leaves(tree, None, None, [])
-    except SystemExit as e:
-        fail(f"{path}: {str(e.code).removeprefix('generate.py: ')}")
+    found = oscquery.leaves(path)
+    for leaf in found:
+        for v in leaf["values"] or []:
+            if v in KEYWORDS:
+                fail(f"{path}: {leaf['path']}: the value {v!r} cannot name a C++ enumerator")
 
     out = ["namespace osc {", ""]
     for leaf in found:

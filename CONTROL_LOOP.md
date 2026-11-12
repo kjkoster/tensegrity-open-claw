@@ -109,10 +109,10 @@ stateDiagram-v2
 ```
 
 - *Entry.* Ch2, ch3 and ch4 are read once, on the tick Pluck begins, and ignored for the rest of the pluck: `A` from Amplitude, the tug's direction from Direction, its speed `v` from Speed.
-- *Settle.* Turning, the shaft ramps to a stop; from Blackout, the 100 ms after enabling. `x0` is where it stands.
+- *Settle.* Turning, the shaft ramps to a stop. `x0` is where it stands. From Blackout, Out makes no step until the 100 ms after enabling are over.
 - *Out.* To `x0 + A` in ch3's direction, at up to `v`, ramped up and down; a short tug never reaches `v`.
 - *Dwell.* Held at the target for 0.5 s.
-- *Back.* To `x0`, taking 2.5 s ramps included: the cruise speed is the one that, ramped at `a_ramp`, covers `A` in 2.5 s.
+- *Back.* To `x0` at `A / 2.5 s`; its ramps, at `a_ramp`, take about a millisecond, so it takes 2.5 s.
 - *Rest.* Held at `x0`, enabled, until the mode leaves Pluck. Another pluck needs the mode to leave Pluck and come back.
 - `A = 0` or `v = 0`: nothing moves; Settle goes straight to Rest.
 - The mode leaving Pluck at any point ends the pluck there; the new mode takes over from where the shaft is.
@@ -140,7 +140,7 @@ One universe (**DECISION:** number). 10–40 Hz, irregular; levels sampled per f
 
 ## 7. OSC (out only)
 
-Always on, sent to each OSC recipient `clockwork.dot` names for Wrist, logged to a remote database. The address space, and how each address is sent, is `fixtures/wrist.oscquery.json`; the file's format, its roots (`/wrist/`, `/dmx/wrist/`, `/sys/wrist/`) and the three ways to send are `DESIGN.md`'s OSC section. The encoders are **generated from it at build time**. Whether the MCU also serves it over HTTP/mDNS: **DECISION**.
+Always on, sent to each OSC recipient `clockwork.dot` names for Wrist, logged to a remote database. The address space, and how each address is sent, is `fixtures/wrist.oscquery.json`; the file's format, its roots (`/wrist/`, `/dmx/wrist/`, `/sys/wrist/`) and the three ways to send are `DESIGN.md`'s OSC section. The encoders, and the brain's decoders, are **generated from it at build time**, both through one reader, `clockwork/oscquery.py`. Whether the MCU also serves it over HTTP/mDNS: **DECISION**.
 
 Only loop variables and raw inputs are sent. Nothing is computed for telemetry: no Hz (`ω` is sent), no settle times (derive from transition timestamps in the database), no CPU estimate.
 
@@ -164,7 +164,7 @@ With Run. `f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Wri
 
 ## 9. LED
 
-1 Hz blink = alive. Solid in Blackout.
+Solid while the coils are enabled: Hold, Pluck and Manual. 1 Hz blink in Blackout, released.
 
 ## 10. Hard-coded constants
 
@@ -172,7 +172,8 @@ With Run. `f_est`, `Q_est`, axis, `φ_off` — the values the system learns. Wri
 |---|---|---|
 | `steps_per_rev` | 800 | DIP switches |
 | `a_ramp` | steps/s² | the one ramp, every mode; sane but minimal: sharp enough for a tug, gentle enough for winding; first guess 100,000, by test; the bench ran 200,000 without an alarm, shaft free |
-| `A_max` | steps | the largest tug the band set takes, by test (5–10 mm on the model) |
+| `A_max` | steps | the largest tug the band set takes, by test (5–10 mm on the model); first guess 320, about 10 mm |
+| longest `dt` | 5 ms | a pass of the loop held up longer, by the WiFi, changes the speed as if it took this long, at most 500 steps/s at `a_ramp` |
 | Pluck's dwell, return | 0.5 s, 2.5 s | §4 |
 | sACN timeout | 2.5 s | E1.31 |
 | `dir_cw` | DIR level | the level that turns the shaft clockwise, facing it, with SW5 as set; by test |

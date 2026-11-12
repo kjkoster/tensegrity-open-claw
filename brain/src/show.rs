@@ -4,17 +4,24 @@
 //! Test mode first, then the calendar. Outside a show the state is `blackout`: dark. Inside
 //! one, or in test mode whatever the calendar says, it is `idle`: the face's left
 //! lamp breathes, a slow sine from dark to full, so the rig can be seen running from the
-//! cabinet door. The face's right lamp says test mode is on.
+//! cabinet door.
 //!
-//! Outside test mode the buttons do nothing but the chord that enters it. Test mode ends itself
-//! after `TEST_MODE_TIMEOUT` without a chord, because a rig left in it would ignore the calendar
-//! unattended.
+//! The chord enters test mode. Test mode ends itself after `TEST_MODE_TIMEOUT` without a chord,
+//! because a rig left in it would ignore the calendar unattended.
+//!
+//! Wrist is plucked from the right button, whatever the state: Wrist is sent Hold, and the
+//! right lamp is lit while Wrist says a pluck can start. A press while it is lit sends Pluck
+//! until Wrist no longer says it can, and Pluck goes on being sent while Wrist says the pluck
+//! is busy; then Hold again. A press while the lamp is dark does nothing. The firmware decides
+//! nothing: the brain holds Pluck exactly as long as the pluck runs.
 //!
 //! The show state is the brain's own: `brain/show` and `brain/testmode`, retained, published
 //! on every change, and logged with what caused it.
 
 use crate::face::FaceState;
 use crate::face_show;
+use crate::wrist::{Heard, Pluck};
+use crate::wrist_show::{self, Tug};
 use cortex::calendar::{self, Calendar};
 use cortex::config::FRAME_RATE_HZ;
 use cortex::telemetry::Publisher;
@@ -25,6 +32,16 @@ use std::time::{Duration, Instant};
 const PULSE_SECS: f64 = 4.0;
 /// How long test mode lasts without a chord.
 const TEST_MODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// How long what Wrist says is believed: ten of its state bundles.
+const WRIST_STALE_AFTER: Duration = Duration::from_secs(1);
+/// Pluck's tug: a quarter of Wrist's largest, until the band set has been tried at more; as
+/// sharp as Wrist's ramp makes it; clockwise, facing the shaft, which reels the wire in, by
+/// test.
+const PLUCK_TUG: Tug = Tug {
+    size: 0.25,
+    speed: 1.0,
+    clockwise: true,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -52,6 +69,12 @@ pub struct Show {
     state: State,
     /// Frames already played in the current state.
     frames: u32,
+    /// The face's right-button count as last read; the face counts from zero, and so does this.
+    seen_right_presses: u32,
+    /// A press of the lit right button, held until Wrist no longer says a pluck can start.
+    pluck_pressed: bool,
+    /// Whether Wrist was sent Pluck in the last frame, so a change can be logged.
+    plucking: bool,
 }
 
 impl Show {
@@ -68,11 +91,14 @@ impl Show {
             testing_since: None,
             state,
             frames: 0,
+            seen_right_presses: 0,
+            pluck_pressed: false,
+            plucking: false,
         }
     }
 
-    /// Fills this frame's slots, given what the door says.
-    pub fn fill(&mut self, slots: &mut [u8], face: &FaceState) {
+    /// Fills this frame's slots, given what the door and Wrist say.
+    pub fn fill(&mut self, slots: &mut [u8], face: &FaceState, wrist: Heard) {
         // A chord takes seconds to make, so one frame never sees two.
         let chorded = face.chords != self.seen_chords;
         self.seen_chords = face.chords;
@@ -97,7 +123,43 @@ impl Show {
         let left = self.left_lamp();
         self.frames = self.frames.saturating_add(1);
 
-        face_show::fill(slots, left, testing);
+        let wrist = wrist
+            .filter(|(_, at)| at.elapsed() < WRIST_STALE_AFTER)
+            .map(|(pluck, _)| pluck);
+        let (pluck, can_pluck) = self.pluck(face, wrist);
+        face_show::fill(slots, left, can_pluck);
+        wrist_show::fill(slots, pluck, &PLUCK_TUG);
+    }
+
+    /// Whether Wrist is sent Pluck this frame, and whether the right lamp is lit, given what
+    /// Wrist last said, if it is not stale.
+    fn pluck(&mut self, face: &FaceState, wrist: Option<Pluck>) -> (bool, bool) {
+        // A press takes tens of milliseconds, so one frame never sees two.
+        let pressed = face.right_presses != self.seen_right_presses;
+        self.seen_right_presses = face.right_presses;
+
+        let can = wrist == Some(Pluck::Can);
+        if pressed && can {
+            self.pluck_pressed = true;
+        }
+        // Until Wrist has seen the Pluck frame it goes on saying it can; after, the pluck is
+        // Wrist's to say.
+        if !can {
+            self.pluck_pressed = false;
+        }
+        let pluck = self.pluck_pressed || wrist == Some(Pluck::Busy);
+        if pluck != self.plucking {
+            let why = if self.pluck_pressed {
+                "right button"
+            } else if pluck {
+                "Wrist busy"
+            } else {
+                "pluck done"
+            };
+            eprintln!("show: Wrist {} — {why}", if pluck { "Pluck" } else { "Hold" });
+            self.plucking = pluck;
+        }
+        (pluck, can && !self.pluck_pressed)
     }
 
     /// The state this frame moves to, if it moves, and why.

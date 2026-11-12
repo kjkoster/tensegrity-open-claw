@@ -91,7 +91,7 @@ it is driven at any amplitude, and in Manual, which the programme never sends.
 
 | situation | left lamp | right lamp |
 |---|---|---|
-| armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | armed Pluck: green while `/wrist/pluck` is `can`, dark while it is `busy` or `cannot` or stale; armed Run: off |
+| armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | armed Pluck: green while `/wrist/pluck` is `can` and the button has not been pressed, dark while it is `busy` or `cannot` or stale; armed Run: off |
 | Pluck | steady 100% | off |
 | Run | the driven sine | the measured sine |
 | finished | two 1 s fades up and down, then the armed pattern | off |

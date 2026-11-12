@@ -1,5 +1,6 @@
-//! Ingests the patch from a QLC+ workspace at build time, and resolves the show calendar
-//! (see [`calendar`]).
+//! Ingests the patch from a QLC+ workspace at build time, resolves the show calendar
+//! (see [`calendar`]), and turns a device's OSCQuery file into the brain's decoders (see
+//! [`osc`]).
 //!
 //! One rig, one workspace: the rig crate's build script calls [`ingest`] with its own
 //! `.qxw`, and the fixtures it names are generated inside that rig's crate.
@@ -34,8 +35,10 @@
 //!     build.
 
 mod calendar;
+mod osc;
 
 pub use calendar::calendar;
+pub use osc::osc;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -266,6 +269,8 @@ struct Dot {
     sacn_bind: SocketAddrV4,
     /// The broker the brain's MQTT client connects to, the port its `mqtt` edge goes to.
     mqtt: SocketAddrV4,
+    /// The address and port the brain's OSC receiver binds, its `osc` port.
+    osc_bind: SocketAddrV4,
     /// Every fixture the brain sends its universe to, one per `sacn` edge from it.
     sacn_recipients: Vec<SocketAddrV4>,
 }
@@ -288,26 +293,7 @@ fn read_dot(network: &Network) -> Dot {
     ] {
         println!("cargo:rerun-if-changed={}", watched.display());
     }
-    // -I, so nothing in the environment or the working directory changes what runs.
-    let run = |script: &str, args: &[&str]| -> String {
-        let output = std::process::Command::new("python3")
-            .arg("-I")
-            .arg(clockwork.join(script))
-            .arg(network.dot)
-            .args(args)
-            .output()
-            .unwrap_or_else(|e| {
-                panic!("cannot run python3 to read {}: {e}", network.dot.display())
-            });
-        if !output.status.success() {
-            panic!(
-                "reading {} failed:\n{}",
-                network.dot.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-        String::from_utf8(output.stdout).expect("the dot's reader prints UTF-8")
-    };
+    let run = |script: &str, args: &[&str]| read_with(&clockwork.join(script), network.dot, args);
 
     let service = network.service.to_uppercase().replace('-', "_");
     let names = [
@@ -315,6 +301,8 @@ fn read_dot(network: &Network) -> Dot {
         format!("{service}_SACN_BIND_PORT"),
         format!("{service}_MQTT_ADDRESS"),
         format!("{service}_MQTT_PORT"),
+        format!("{service}_OSC_BIND_ADDRESS"),
+        format!("{service}_OSC_BIND_PORT"),
     ];
     let mut args = vec![network.device];
     args.extend(names.iter().map(String::as_str));
@@ -353,8 +341,32 @@ fn read_dot(network: &Network) -> Dot {
     Dot {
         sacn_bind: socket(&names[0], &names[1]),
         mqtt: socket(&names[2], &names[3]),
+        osc_bind: socket(&names[4], &names[5]),
         sacn_recipients,
     }
+}
+
+/// Runs one of the Python readers in `clockwork/` on `file`, and returns what it prints. The
+/// readers are shared with the Pis' deploys and Wrist's build, so every build refuses the same
+/// files; a file a reader refuses fails this build with its message.
+fn read_with(reader: &Path, file: &Path, args: &[&str]) -> String {
+    // -I, so nothing in the environment or the working directory changes what runs.
+    let output = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(reader)
+        .arg(file)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("cannot run python3 to read {}: {e}", file.display()));
+    if !output.status.success() {
+        panic!(
+            "reading {} failed:\n{}",
+            file.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout)
+        .unwrap_or_else(|e| panic!("{} printed no UTF-8: {e}", reader.display()))
 }
 
 /// The console's E1.31 output has to unicast where the brain's receiver binds. The dot says
@@ -623,6 +635,21 @@ fn render_network(dot: &Dot, dot_name: &str, network: &Network) -> String {
         "pub const MQTT: core::net::SocketAddrV4 = \
          core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {});",
         dot.mqtt.port()
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+    let [a, b, c, d] = dot.osc_bind.ip().octets();
+    writeln!(
+        out,
+        "/// Where the {}'s OSC receiver binds, its `osc` port as {dot_name} has it.",
+        network.service
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "pub const OSC_BIND: core::net::SocketAddrV4 = \
+         core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {});",
+        dot.osc_bind.port()
     )
     .unwrap();
     writeln!(out).unwrap();

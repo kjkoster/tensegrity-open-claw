@@ -15,6 +15,9 @@ fn main() {
         },
     );
 
+    // What Wrist sends, which the brain decodes by.
+    cortex_build::osc(&root.join("fixtures").join("wrist.oscquery.json"));
+
     println!("cargo:rerun-if-changed=shows.rs");
     cortex_build::calendar(CITY, SHOWS);
 }

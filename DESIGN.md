@@ -417,6 +417,7 @@ workspace patches them.
 | the mouth (§3.8) | no: `last-version-with-mouth` |
 | moving heads: their aiming and the QLC+ pointing presets (§1.1) | no: `last-version-with-mouth` |
 | Wrist (§3.10) | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json` |
+| Wrist's OSC in the brain, and the pluck it is sent | `brain/src/wrist.rs`, `brain/src/wrist_show.rs`, `show.rs`; decoders by `cortex-build` through `clockwork/oscquery.py` |
 
 ### 3.1 Stem
 

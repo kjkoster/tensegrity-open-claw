@@ -11,11 +11,21 @@
       "CONTENTS": {
         "mode": {
           "FULL_PATH": "/wrist/mode",
-          "DESCRIPTION": "The mode Wrist is in, which can differ from the one the frame asks for.",
+          "DESCRIPTION": "The mode Wrist is in: the frame's, or blackout while it has no live frame.",
           "TYPE": "s",
           "ACCESS": 1,
           "RANGE": [
-            { "VALS": ["blackout", "pluck", "run", "rampdown", "manual"] }
+            { "VALS": ["blackout", "hold", "pluck", "manual"] }
+          ],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "pluck": {
+          "FULL_PATH": "/wrist/pluck",
+          "DESCRIPTION": "Whether a pluck can be started: busy from Pluck's start until the shaft is back where it began; can in Hold, where Pluck in the next frame tugs; cannot at every other time, Pluck after its return included.",
+          "TYPE": "s",
+          "ACCESS": 1,
+          "RANGE": [
+            { "VALS": ["cannot", "can", "busy"] }
           ],
           "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
         },
