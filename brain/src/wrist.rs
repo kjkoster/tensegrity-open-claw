@@ -19,8 +19,10 @@ pub use crate::osc::wrist::WristPluck as Pluck;
 
 /// The longest wait between attempts to bind, while the access point's address is not up.
 const BIND_RETRY_MAX_S: u64 = 30;
-/// Larger than any datagram Wrist sends: its packets are built in 512 bytes.
+/// Larger than any datagram Wrist sends: its packets are built in 1024 bytes.
 const MAX_PACKET_LEN: usize = 1536;
+/// A gap in `/wrist/pluck` this long is logged when it ends: five of Wrist's state bundles.
+const GAP_LOGGED: Duration = Duration::from_millis(500);
 
 /// `/wrist/pluck` as last heard, and when; what stale means is the show's to say.
 pub type Heard = Option<(Pluck, Instant)>;
@@ -60,6 +62,12 @@ pub fn spawn(bind: SocketAddrV4) -> LatestRx<Heard> {
 fn receive(socket: &UdpSocket, reports: &LatestTx<Heard>) {
     let mut buffer = [0u8; MAX_PACKET_LEN];
     let mut heard = None;
+    // When `/wrist/pluck` last came, and what else came since: bundles without it, and single
+    // messages. Wrist sends both ten times a second, so a gap with the others still arriving is
+    // Wrist sending and the link up, and one with nothing is the link or Wrist gone quiet.
+    let mut last_pluck: Option<Instant> = None;
+    let mut bundles_without = 0u32;
+    let mut messages = 0u32;
     loop {
         let len = match socket.recv(&mut buffer) {
             Ok(len) => len,
@@ -68,14 +76,33 @@ fn receive(socket: &UdpSocket, reports: &LatestTx<Heard>) {
                 return;
             }
         };
-        let Some(pluck) = pluck_in(&buffer[..len]) else {
+        let packet = &buffer[..len];
+        let Some(pluck) = pluck_in(packet) else {
+            if packet.starts_with(b"#bundle\0") {
+                bundles_without += 1;
+            } else {
+                messages += 1;
+            }
             continue;
         };
+        let now = Instant::now();
+        if let Some(gap) = last_pluck.map(|at| now - at)
+            && gap >= GAP_LOGGED
+        {
+            eprintln!(
+                "wrist: /wrist/pluck again after {} ms without; meanwhile {bundles_without} \
+                 bundles without it and {messages} other messages",
+                gap.as_millis()
+            );
+        }
+        last_pluck = Some(now);
+        bundles_without = 0;
+        messages = 0;
         if heard != Some(pluck) {
             eprintln!("wrist: pluck {}", pluck.word());
             heard = Some(pluck);
         }
-        reports.publish(Some((pluck, Instant::now())));
+        reports.publish(Some((pluck, now)));
     }
 }
 

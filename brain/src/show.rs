@@ -12,7 +12,8 @@
 //! Wrist is plucked from the right button, whatever the state: Wrist is sent Hold, and the
 //! right lamp is lit while Wrist says a pluck can start. A press while it is lit sends Pluck
 //! until Wrist no longer says it can, and Pluck goes on being sent while Wrist says the pluck
-//! is busy; then Hold again. A press while the lamp is dark does nothing, and a press Wrist
+//! is busy; then Hold again, until the next press, whatever Wrist says after. A press while
+//! the lamp is dark does nothing, and a press Wrist
 //! still says it can after a second of is let go of: the Pluck never reached it. The firmware
 //! decides nothing: the brain holds Pluck exactly as long as the pluck runs.
 //!
@@ -41,11 +42,10 @@ const WRIST_STALE_AFTER: Duration = Duration::from_secs(1);
 /// press's Pluck — a desk holding the universe, frames lost on the way — and a press that waited
 /// on would pluck whenever a frame next got through, unattended.
 const PLUCK_PRESS_FRAMES: u32 = (WRIST_STALE_AFTER.as_millis() as u64 * FRAME_RATE_HZ / 1000) as u32;
-/// Pluck's tug: a quarter of Wrist's largest, until the band set has been tried at more; as
-/// sharp as Wrist's ramp makes it; clockwise, facing the shaft, which reels the wire in, by
-/// test.
+/// Pluck's tug: Wrist's largest, four revolutions, at its top speed, as sharp as its ramp makes
+/// it; clockwise, facing the shaft, which reels the wire in, by test.
 const PLUCK_TUG: Tug = Tug {
-    size: 0.25,
+    size: 1.0,
     speed: 1.0,
     clockwise: true,
 };
@@ -161,14 +161,17 @@ impl Show {
             self.pluck_pressed = None;
         }
         let pressing = self.pluck_pressed.is_some();
-        let pluck = pressing || wrist == Some(Pluck::Busy);
+        // Busy only keeps a Pluck going, never starts one. Once Hold has gone out, a busy still
+        // on its way, or arriving after a silence, is the pluck that was ended, and Wrist, in
+        // Hold, would take Pluck again as a new one.
+        let pluck = pressing || (self.plucking && wrist == Some(Pluck::Busy));
         if pluck != self.plucking {
             let why = if pressing {
                 "right button"
             } else if expired {
                 "Wrist never saw the press"
-            } else if pluck {
-                "Wrist busy"
+            } else if wrist.is_none() {
+                "Wrist not heard for a second"
             } else {
                 "pluck done"
             };

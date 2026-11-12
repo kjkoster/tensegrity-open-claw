@@ -17,7 +17,7 @@ None of the four needs homing or the accelerometer. **The firmware follows the d
 
 Guy wire wrapped a few turns around the bare motor shaft (capstan; tail tied off) → short cable → hook → rubber bands in parallel → hook → wire to the structure. Motor sits on a bar-type load cell. One ADXL345 accelerometer on the structure.
 
-- Shaft **ASSUMPTION** 8 mm diameter: 25.1 mm of wire per revolution. Driver at 800 steps/rev: 31 µm per step.
+- Shaft **ASSUMPTION** 8 mm diameter: 25.1 mm of wire per revolution. Driver at 400 steps/rev: 63 µm per step.
 - `x` = shaft position in steps, counted by the step generator. In Hold, Pluck and Manual it has no home and means only distances. With Run: positive = reel in, `x = 0` at the homing switch (pay-out end, bands still stretched), `x_pre` = resting position, all drive motion relative to `x_pre`.
 - Bands are the series spring: motor position → force, wire never slack as long as `x ≥ 0`. Preload keeps the wire taut, so there is no backlash.
 - Load cell reads wire tension (motor's reaction force along the cell axis; wire leaves the shaft along that axis). Telemetry only. Not in the phase loop.
@@ -76,7 +76,7 @@ Control tick nominal 200 Hz, `dt` measured. Nothing in the loop crosses the netw
 - *Track* — **extremum seeking**, the part that follows wind, temperature and band drift while the show runs (locked, `A` unchanged for 5 cycles). Square-wave dither of `d = ±8°` on `φ_off`, period 30 cycles. At the end of each period, `g = (ā_high − ā_low) / (2d)` from the mean sway amplitude in the two halves; `φ_off += K_adapt·g`, step clamped to 5°. The sway amplitude at fixed drive is largest when the drive is in phase with velocity, so this climbs to the optimum and stays on it as it moves. Paused while `A` is changing (a changing drive moves `a` for reasons that have nothing to do with phase). Clamped to ±60° of the acquired value; falls back to *Acquire* if the clamp is hit repeatedly.
 - Persisted at most once a minute.
 
-**Step generation.** Timer1 as NMI at 25 kHz. Phase accumulator; a carry starts a pulse and the next tick ends it, so every pulse is 40 µs low and at least 40 µs high; DIR written only while stopped, between pulses, 10 µs before the next can start. Usable step rate ≤ 12.5 kHz = 390 mm/s of wire, which is also where motor torque falls off (~900 rpm). That is the hardware ceiling, not the setting: `v_max` is hard-coded to what the model needs, `≈ 1.2 × 2π·f_max·A_max` — about 150–200 mm/s for 5–10 mm at 3 Hz — so that a bad `f_est` or a desk snap cannot do more than the show would. Hold, Pluck and Manual use the step generator's ceiling. A signed step count `x` is kept in the NMI, and the NMI stops itself on a target count when one is set, so a late control tick cannot overshoot a move. Write idle levels before switching pins to OUTPUT.
+**Step generation.** Timer1 as NMI at 25 kHz. Phase accumulator; a carry starts a pulse and the next tick ends it, so every pulse is 40 µs low and at least 40 µs high; DIR written only while stopped, between pulses, 10 µs before the next can start. Usable step rate ≤ 12.5 kHz = 31 rev/s at 400 steps/rev = 785 mm/s of wire, about twice the ~900 rpm where motor torque falls off. That is the hardware ceiling, not the setting: `v_max` is hard-coded to what the model needs, `≈ 1.2 × 2π·f_max·A_max` — about 150–200 mm/s for 5–10 mm at 3 Hz — so that a bad `f_est` or a desk snap cannot do more than the show would. Hold, Pluck and Manual use the step generator's ceiling. A signed step count `x` is kept in the NMI, and the NMI stops itself on a target count when one is set, so a late control tick cannot overshoot a move. Write idle levels before switching pins to OUTPUT.
 
 **The ramp.** One for every mode, so no mode has motion code of its own. A mode asks for a speed, or for a position to stop on; the motion stage changes the speed by at most `a_ramp·dt` a tick, takes a change of direction through zero, and, with a position to stop on, caps the speed at `√(2·a_ramp·remaining)` so the shaft stops on it. Every controlled change of speed goes through the ramp. Blackout is not a change of speed: it releases the coils at once, moving or not.
 
@@ -170,10 +170,10 @@ Solid while the coils are enabled: Hold, Pluck and Manual. 1 Hz blink in Blackou
 
 | | Value | Note |
 |---|---|---|
-| `steps_per_rev` | 800 | DIP switches |
-| `a_ramp` | steps/s² | the one ramp, every mode; sane but minimal: sharp enough for a tug, gentle enough for winding; first guess 100,000, by test; the bench ran 200,000 without an alarm, shaft free |
-| `A_max` | steps | the largest tug the band set takes, by test (5–10 mm on the model); first guess 320, about 10 mm |
-| longest `dt` | 5 ms | a pass of the loop held up longer, by the WiFi, changes the speed as if it took this long, at most 500 steps/s at `a_ramp` |
+| `steps_per_rev` | 400 | DIP switches; 800 until 2026-11-12, for a top speed of 31 rev/s rather than 15.6 |
+| `a_ramp` | steps/s² | the one ramp, every mode; sane but minimal: sharp enough for a tug, gentle enough for winding; 200,000 at 400 steps/rev, by test: at 800 steps/rev 100,000, 300,000 and 400,000 ran on the wire with no alarm, and the bench 200,000 with the shaft free |
+| `A_max` | steps | the largest tug the band set takes, by test (5–10 mm on the model); for now 1600, four revolutions, about 100 mm |
+| longest `dt` | 250 steps/s ÷ `a_ramp`: 1.25 ms at 200,000 | a pass of the loop held up longer, by the WiFi, changes the speed as if it took this long, so no pass changes it by more than 250 steps/s, 0.6 rev/s |
 | Pluck's dwell, return | 0.5 s, 2.5 s | §4 |
 | sACN timeout | 2.5 s | E1.31 |
 | `dir_cw` | DIR level | the level that turns the shaft clockwise, facing it, with SW5 as set; by test |
@@ -183,7 +183,7 @@ With Run:
 
 | | Value | Note |
 |---|---|---|
-| `v_max` | ≈ 150–200 mm/s for the 1 m model | hardware ceiling 390 mm/s (12.5 kHz); §3 |
+| `v_max` | ≈ 150–200 mm/s for the 1 m model | hardware ceiling 785 mm/s (12.5 kHz at 400 steps/rev); §3 |
 | `x_pre`, `x_max`, `margin` | per band set, in steps | travel must stay inside the wrap |
 | `A_seed` | steps | must stay ≤ `x_max − x_pre`, as `A_max` must |
 | `f_est`, `Q_est`, axis, `φ_off` defaults | | starting points only; overridden by persisted values |

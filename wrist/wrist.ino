@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "generated.h"
+#include "log.h"
 
 // The optos share a common anode on 3.3 V, so a pin driven low lights its opto.
 const uint8_t PIN_PUL = 14;     // D5
@@ -30,24 +31,29 @@ const uint8_t PIN_LED = 2;      // D4, lit when low
 const int32_t LOAD_TARE = 0;            // raw counts
 const float LOAD_SCALE = NAN;           // N per count
 
-// The motion, CONTROL_LOOP.md §10. The top speed is the step generator's ceiling, half its
-// 25 kHz tick: 15.6 revolutions a second at 800 steps a revolution, about where the motor's
-// torque falls off. One ramp for every mode. The bench ran 200,000 steps/s² to 12,000 steps/s
-// with the shaft free and no alarm; the ramp is a first guess inside that, sharp enough for a
-// tug of a few millimetres. By test.
+// The motion, CONTROL_LOOP.md §10. The driver is set to 400 steps a revolution, SW1–SW4; every
+// figure here is in its steps. The top speed is the step generator's ceiling, half its 25 kHz
+// tick: 31 revolutions a second, past the 15 where the motor's torque falls off, on trial. One
+// ramp for every mode: 200,000 steps/s² here is the 400,000 that ran on the wire without an alarm
+// at 800 steps a revolution, the same turn of the shaft. By test: watch the driver's red LED,
+// /wrist/alarm and /wrist/load/raw's peaks.
 const float V_MAX = 12500.0f;           // steps/s, Speed at the top of its band
-const float A_RAMP = 100000.0f;         // steps/s², every controlled change of speed
+const float A_RAMP = 200000.0f;         // steps/s², every controlled change of speed
 
-// Pluck, CONTROL_LOOP.md §4. The largest tug, Amplitude at full: about 10 mm of wire on the
-// 8 mm shaft at 800 steps a revolution. The largest the band set takes is found by test.
-const int32_t A_MAX = 320;              // steps
+// Pluck, CONTROL_LOOP.md §4. The largest tug, Amplitude at full: four revolutions, about 100 mm
+// of wire on the 8 mm shaft. The largest the band set takes is found by test.
+const int32_t A_MAX = 1600;             // steps
 const uint32_t PLUCK_DWELL_MS = 500;    // held at the tug's end
 const float PLUCK_RETURN_S = 2.5f;      // back to where it began, ramps included
 // The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test, 2026-11-09.
 const uint8_t DIR_CW = HIGH;
-// The longest pass of loop() the ramp takes at face value: 500 steps/s at A_RAMP. A pass longer
-// than that, held up by the WiFi stack, changes the speed as if it had taken this long.
-const uint32_t MAX_DT_US = 5000;
+// The most one pass of loop() changes the speed by: the step generator takes the change at once.
+// 0.6 revolutions a second, as it has been since the first ramp.
+const float MAX_SPEED_JUMP = 250.0f;    // steps/s
+// The longest pass of loop() the ramp takes at face value, MAX_SPEED_JUMP at A_RAMP: 1.25 ms. A
+// pass longer than that, held up by the WiFi stack, changes the speed as if it had taken this
+// long.
+const uint32_t MAX_DT_US = static_cast<uint32_t>(MAX_SPEED_JUMP / A_RAMP * 1e6f);
 // The driver wants enable settled this long before the first pulse.
 const uint32_t ENABLE_SETTLE_MS = 100;
 
@@ -57,8 +63,9 @@ const uint32_t SACN_TIMEOUT_MS = 2500;
 // 1 Hz: half a second lit, half dark.
 const uint32_t BLINK_HALF_PERIOD_MS = 500;
 
-// Room for the largest bundle with a margin; an encoder that would overrun it sends nothing.
-uint8_t packet[512];
+// Room for the largest bundle with a margin; an encoder that would overrun it sends nothing. The
+// largest is the connect bundle, at most 580 bytes with its longest strings.
+uint8_t packet[1024];
 
 WiFiUDP udp;
 WiFiUDP sacnUdp;
@@ -191,7 +198,7 @@ void releaseMotor() {
 void toBlackout(const char *why) {
   releaseMotor();
   if (mode != Mode::blackout) {
-    Serial.printf("wrist: Blackout, released: %s\n", why);
+    say("Blackout, released: %s", why);
   }
   mode = Mode::blackout;
 }
@@ -237,16 +244,32 @@ void takeSacn(const uint8_t *p, size_t len) {
   const size_t first = patch::DMX_ADDRESS - 1;
   if (slots < first + patch::CHANNELS || len < 126 + first + patch::CHANNELS) {
     if (!shortWarned) {
-      Serial.printf("wrist: an sACN frame of %u slots stops short of Wrist's, %u–%u\n",
-                    static_cast<unsigned>(slots), patch::DMX_ADDRESS,
-                    patch::DMX_ADDRESS + patch::CHANNELS - 1);
+      say("an sACN frame of %u slots stops short of Wrist's, %u–%u",
+          static_cast<unsigned>(slots), patch::DMX_ADDRESS,
+          patch::DMX_ADDRESS + patch::CHANNELS - 1);
       shortWarned = true;
     }
     return;
   }
   memcpy(levels, p + 126 + first, patch::CHANNELS);
+  // Counted, not acted on: a frame that skips ahead is still the newest.
+  const uint8_t sequence = p[111];
+  if (lastSequence >= 0) {
+    const uint8_t ahead = sequence - static_cast<uint8_t>(lastSequence);
+    if (ahead > 1 && ahead < 128) {
+      sacnSkipped += ahead - 1;
+    }
+  }
+  lastSequence = sequence;
+  sacnFrames++;
+  packetsSinceFrame = 0;
   if (!haveFrame) {
-    Serial.println("wrist: sACN frames arriving");
+    if (frameAt == 0) {
+      say("sACN frames arriving");
+    } else {
+      say("sACN frames arriving again, after %lu ms without",
+          static_cast<unsigned long>(millis() - frameAt));
+    }
   }
   haveFrame = true;
   frameAt = millis();
@@ -254,6 +277,8 @@ void takeSacn(const uint8_t *p, size_t len) {
 
 void receiveSacn() {
   while (sacnUdp.parsePacket() > 0) {
+    sacnPackets++;
+    packetsSinceFrame++;
     const int len = sacnUdp.read(sacnBuffer, sizeof sacnBuffer);
     if (len > 0) {
       takeSacn(sacnBuffer, len);
@@ -261,6 +286,12 @@ void receiveSacn() {
   }
   if (haveFrame && millis() - frameAt > SACN_TIMEOUT_MS) {
     haveFrame = false;
+    lastSequence = -1;
+    // Whether anything came in meanwhile, and the link as it is now, tell a sender that stopped
+    // from packets that were not this universe's from a link that went.
+    say("sACN lost: %lu packets since the last frame, WiFi %s, %d dBm",
+        static_cast<unsigned long>(packetsSinceFrame),
+        WiFi.status() == WL_CONNECTED ? "up" : "down", WiFi.RSSI());
     toBlackout("sACN lost");
   }
 }
@@ -341,8 +372,8 @@ void beginPluck() {
   pluckClockwise = clockwiseOf(levels[patch::direction::OFFSET]);
   pluckSpeed = rateOf(levels[patch::speed::OFFSET]);
   pluckPhase = PluckPhase::settle;
-  Serial.printf("wrist: Pluck, %ld steps %s at %.0f steps/s\n", static_cast<long>(pluckSteps),
-                pluckClockwise ? "clockwise" : "counter-clockwise", pluckSpeed);
+  say("Pluck, %ld steps %s at %.0f steps/s", static_cast<long>(pluckSteps),
+      pluckClockwise ? "clockwise" : "counter-clockwise", pluckSpeed);
 }
 
 void stepPluck(float dt) {
@@ -354,7 +385,7 @@ void stepPluck(float dt) {
       }
       if (pluckSteps == 0 || pluckSpeed == 0) {
         pluckPhase = PluckPhase::rest;
-        Serial.println("wrist: Pluck, no tug");
+        say("Pluck, no tug");
         break;
       }
       pluckStart = stepper::position;
@@ -375,11 +406,11 @@ void stepPluck(float dt) {
       }
       break;
     case PluckPhase::back:
-      // The ramps at either end of a return this slow take about a millisecond.
+      // The ramps at either end of a return this slow take a few milliseconds.
       move(pluckSteps / PLUCK_RETURN_S, dt, &pluckStart);
       if (speed == 0 && stepper::position == pluckStart) {
         pluckPhase = PluckPhase::rest;
-        Serial.println("wrist: Pluck, back where it began");
+        say("Pluck, back where it began");
       }
       break;
     case PluckPhase::rest:
@@ -414,7 +445,7 @@ void updateMotor(float dt) {
       enableMotor();
       enabledAt = millis();
     }
-    Serial.printf("wrist: %s → %s\n", modeName(mode), modeName(asked));
+    say("%s → %s", modeName(mode), modeName(asked));
     mode = asked;
     if (mode == Mode::pluck) {
       beginPluck();
@@ -441,13 +472,19 @@ void updateMotor(float dt) {
 
 void sendToRecipients(size_t length) {
   if (length == 0) {
-    Serial.println("wrist: an OSC packet did not fit its buffer, and was not sent");
+    say("an OSC packet did not fit its buffer, and was not sent");
     return;
   }
-  for (const net::Recipient &r : net::OSC_RECIPIENTS) {
-    udp.beginPacket(IPAddress(r.address[0], r.address[1], r.address[2], r.address[3]), r.port);
-    udp.write(packet, length);
-    udp.endPacket();
+  for (size_t i = 0; i < RECIPIENTS; i++) {
+    const net::Recipient &r = net::OSC_RECIPIENTS[i];
+    const bool begun =
+        udp.beginPacket(IPAddress(r.address[0], r.address[1], r.address[2], r.address[3]), r.port);
+    bool taken = false;
+    if (begun) {
+      udp.write(packet, length);
+      taken = udp.endPacket();
+    }
+    noteOscSend(i, taken);
   }
 }
 
@@ -463,6 +500,7 @@ osc::SysWristResetReason resetReason() {
 void sendOnConnect() {
   const String mac = WiFi.macAddress();
   const String ip = WiFi.localIP().toString();
+  const String bssid = WiFi.BSSIDstr();
   osc::OnConnect v;
   v.wrist_load_tare = LOAD_TARE;
   v.wrist_load_scale = LOAD_SCALE;
@@ -474,8 +512,12 @@ void sendOnConnect() {
   v.sys_wrist_reset_reason = resetReason();
   v.sys_wrist_flash_size = static_cast<int32_t>(ESP.getFlashChipRealSize());
   v.sys_wrist_cpu_freq = ESP.getCpuFreqMHz();
+  v.sys_wrist_wifi_channel = WiFi.channel();
+  v.sys_wrist_wifi_bssid = bssid.c_str();
+  v.sys_wrist_wifi_disconnects = static_cast<int32_t>(disconnects);
+  v.sys_wrist_wifi_disconnect_reason = lastDisconnect;
   sendToRecipients(osc::encodeOnConnect(v, packet, sizeof packet));
-  Serial.printf("wrist: connected as %s, %s\n", ip.c_str(), mac.c_str());
+  say("connected as %s, %s, %d dBm", ip.c_str(), mac.c_str(), WiFi.RSSI());
 }
 
 void sendState() {
@@ -487,6 +529,12 @@ void sendState() {
   v.wrist_health_tick_dt = static_cast<int32_t>(longestTick);
   // No frame yet is as old as a frame can be.
   v.dmx_wrist_sacn_age = frameAt == 0 ? INT32_MAX : static_cast<int32_t>(millis() - frameAt);
+  v.dmx_wrist_sacn_packets = static_cast<int32_t>(sacnPackets);
+  v.dmx_wrist_sacn_frames = static_cast<int32_t>(sacnFrames);
+  v.dmx_wrist_sacn_skipped = static_cast<int32_t>(sacnSkipped);
+  v.sys_wrist_uptime = static_cast<int32_t>(millis() / 1000);
+  v.sys_wrist_heap_free = static_cast<int32_t>(ESP.getFreeHeap());
+  v.sys_wrist_wifi_rssi = WiFi.RSSI();
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
   longestTick = 0;
 }
@@ -544,6 +592,7 @@ void setup() {
   // The address is fixed, from clockwork.dot, and modem sleep is off, so a packet to Wrist is
   // never held for a beacon interval. Not persisted: the settings come from the build, not flash.
   WiFi.persistent(false);
+  watchWifi();
   WiFi.mode(WIFI_STA);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.setAutoReconnect(true);
@@ -552,23 +601,33 @@ void setup() {
   sacnUdp.begin(net::SACN_PORT);
 
   Serial.println();
-  Serial.printf("wrist: start, joining \"%s\" as %u.%u.%u.%u, sACN universe %u on port %u, "
-                "DMX %u–%u\n",
-                net::WIFI_SSID, net::ADDRESS[0], net::ADDRESS[1], net::ADDRESS[2],
-                net::ADDRESS[3], patch::SACN_UNIVERSE, net::SACN_PORT, patch::DMX_ADDRESS,
-                patch::DMX_ADDRESS + patch::CHANNELS - 1);
+  say("start (%s), joining \"%s\" as %u.%u.%u.%u, sACN universe %u on port %u, DMX %u–%u",
+      ESP.getResetReason().c_str(), net::WIFI_SSID, net::ADDRESS[0], net::ADDRESS[1],
+      net::ADDRESS[2], net::ADDRESS[3], patch::SACN_UNIVERSE, net::SACN_PORT,
+      patch::DMX_ADDRESS, patch::DMX_ADDRESS + patch::CHANNELS - 1);
 }
 
 void loop() {
   static uint32_t lastTick = micros();
   static bool connected = false;
   static uint32_t stateDue = 0;
+  static uint32_t statusDue = STATUS_PERIOD_MS;
 
   const uint32_t now = micros();
   const uint32_t tick = now - lastTick;
   lastTick = now;
   if (tick > longestTick) {
     longestTick = tick;
+  }
+  if (tick > longestTickLogged) {
+    longestTickLogged = tick;
+  }
+  if (tick > STALL_LOG_US) {
+    say("loop stalled %lu ms", static_cast<unsigned long>(tick / 1000));
+  }
+  if (static_cast<int32_t>(millis() - statusDue) >= 0) {
+    logStatus();
+    statusDue = millis() + STATUS_PERIOD_MS;
   }
 
   // Lit while the motor is enabled, blinking at 1 Hz while it is released.
@@ -598,7 +657,7 @@ void loop() {
     stateDue = now;
   }
   if (!up && connected) {
-    Serial.println("wrist: WiFi lost");
+    say("WiFi lost");
   }
   connected = up;
   if (!connected) {

@@ -145,8 +145,8 @@ named `Wrist`. Its address on the access point is in `clockwork.dot`, the rig's 
 | 4 | Speed | Speed; stop band **Stopped** (0) | in Manual, and in Pluck read at its start: 0 stopped, 1–255 slow … the step generator's ceiling |
 
 **Motor.** The closed-loop stepper, set and supplied as `OWNED-DEVICES.md` has it. It runs at
-800 pulses per revolution: the model's fastest motion, about 8 rev/s, is 6.4 kHz of pulses,
-inside the 12.5 kHz the firmware can make; 1600 would not be.
+400 pulses per revolution, so the 12.5 kHz the firmware can make is 31 rev/s, for a sharper
+pluck than the 15.6 rev/s 800 gave; the model's fastest motion, about 8 rev/s, is 3.2 kHz.
 
 **Supply.** If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
