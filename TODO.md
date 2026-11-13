@@ -21,8 +21,8 @@ universe. The physical build waits for the model, in the next section.
 - `wrist/` firmware:
   - the modes Blackout, Hold, Pluck and Manual, each entered from any mode on the next tick;
     leaving Manual no longer ramps to a stop and releases;
-  - one ramp, `a_ramp`, for every controlled change of speed, so no mode has motion code of
-    its own; Blackout releases at once;
+  - one motion stage for every mode, so no mode has motion code of its own; every change of
+    speed at once, no ramp; Blackout releases at once;
   - a signed step count in the step generator, and a target the NMI stops itself on;
   - Pluck: Amplitude, Direction and Speed read once at its start; out by `A` at Speed,
     0.5 s dwell, back to the start in 2.5 s, held there until Mode leaves Pluck;
@@ -45,9 +45,8 @@ With the test sculpture, Monday 2026-11-16. Everything bought before then.
   the load cell, the wire leaving the shaft along the cell's axis; the wire wrapped a few
   turns round the bare shaft, tail tied off, then cable, hook, bands, hook and wire to the
   node. Nothing fixed to the sculpture but the wire.
-- By test, into the firmware's constants: `A_max`, the largest tug the band set takes, and
-  `a_ramp`, sharp enough for a tug without an alarm. Which Direction reels in, noted for the
-  desk.
+- By test, into the firmware's constants: `A_max`, the largest tug the band set takes. Which
+  Direction reels in, noted for the desk.
 - Pluck under takeover from QLC+: Hold, then Pluck; Amplitude small first, then up, watching
   the model.
 
@@ -65,6 +64,19 @@ universe.
   stale. A press while it is dark does nothing. So: Hold → green → pressed → dark → Pluck →
   `busy` … `cannot` → Hold → `can` → green.
 
+## Wrist's Run, from QLC+
+
+The target: the model swung by an open-loop sine from QLC+ faders under takeover, its
+frequency found by hand. Run as `CONTROL_LOOP.md` §4 has it; adaptive running stays later.
+
+- `wrist/` firmware: Run, `x0 + A_env·sin φ` through the motion stage, the swing cut to what the motor can follow and swelled at `A_slew`, the
+  stop armed on the end of the swing it is heading for; `/wrist/run/frequency`, `/wrist/run/amplitude`
+  and `/wrist/run/phase` in the state bundle.
+- `fixtures/wrist.qxf`: Mode's Manual 192–223 and Run 224–255; Frequency and Frequency fine
+  on ch5–ch6, a six-channel mode. `wrist.oscquery.json`: `/wrist/mode` gains `run`, and the
+  three Run addresses. The definition reinstalled in QLC+.
+- On the model: Run at a small Amplitude, Frequency swept slowly through the sway, by eye.
+
 ## Soldering
 
 - Find a plank to mount Wrist's board and its wiring on, instead of a housing.
@@ -74,6 +86,13 @@ universe.
 - With everything mounted on the plank, into `OWNED-DEVICES.md` and the firmware's constants:
   the status LED, and the alarm's polarity on a forced stall, holding the shaft while the
   motor runs; once the wire is on, the tension the unpowered shaft holds by its detent.
+- Wrist's board's supply, against the OSC refused by its WiFi stack (about 23 in 10 s at
+  −51 dBm, in and out of a pluck): 220–470 µF and 100 nF across the NodeMCU's 3V3 and GND,
+  on the header pins; 100–220 µF across VIN and GND if it is fed over a long lead or from
+  chaos-pi's USB (no more than 220 µF there, for the port's inrush). The optos' common anode
+  moved to 5 V with a 1N4148 in series with each cathode (`CONTROL_LOOP.md` §2), so the step
+  pulses' current is not on the radio's rail; or, short of that, 10 µF and 100 nF at the common
+  anode where the cable leaves. Read the refused count in the `status:` lines before and after.
 - Wire the home switch and the ADXL345 on the pins in `CONTROL_LOOP.md` §2.
 - If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
   feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.

@@ -42,8 +42,8 @@ const WRIST_STALE_AFTER: Duration = Duration::from_secs(1);
 /// press's Pluck — a desk holding the universe, frames lost on the way — and a press that waited
 /// on would pluck whenever a frame next got through, unattended.
 const PLUCK_PRESS_FRAMES: u32 = (WRIST_STALE_AFTER.as_millis() as u64 * FRAME_RATE_HZ / 1000) as u32;
-/// Pluck's tug: Wrist's largest, four revolutions, at its top speed, as sharp as its ramp makes
-/// it; clockwise, facing the shaft, which reels the wire in, by test.
+/// Pluck's tug: Wrist's largest, four revolutions, at its top speed from the first step to the
+/// last; clockwise, facing the shaft, which reels the wire in, by test.
 const PLUCK_TUG: Tug = Tug {
     size: 1.0,
     speed: 1.0,

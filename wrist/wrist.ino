@@ -33,27 +33,18 @@ const float LOAD_SCALE = NAN;           // N per count
 
 // The motion, CONTROL_LOOP.md §10. The driver is set to 400 steps a revolution, SW1–SW4; every
 // figure here is in its steps. The top speed is the step generator's ceiling, half its 25 kHz
-// tick: 31 revolutions a second, past the 15 where the motor's torque falls off, on trial. One
-// ramp for every mode: 200,000 steps/s² here is the 400,000 that ran on the wire without an alarm
-// at 800 steps a revolution, the same turn of the shaft. By test: watch the driver's red LED,
-// /wrist/alarm and /wrist/load/raw's peaks.
+// tick: 31 revolutions a second, past the 15 where the motor's torque falls off, on trial. No
+// ramp: every change of speed is taken at once. Plucks at full Amplitude and Speed, and Manual
+// reversed at full Speed, ran on the wire without an alarm, 2026-11-13.
 const float V_MAX = 12500.0f;           // steps/s, Speed at the top of its band
-const float A_RAMP = 200000.0f;         // steps/s², every controlled change of speed
 
 // Pluck, CONTROL_LOOP.md §4. The largest tug, Amplitude at full: four revolutions, about 100 mm
 // of wire on the 8 mm shaft. The largest the band set takes is found by test.
 const int32_t A_MAX = 1600;             // steps
 const uint32_t PLUCK_DWELL_MS = 500;    // held at the tug's end
-const float PLUCK_RETURN_S = 2.5f;      // back to where it began, ramps included
+const float PLUCK_RETURN_S = 2.5f;      // back to where it began
 // The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test, 2026-11-09.
 const uint8_t DIR_CW = HIGH;
-// The most one pass of loop() changes the speed by: the step generator takes the change at once.
-// 0.6 revolutions a second, as it has been since the first ramp.
-const float MAX_SPEED_JUMP = 250.0f;    // steps/s
-// The longest pass of loop() the ramp takes at face value, MAX_SPEED_JUMP at A_RAMP: 1.25 ms. A
-// pass longer than that, held up by the WiFi stack, changes the speed as if it had taken this
-// long.
-const uint32_t MAX_DT_US = static_cast<uint32_t>(MAX_SPEED_JUMP / A_RAMP * 1e6f);
 // The driver wants enable settled this long before the first pulse.
 const uint32_t ENABLE_SETTLE_MS = 100;
 
@@ -169,9 +160,9 @@ float speed = 0;
 
 const char *modeName(Mode m) { return osc::WristModeNames[static_cast<uint8_t>(m)]; }
 
-// One pluck, from the tick Pluck begins: Settle until the shaft stands, Out to the tug's end,
-// Dwell there, Back to where it began, then Rest there until Mode leaves Pluck.
-enum class PluckPhase { settle, out, dwell, back, rest };
+// One pluck, from the tick Pluck begins: Out to the tug's end, Dwell there, Back to where it
+// began, then Rest there until Mode leaves Pluck.
+enum class PluckPhase { out, dwell, back, rest };
 PluckPhase pluckPhase = PluckPhase::rest;
 // Read from the frame once, as Pluck begins.
 int32_t pluckSteps = 0;
@@ -326,23 +317,15 @@ float rateOf(uint8_t level) {
 
 bool clockwiseOf(uint8_t level) { return patch::direction::CLOCKWISE.holds(level); }
 
-// The one motion stage: every mode asks for a speed, or for a position to stop on, and this
-// ramps the shaft to it at A_RAMP, so no mode has motion code of its own. `wanted` is in
-// steps/s, positive clockwise. With `target`, the shaft is to come to rest there, and `wanted`
-// is only the most speed it may have on the way. Once per pass of loop(), `dt` in seconds.
-void move(float wanted, float dt, const int32_t *target = nullptr) {
-  // The highest speed from which the shaft can still stop on the target at A_RAMP, while it
-  // is moving towards it; moving away, it ramps to a stop like any change of direction. On
-  // the target the step generator has already stopped, so the speed is 0.
-  float most = INFINITY;
+// The one motion stage: every mode asks for a speed, or for a position to stop on, and this sets
+// it at once. `wanted` is in steps/s, positive clockwise. With `target`, the shaft is to come to
+// rest there, at `wanted`'s speed until the step generator stops itself on it. Once per pass of
+// loop().
+void move(float wanted, const int32_t *target = nullptr) {
   if (target != nullptr) {
     stepper::stopOn(*target);
     const int32_t remaining = *target - stepper::position;
-    const float reach = sqrtf(2 * A_RAMP * abs(remaining));
-    wanted = remaining == 0 ? 0 : copysignf(min(fabsf(wanted), reach), remaining);
-    if (remaining == 0 || (speed > 0) == (remaining > 0)) {
-      most = reach;
-    }
+    wanted = remaining == 0 ? 0 : copysignf(fabsf(wanted), remaining);
   } else {
     stepper::noStop();
   }
@@ -350,19 +333,13 @@ void move(float wanted, float dt, const int32_t *target = nullptr) {
   if (millis() - enabledAt < ENABLE_SETTLE_MS) {
     wanted = 0;
   }
-  // A change of direction ramps to a stop first, then sets DIR, then ramps up the other way.
-  if (speed != 0 && (wanted > 0) != (speed > 0)) {
-    wanted = 0;
+  // DIR is written only with the pulses stopped: a start, or a change of direction, stops them,
+  // sets DIR, and goes on the other way in the same pass.
+  if (wanted != 0 && (speed == 0 || (wanted > 0) != (speed > 0))) {
+    stepper::setRate(0);
+    stepper::setDirection(wanted > 0);
   }
-  const float step = A_RAMP * dt;
-  const bool startingFromRest = speed == 0;
-  speed = wanted > speed ? min(wanted, speed + step) : max(wanted, speed - step);
-  if (fabsf(speed) > most) {
-    speed = copysignf(most, speed);
-  }
-  if (startingFromRest && speed != 0) {
-    stepper::setDirection(speed > 0);
-  }
+  speed = wanted;
   stepper::setRate(fabsf(speed));
 }
 
@@ -371,50 +348,44 @@ void beginPluck() {
   pluckSteps = lroundf(A_MAX * levels[patch::amplitude::OFFSET] / 255.0f);
   pluckClockwise = clockwiseOf(levels[patch::direction::OFFSET]);
   pluckSpeed = rateOf(levels[patch::speed::OFFSET]);
-  pluckPhase = PluckPhase::settle;
+  // Turning, the shaft stops here, and the tug starts from where it stands.
+  move(0);
+  if (pluckSteps == 0 || pluckSpeed == 0) {
+    pluckPhase = PluckPhase::rest;
+    say("Pluck, no tug");
+    return;
+  }
+  pluckStart = stepper::position;
+  pluckEnd = pluckStart + (pluckClockwise ? pluckSteps : -pluckSteps);
+  pluckPhase = PluckPhase::out;
   say("Pluck, %ld steps %s at %.0f steps/s", static_cast<long>(pluckSteps),
       pluckClockwise ? "clockwise" : "counter-clockwise", pluckSpeed);
 }
 
-void stepPluck(float dt) {
+void stepPluck() {
   switch (pluckPhase) {
-    case PluckPhase::settle:
-      move(0, dt);
-      if (speed != 0) {
-        break;
-      }
-      if (pluckSteps == 0 || pluckSpeed == 0) {
-        pluckPhase = PluckPhase::rest;
-        say("Pluck, no tug");
-        break;
-      }
-      pluckStart = stepper::position;
-      pluckEnd = pluckStart + (pluckClockwise ? pluckSteps : -pluckSteps);
-      pluckPhase = PluckPhase::out;
-      break;
     case PluckPhase::out:
-      move(pluckSpeed, dt, &pluckEnd);
+      move(pluckSpeed, &pluckEnd);
       if (speed == 0 && stepper::position == pluckEnd) {
         dwellFrom = millis();
         pluckPhase = PluckPhase::dwell;
       }
       break;
     case PluckPhase::dwell:
-      move(0, dt);
+      move(0);
       if (millis() - dwellFrom >= PLUCK_DWELL_MS) {
         pluckPhase = PluckPhase::back;
       }
       break;
     case PluckPhase::back:
-      // The ramps at either end of a return this slow take a few milliseconds.
-      move(pluckSteps / PLUCK_RETURN_S, dt, &pluckStart);
+      move(pluckSteps / PLUCK_RETURN_S, &pluckStart);
       if (speed == 0 && stepper::position == pluckStart) {
         pluckPhase = PluckPhase::rest;
         say("Pluck, back where it began");
       }
       break;
     case PluckPhase::rest:
-      move(0, dt);
+      move(0);
       break;
   }
 }
@@ -430,9 +401,9 @@ osc::WristPluck pluckState() {
   return osc::WristPluck::cannot;
 }
 
-// Once per pass of loop(), `dt` in seconds since the last. The frame's mode is the mode, from
-// any mode to any other, taking over from wherever the shaft is.
-void updateMotor(float dt) {
+// Once per pass of loop(). The frame's mode is the mode, from any mode to any other, taking over
+// from wherever the shaft is.
+void updateMotor() {
   const Mode asked = askedMode();
   if (asked == Mode::blackout) {
     if (mode != Mode::blackout) {
@@ -453,14 +424,14 @@ void updateMotor(float dt) {
   }
   switch (mode) {
     case Mode::hold:
-      move(0, dt);
+      move(0);
       break;
     case Mode::pluck:
-      stepPluck(dt);
+      stepPluck();
       break;
     case Mode::manual: {
       const float rate = rateOf(levels[patch::speed::OFFSET]);
-      move(clockwiseOf(levels[patch::direction::OFFSET]) ? rate : -rate, dt);
+      move(clockwiseOf(levels[patch::direction::OFFSET]) ? rate : -rate);
       break;
     }
     default:
@@ -636,12 +607,10 @@ void loop() {
                             : HIGH);
 
   // The motor first, and whether or not the WiFi is up: with the WiFi gone the frames stop,
-  // and the timeout is what releases the shaft. A pass held up by the WiFi stack ramps no
-  // faster for it: dt is capped, so a late pass changes the speed by at most A_RAMP·MAX_DT.
-  // What it cannot help is the step generator running on at the old speed through the stall:
-  // the move then ends harder than the ramp, still on its target.
+  // and the timeout is what releases the shaft. Through a pass held up by the WiFi stack the
+  // step generator runs on at the speed it has, and still stops itself on a move's target.
   receiveSacn();
-  updateMotor(min(tick, MAX_DT_US) * 1e-6f);
+  updateMotor();
 
   // Read whether or not the WiFi is up, so the force is current the moment it is.
   int32_t raw;
