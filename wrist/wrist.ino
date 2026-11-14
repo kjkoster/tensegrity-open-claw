@@ -1,7 +1,6 @@
-// Wrist's firmware, so far: the board on the WiFi, every OSC address in wrist.oscquery.json sent
-// the way the file says, and the motor in Blackout, Hold, Pluck or Manual as the brain's sACN
-// frame sets, per CONTROL_LOOP.md. It follows the frame and decides nothing but Blackout on a
-// lost universe. The accelerometer and Run come later.
+// Wrist's firmware: the board on the WiFi, its state and readings sent over OSC, and the motor in
+// Blackout, Hold, Pluck, Run or Manual as the brain's sACN frame sets. It follows the frame and
+// decides nothing but Blackout on a lost universe.
 //
 // The network, the patch and the OSC encoders are in generated.h, which build.sh writes from
 // clockwork.dot, clockwork.qxw, wrist.qxf and wrist.oscquery.json before every build.
@@ -26,23 +25,27 @@ const uint8_t PIN_HX_DT = 16;   // D0
 const uint8_t PIN_HX_SCK = 15;  // D8
 const uint8_t PIN_LED = 2;      // D4, lit when low
 
-// The load cell's calibration, CONTROL_LOOP.md §7. Until it is measured the scale is NaN, so
+// The load cell's calibration: force = (raw − tare) · scale. The scale is NaN, so
 // /wrist/load/force reads NaN rather than a tension nobody measured.
 const int32_t LOAD_TARE = 0;            // raw counts
 const float LOAD_SCALE = NAN;           // N per count
 
-// The motion, CONTROL_LOOP.md §10. The driver is set to 400 steps a revolution, SW1–SW4; every
+// The motion. The driver is set to 400 steps a revolution, SW1–SW4; every
 // figure here is in its steps. The top speed is the step generator's ceiling, half its 25 kHz
 // tick: 31 revolutions a second, past the 15 where the motor's torque falls off, on trial. No
 // ramp: every change of speed is taken at once. Plucks at full Amplitude and Speed, and Manual
 // reversed at full Speed, ran on the wire without an alarm, 2026-11-13.
 const float V_MAX = 12500.0f;           // steps/s, Speed at the top of its band
 
-// Pluck, CONTROL_LOOP.md §4. The largest tug, Amplitude at full: four revolutions, about 100 mm
-// of wire on the 8 mm shaft. The largest the band set takes is found by test.
+// Pluck's largest tug, and Run's largest swing either side, Amplitude at full: four revolutions,
+// about 100 mm of wire on the 8 mm shaft.
 const int32_t A_MAX = 1600;             // steps
 const uint32_t PLUCK_DWELL_MS = 500;    // held at the tug's end
 const float PLUCK_RETURN_S = 2.5f;      // back to where it began
+// Run: Frequency at the top of its 16 bits, and how fast the shaft closes on the sine; it trails
+// the sine by atan(2π·f·τ), 17° at 5 Hz.
+const float F_MAX = 5.0f;               // Hz
+const float RUN_TAU_S = 0.01f;          // s
 // The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test, 2026-11-09.
 const uint8_t DIR_CW = HIGH;
 // The driver wants enable settled this long before the first pulse.
@@ -50,6 +53,9 @@ const uint32_t ENABLE_SETTLE_MS = 100;
 
 // E1.31's network-data-loss timeout: a universe silent this long is lost.
 const uint32_t SACN_TIMEOUT_MS = 2500;
+
+// The loop measures a pass in µs, from micros(); the motor takes it in seconds.
+const float US_PER_S = 1e6f;
 
 // 1 Hz: half a second lit, half dark.
 const uint32_t BLINK_HALF_PERIOD_MS = 500;
@@ -150,8 +156,7 @@ void noStop() { stopArmed = false; }
 
 // ── The motor ────────────────────────────────────────────────────────────────────────────────
 
-// The modes are /wrist/mode's values, as wrist.oscquery.json lists them, so the mode is sent as
-// it is.
+// The modes are the generated encoder's values for /wrist/mode, so the mode is sent as it is.
 using Mode = osc::WristMode;
 Mode mode = Mode::blackout;
 uint32_t enabledAt = 0;
@@ -172,6 +177,11 @@ float pluckSpeed = 0;           // steps/s
 int32_t pluckStart = 0;
 int32_t pluckEnd = 0;
 uint32_t dwellFrom = 0;
+
+// Run's sine, x0 + s·A·sin φ: where the shaft stood as Run began, s from Direction then, and φ.
+int32_t runCentre = 0;
+float runSign = 1;
+float runPhase = 0;             // radians
 
 void enableMotor() {
   digitalWrite(PIN_ENA, LOW);
@@ -299,6 +309,9 @@ Mode askedMode() {
   if (patch::mode::PLUCK.holds(level)) {
     return Mode::pluck;
   }
+  if (patch::mode::RUN.holds(level)) {
+    return Mode::run;
+  }
   if (patch::mode::MANUAL.holds(level)) {
     return Mode::manual;
   }
@@ -401,9 +414,33 @@ osc::WristPluck pluckState() {
   return osc::WristPluck::cannot;
 }
 
-// Once per pass of loop(). The frame's mode is the mode, from any mode to any other, taking over
-// from wherever the shaft is.
-void updateMotor() {
+// Direction is read once, here, and ignored for the rest of the Run.
+void beginRun() {
+  move(0);
+  runCentre = stepper::position;
+  runSign = clockwiseOf(levels[patch::direction::OFFSET]) ? 1 : -1;
+  runPhase = 0;
+  say("Run, first swing %s", runSign > 0 ? "clockwise" : "counter-clockwise");
+}
+
+// Amplitude and Frequency are followed on every frame. φ stands still while the driver settles
+// after enabling, so the sine starts from x0 once the shaft can follow it.
+void stepRun(float dt) {
+  const float amplitude = A_MAX * levels[patch::amplitude::OFFSET] / 255.0f;
+  const uint16_t level = (levels[patch::frequency::OFFSET] << 8) |
+                         levels[patch::frequency_fine::OFFSET];
+  const float frequency = F_MAX * level / 65535.0f;
+  if (millis() - enabledAt >= ENABLE_SETTLE_MS) {
+    runPhase = fmodf(runPhase + 2 * PI * frequency * dt, 2 * PI);
+  }
+  // A whole step, so a frozen sine does not hunt between the two either side of it.
+  const int32_t wanted = runCentre + lroundf(runSign * amplitude * sinf(runPhase));
+  move((wanted - stepper::position) / RUN_TAU_S);
+}
+
+// Once per pass of loop(), `dt` in seconds since the last. The frame's mode is the mode, from
+// any mode to any other, taking over from wherever the shaft is.
+void updateMotor(float dt) {
   const Mode asked = askedMode();
   if (asked == Mode::blackout) {
     if (mode != Mode::blackout) {
@@ -421,6 +458,9 @@ void updateMotor() {
     if (mode == Mode::pluck) {
       beginPluck();
     }
+    if (mode == Mode::run) {
+      beginRun();
+    }
   }
   switch (mode) {
     case Mode::hold:
@@ -428,6 +468,9 @@ void updateMotor() {
       break;
     case Mode::pluck:
       stepPluck();
+      break;
+    case Mode::run:
+      stepRun(dt);
       break;
     case Mode::manual: {
       const float rate = rateOf(levels[patch::speed::OFFSET]);
@@ -460,7 +503,7 @@ void sendToRecipients(size_t length) {
 }
 
 // The ESP8266's reset reasons, REASON_DEFAULT_RST to REASON_EXT_SYS_RST, are 0 to 6 in the
-// order wrist.oscquery.json lists their names.
+// order the generated osc::SysWristResetReason lists them.
 osc::SysWristResetReason resetReason() {
   const uint32_t reason = ESP.getResetInfoPtr()->reason;
   return reason <= static_cast<uint32_t>(osc::SysWristResetReason::external_reset)
@@ -495,6 +538,7 @@ void sendState() {
   osc::At10hz v;
   v.wrist_mode = mode;
   v.wrist_pluck = pluckState();
+  v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
   v.wrist_load_force = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
   v.wrist_health_tick_dt = static_cast<int32_t>(longestTick);
@@ -610,7 +654,7 @@ void loop() {
   // and the timeout is what releases the shaft. Through a pass held up by the WiFi stack the
   // step generator runs on at the speed it has, and still stops itself on a move's target.
   receiveSacn();
-  updateMotor();
+  updateMotor(tick / US_PER_S);
 
   // Read whether or not the WiFi is up, so the force is current the moment it is.
   int32_t raw;

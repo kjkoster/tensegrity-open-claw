@@ -37,7 +37,7 @@ fn main() {
     let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
     let (face, face_state) = face::claim(brain_publisher.part("face"), sent_frames);
     let estop_state = face_state.clone();
-    // Wrist's OSC, which the show plucks it by.
+    // Wrist's OSC, which the show plucks it by and shows its phase from.
     let wrist_reports = wrist::spawn(network::OSC_BIND);
     let mut show = Show::new(brain_publisher.clone(), &shows::CALENDAR);
 

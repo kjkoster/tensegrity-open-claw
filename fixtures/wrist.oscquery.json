@@ -15,9 +15,24 @@
           "TYPE": "s",
           "ACCESS": 1,
           "RANGE": [
-            { "VALS": ["blackout", "hold", "pluck", "manual"] }
+            { "VALS": ["blackout", "hold", "pluck", "run", "manual"] }
           ],
           "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "run": {
+          "FULL_PATH": "/wrist/run",
+          "DESCRIPTION": "Run's sine, x0 + s·A·sin φ.",
+          "CONTENTS": {
+            "phase": {
+              "FULL_PATH": "/wrist/run/phase",
+              "DESCRIPTION": "φ, from 0 as Run begins, the end of the first swing at π/2. NaN outside Run.",
+              "TYPE": "f",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0, "MAX": 6.2831855 }],
+              "UNIT": ["rad"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+            }
+          }
         },
         "pluck": {
           "FULL_PATH": "/wrist/pluck",

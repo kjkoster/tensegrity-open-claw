@@ -1,3 +1,6 @@
+// The table names its days by kind, and need not use both.
+#[allow(unused_imports)]
+use cortex_build::Day::{self, DuskShowDay, TestDay};
 use std::env;
 use std::path::PathBuf;
 

@@ -755,32 +755,26 @@ days, not seconds.
 ### 3.10 Wrist
 
 A guy-wire drive that sways a structure at its own first natural frequency: an integrated
-closed-loop stepper reeling the wire through a series spring, an accelerometer on the structure
-and a load cell under the motor, all on one board that follows the universe and closes the sway
-loop itself. Its firmware is C++ on the Arduino core for the ESP8266, which the chip forces
-(§2.4).
+closed-loop stepper reeling the wire through a series spring, and a load cell under the motor,
+on one board that follows the universe. Its firmware is C++ on the Arduino core for the
+ESP8266, which the chip forces (§2.4).
 
 **A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told to
 move, which lets the e-stop, a takeover and signal loss cover the drive with no rule of their
-own, and lets an artist session drive it from a fader. The frame sets a mode and an amplitude,
-and for turning the shaft by hand a direction and a speed; Wrist renders the motion at its own
-rate, for the ball's reason: forty bunched
-frames a second over WiFi cannot carry step pulses.
-
-**The loop closes in the fixture.** Sensor, oscillator and motor share one board, so nothing in
-the phase loop crosses the network: no WiFi latency or jitter to allow for, no shared clock, no
-relay. The ESP8266 has no Bluetooth, so the accelerometer is wired to the board rather than
-sending from a radio of its own. A local oscillator phase-locked to the sway times the drive;
-the frame says only how much.
+own, and lets an artist session drive it from a fader. The frame sets a mode and what that mode
+reads; `fixtures/wrist.qxf` says which channels those are. Wrist renders the motion at its own
+rate, for the ball's reason: forty bunched frames a second over WiFi cannot carry step pulses.
 
 **A resonance pumped through a spring.** Rubber bands between the wire and the structure turn
 motor position into force, so the motor drives the structure's own mode and the drive's phase
-is the control; a stiff line would fight the structure instead. Every lag in the chain —
-sensor, filter, motor, bands, structure — is absorbed in one phase offset that Wrist learns
-while it runs, by seeking the largest sway at a fixed drive, rather than one computed or set by
-hand. Frequency and Q come from the ring-down after a single tug, a pluck. What Wrist learns
-persists across power cycles and is reported, so the coded-in defaults are updated by hand from
-what it learned.
+is the control; a stiff line would fight the structure instead. Run drives the wire in a sine
+at the frequency and amplitude the frame sets, open loop: the desk finds the resonance by eye.
+
+**Closing the loop in the fixture is the aim, not built.** An accelerometer on the structure,
+wired to the board, and an oscillator phase-locked to the sway would time the drive on the
+board itself, so nothing in the phase loop crosses the network, with the drive's phase learned
+while it runs. The ESP8266 has no Bluetooth, which is why the accelerometer is to be wired
+rather than send from a radio of its own.
 
 **Blackout is limp.** Mode's no-function band is Blackout: coils released, as if the motor's
 power were cut, which is also Wrist's idle state. Every other fixture holds its last values on
@@ -792,29 +786,26 @@ from a requested one — releases at once as well.
 
 **Wrist follows the desk and does not decide.** The mode in the frame is Wrist's mode, from
 any mode to any other, on the next tick: Blackout, Hold (enabled, the shaft locked), Pluck (one
-tug of the frame's size, direction and speed, then back and held) and Manual (the frame's
-direction and speed). No mode is entered or left by the firmware's own choice, no brake, no
+tug, then back and held), Run (a sine about where the shaft stood) and Manual (the shaft turned
+by hand from the desk). No mode is entered or left by the firmware's own choice, no brake, no
 fallback; the one exception is the lost universe above. Every change of speed is taken at once,
 with no ramp: the motor follows a step from standstill to full speed. Wrist reports whether a
 pluck can start, so the show starts one only when it can.
 
 **Blackout means unhomed.** Released, the shaft can be turned by the wire, a hand or the
 structure settling, and the motor's encoder is inside its driver where Wrist cannot read it.
-Hold, Pluck and Manual need no home: each counts from where the shaft is. Run will need one;
-how it homes is decided with Run.
+No mode needs a home: each counts from where the shaft is as it begins.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
 latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
-in-position signal. Wrist's other evidence is its own — the load cell's tension, the home switch
-closing mid-run on lost steps or a slipped wrap, a stale accelerometer, a move clamped at the
-travel limits — and all of it is reported, not acted on: the desk decides.
+in-position signal. Wrist's other evidence is the load cell's tension. Both are reported, not
+acted on: the desk decides.
 
 **Step pulses from a timer NMI.** The ESP8266 has one core, shared with WiFi; pulses timed in
 ordinary code would jitter with the radio's interrupts, so a timer at non-maskable priority
 makes them from a velocity the control tick sets.
 
-**Telemetry is OSC, out only.** Wrist sends its loop variables and raw inputs
-as OSC bundles, whether a pluck can start among them, and its transitions as events. Nothing is
-computed for telemetry; what can be derived is derived from the recording. The address space is
-`fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
+**Telemetry is OSC, out only.** Wrist sends its state and raw inputs as OSC, whether a pluck
+can start and Run's phase among them. Nothing is computed for telemetry; what can be derived is
+derived from the recording. The address space is `fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
 coded in, worked out from raw readings in the telemetry.

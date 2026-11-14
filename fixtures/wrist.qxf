@@ -11,14 +11,15 @@
  <Type>Other</Type>
  <Channel Name="Mode">
   <Group Byte="0">Maintenance</Group>
-  <Capability Min="0" Max="63" Preset="NoFunction">Blackout</Capability>
-  <Capability Min="64" Max="127">Hold</Capability>
-  <Capability Min="128" Max="191">Pluck</Capability>
-  <Capability Min="192" Max="255">Manual</Capability>
+  <Capability Min="0" Max="51" Preset="NoFunction">Blackout</Capability>
+  <Capability Min="52" Max="102">Hold</Capability>
+  <Capability Min="103" Max="153">Pluck</Capability>
+  <Capability Min="154" Max="204">Run</Capability>
+  <Capability Min="205" Max="255">Manual</Capability>
  </Channel>
  <Channel Name="Amplitude">
   <Group Byte="0">Nothing</Group>
-  <Capability Min="0" Max="255">Tug, none to the maximum</Capability>
+  <Capability Min="0" Max="255">Tug or swing, none to the maximum</Capability>
  </Channel>
  <Channel Name="Direction">
   <Group Byte="0">Speed</Group>
@@ -30,11 +31,21 @@
   <Capability Min="0" Max="0" Preset="RotationStop">Stopped</Capability>
   <Capability Min="1" Max="255" Preset="SlowToFast">Slow to the maximum</Capability>
  </Channel>
- <Mode Name="4 Channel">
+ <Channel Name="Frequency">
+  <Group Byte="0">Speed</Group>
+  <Capability Min="0" Max="255">Frequency, none to the maximum</Capability>
+ </Channel>
+ <Channel Name="Frequency fine">
+  <Group Byte="1">Speed</Group>
+  <Capability Min="0" Max="255">Frequency fine</Capability>
+ </Channel>
+ <Mode Name="6 Channel">
   <Channel Number="0">Mode</Channel>
   <Channel Number="1">Amplitude</Channel>
   <Channel Number="2">Direction</Channel>
   <Channel Number="3">Speed</Channel>
+  <Channel Number="4">Frequency</Channel>
+  <Channel Number="5">Frequency fine</Channel>
  </Mode>
  <Physical>
   <Bulb Type="Other" Lumens="0" ColourTemperature="0"/>

@@ -1,36 +1,15 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: Wrist's pluck first, then Monday's test, then the brain's pluck, then soldering, then clean up,
-then Wrist's sensing and telemetry, then its motor under a console, then the brain's programme;
+it: Monday's test first, then Wrist's Run, then soldering, then clean up, then Wrist's sensing
+and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
 [`DESIGN.md`](DESIGN.md), and the PoC's measurements are recorded by `brain/run`.
-Wrist's firmware is specified in [`CONTROL_LOOP.md`](CONTROL_LOOP.md); its open decisions are
-steps here.
+Wrist's open decisions are steps here, and so is the design of what its firmware does not do
+yet.
 
 ---
-
-## Wrist's pluck, from QLC+
-
-The target: the model plucked from QLC+ faders under takeover, by hand, without measuring it:
-there is no accelerometer yet. Blackout, Hold, Pluck and Manual as `CONTROL_LOOP.md` §4 has
-them; no Run. The firmware follows the desk and decides nothing but Blackout on a lost
-universe. The physical build waits for the model, in the next section.
-
-- `wrist/` firmware:
-  - the modes Blackout, Hold, Pluck and Manual, each entered from any mode on the next tick;
-    leaving Manual no longer ramps to a stop and releases;
-  - one motion stage for every mode, so no mode has motion code of its own; every change of
-    speed at once, no ramp; Blackout releases at once;
-  - a signed step count in the step generator, and a target the NMI stops itself on;
-  - Pluck: Amplitude, Direction and Speed read once at its start; out by `A` at Speed,
-    0.5 s dwell, back to the start in 2.5 s, held there until Mode leaves Pluck;
-  - `/wrist/pluck` in the state bundle: `busy`, `can` or `cannot`.
-- `fixtures/wrist.qxf`: Mode as Blackout 0–63 · Hold 64–127 · Pluck 128–191 · Manual 192–255,
-  RampDown and Run gone; Amplitude Pluck's, Direction and Speed Manual's and Pluck's.
-  `wrist.oscquery.json`: `/wrist/mode` as `blackout`, `hold`, `pluck`, `manual`, and
-  `/wrist/pluck`. The definition reinstalled in QLC+.
 
 ## Test and dinner on Monday
 
@@ -50,32 +29,14 @@ With the test sculpture, Monday 2026-11-16. Everything bought before then.
 - Pluck under takeover from QLC+: Hold, then Pluck; Amplitude small first, then up, watching
   the model.
 
-## The brain plucks
+## Wrist's Run
 
-The target: the model plucked from the cabinet door's right button, through the brain's
-universe.
+The target: the model swung by an open-loop sine, from the brain's `run` show state and from
+QLC+ faders under takeover, its frequency found by hand.
 
-- Brain: an OSC receiver for Wrist's state bundle, binding where `clockwork.dot` has its `osc`
-  port, read by `cortex-build` as the sACN receiver's is, decoded from
-  `wrist.oscquery.json`, feeding a seam; stale when no bundle has come for a set time.
-- Brain: Wrist's Mode is Pluck from a press of the right button while it is green until
-  `/wrist/pluck` leaves `can`, and while `/wrist/pluck` is `busy`; Hold otherwise. The right
-  button lit green while `/wrist/pluck` is `can`, dark while it is `busy` or `cannot`, or
-  stale. A press while it is dark does nothing. So: Hold → green → pressed → dark → Pluck →
-  `busy` … `cannot` → Hold → `can` → green.
-
-## Wrist's Run, from QLC+
-
-The target: the model swung by an open-loop sine from QLC+ faders under takeover, its
-frequency found by hand. Run as `CONTROL_LOOP.md` §4 has it; adaptive running stays later.
-
-- `wrist/` firmware: Run, `x0 + A_env·sin φ` through the motion stage, the swing cut to what the motor can follow and swelled at `A_slew`, the
-  stop armed on the end of the swing it is heading for; `/wrist/run/frequency`, `/wrist/run/amplitude`
-  and `/wrist/run/phase` in the state bundle.
-- `fixtures/wrist.qxf`: Mode's Manual 192–223 and Run 224–255; Frequency and Frequency fine
-  on ch5–ch6, a six-channel mode. `wrist.oscquery.json`: `/wrist/mode` gains `run`, and the
-  three Run addresses. The definition reinstalled in QLC+.
-- On the model: Run at a small Amplitude, Frequency swept slowly through the sway, by eye.
+- `fixtures/wrist.qxf`, now six channels, reinstalled in QLC+; Wrist and the brain deployed.
+- On the model: Run at a small Amplitude, Frequency swept slowly through the sway, by eye, the
+  right lamp against the shaft.
 
 ## Soldering
 
@@ -90,10 +51,10 @@ frequency found by hand. Run as `CONTROL_LOOP.md` §4 has it; adaptive running s
   −51 dBm, in and out of a pluck): 220–470 µF and 100 nF across the NodeMCU's 3V3 and GND,
   on the header pins; 100–220 µF across VIN and GND if it is fed over a long lead or from
   chaos-pi's USB (no more than 220 µF there, for the port's inrush). The optos' common anode
-  moved to 5 V with a 1N4148 in series with each cathode (`CONTROL_LOOP.md` §2), so the step
+  moved to 5 V with a 1N4148 in series with each cathode, so the step
   pulses' current is not on the radio's rail; or, short of that, 10 µF and 100 nF at the common
   anode where the cable leaves. Read the refused count in the `status:` lines before and after.
-- Wire the home switch and the ADXL345 on the pins in `CONTROL_LOOP.md` §2.
+- Wire the home switch and the ADXL345 on the pins in `SHOW.md` §3.1.
 - If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
   feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
 
@@ -104,8 +65,6 @@ frequency found by hand. Run as `CONTROL_LOOP.md` §4 has it; adaptive running s
   its HX711.
 - Hardware out of the cabinet: the camera and its PoE injector, the audio interface, their
   cables.
-- Delete `fixtures/dendrite.oscquery.json`, and `fixtures/wrist.xml`, a copy of the old
-  `wrist.qxf`.
 - Rename `claw-pi` to `chaos-pi`.
 - `ngrep` installed on `chaos-pi` by its deploy, for watching Wrist's OSC arrive:
   `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'`.
@@ -134,8 +93,10 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
   results and protections, `brain/show` and `brain/run` as annotations. Grafana stays on
   loopback; the Mac reaches it over the SSH jump, now across the access point.
-- `wrist/` firmware, sensing half, per `CONTROL_LOOP.md`: the ADXL345 and the HX711; the
-  lock-in running; the state and waveform bundles and the events; LittleFS; the LED.
+- `wrist/` firmware, sensing half: the ADXL345 over I²C, ±2 g full resolution, 200 Hz output
+  read at 100 Hz in one 6-byte burst (not SPI: its pins are taken, and a fast four-wire bus
+  down a cable to a moving structure is the fragile choice); the lock-in running; the waveform
+  bundle and the events; LittleFS.
 - Once the HX711 reads right at 10 samples a second, and not before, in case the board does
   not survive it: lift the chip's RATE leg (pin 15) off its ground pad and tie it to DVDD
   (pin 16), for 80 a second; confirm the readings again.
@@ -148,16 +109,46 @@ The target: E1, Wrist homing, plucking and running from QLC+ faders under takeov
 through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 - The home switch on the bridge, at the wire's pay-out end.
-- `wrist/` firmware, Run, designed first: its band in Mode, homing, the ring-down that
-  measures f and Q, the PLL and the drive phase's adaptation, the velocity clamp and soft
-  limits; then built per `CONTROL_LOOP.md`.
-- Calibrate the load cell per `CONTROL_LOOP.md` §7; measure the rest position, the travel and
+- `wrist/` firmware, adaptive running: Run's sine with its frequency and phase no longer the
+  desk's but a local oscillator's, phase-locked to the sway, so the shaft drives in phase with
+  the structure's velocity at the amplitude the desk sets. Designed first: its band in Mode,
+  homing, the ring-down that measures f and Q and how it is recorded, the PLL and the drive
+  phase's adaptation, the velocity clamp and soft limits. The sketch so far:
+  - *Position.* Positive reels in; 0 at the home switch, at the pay-out end with the bands
+    still stretched; the drive centred on a rest position between it and the travel's end,
+    so the wire is never slack.
+  - *Sway signal.* One ADXL345 axis, the one with the largest ring-down, picked at a pluck,
+    through a slow DC high-pass and nothing else: the lock-in is the band-pass.
+  - *Lock-in.* `I = LPF(s·cos φ)`, `Q = LPF(s·sin φ)` over 3–5 cycles; `θ = atan2(Q, I)` the
+    sway's phase against the oscillator, `a = 2√(I² + Q²)` its amplitude; worked out at
+    20 Hz, not every tick, the chip having no floating point.
+  - *PLL.* `e = wrap(−θ)`; `ω += K_i·e·dt`, `φ += K_p·e`, bandwidth about `f/100`, `ω`
+    clamped to ±20% of the ring-down's `f`, seeded from it. Locked while `a` is above a
+    floor and `|e|` under about 20° for five cycles. A loop this slow does not care about
+    sensor latency or a dropped sample.
+  - *Drive.* Run's sine at `φ + φ_off`; the loop does not regulate the sway's amplitude. The
+    velocity clamped to what the model needs, about 1.2 × 2π·f·A at the largest f and A,
+    so a bad estimate or a snapped fader can do no more than the show would.
+  - *Drive phase.* `φ_off` absorbs every lag in the chain and is learned, not computed.
+    Acquiring: drive at a seed amplitude, step `φ_off` by 90° when the sway does not grow in
+    five cycles, keep the quadrant that grows fastest, bisect twice. Tracking, by extremum
+    seeking: a ±8° square-wave dither over 30 cycles, `φ_off` moved by the difference in mean
+    sway between the halves, at most 5° a step; paused while the amplitude changes; clamped to
+    ±60° of the acquired value, back to acquiring if the clamp is hit repeatedly.
+  - *Kept.* f, Q, the axis and `φ_off` in LittleFS, `φ_off` at most once a minute, the coded
+    defaults only for a board with nothing kept; all reported over OSC, so the defaults are
+    updated by hand.
+  - *Reported.* Homed and locked; the oscillator's ω and φ, the PLL's error, the sway's
+    amplitude, the drive's amplitude and phase offset, the regime, the shaft's position; the
+    accelerometer's axes and the sway on each reading; the transitions and ring-down results
+    as they happen.
+- Calibrate the load cell per `SHOW.md` §3.1; measure the rest position, the travel and
   the tension limits for the band set; all into the firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
 
 ## The brain runs the programme
 
-- Brain: the calendar and test mode disabled, left in the code; the show always runs.
+- Brain: test mode disabled, left in the code, as the calendar is.
 - Brain: the OSC receiver takes Wrist's waveform bundle as well.
 - The Director's states — `armed-pluck`, `pluck`, `armed-run`, `run` — with the button rules
   of `SHOW.md` §2.2, `brain/run`, and the lamp patterns of §2.3, Run's two sines included;
@@ -199,4 +190,6 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
   panels and the SQL behind them committed under `pi/memory-pi/grafana/`; the answers to the
   three questions, with the measurement behind each; and what the PoC did not settle.
 - `DESIGN.md`: correct §3.10 by what was measured.
+- Delete `CONTROL_LOOP.md`: its content is merged into `SHOW.md` and this file, and nothing
+  links to it.
 - Tag `<YYYY-MM-DD>-headless-hug-poc`; empty this file for the next show.

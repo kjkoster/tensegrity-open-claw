@@ -59,7 +59,7 @@ wrist/build.sh
 BINARIES="target/binaries"
 rm -rf "$BINARIES"
 mkdir -p "$BINARIES"
-cp wrist/build/wrist.ino.bin "$BINARIES/wrist.bin"
+cp "${WRIST_BUILD_DIR:-target/arduino}/wrist.ino.bin" "$BINARIES/wrist.bin"
 
 # --- Ship to the Pi --------------------------------------------------------
 # What the Pi runs, and nothing else. Named rather than excluded, so adding something is a

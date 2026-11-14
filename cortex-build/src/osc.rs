@@ -19,7 +19,8 @@ struct Leaf {
 
 /// Generates `osc_<device>.rs` in `OUT_DIR` from `<device>.oscquery.json`, holding
 /// `pub mod <device>`: for every string address that lists its values, an enum of them, with
-/// its address, its type tag and the words for each.
+/// its address, its type tag and the words for each; for every other address, a unit struct
+/// with its address and type tag.
 ///
 /// The reader is found in `clockwork/`, beside the `fixtures/` the file is in.
 pub fn osc(file: &Path) {
@@ -67,12 +68,22 @@ fn render(device: &str, source: &str, leaves: &[Leaf]) -> String {
     writeln!(out).unwrap();
     writeln!(out, "#[allow(dead_code)]").unwrap();
     writeln!(out, "pub mod {device} {{").unwrap();
-    for (i, leaf) in leaves.iter().filter(|leaf| !leaf.values.is_empty()).enumerate() {
+    for (i, leaf) in leaves.iter().enumerate() {
         let name = camel(&leaf.path.trim_start_matches('/').replace('/', "_"));
-        let variants: Vec<String> = leaf.values.iter().map(|v| camel(v)).collect();
         if i > 0 {
             writeln!(out).unwrap();
         }
+        if leaf.values.is_empty() {
+            writeln!(out, "    /// `{}`'s address and type tag.", leaf.path).unwrap();
+            writeln!(out, "    pub struct {name};").unwrap();
+            writeln!(out).unwrap();
+            writeln!(out, "    impl {name} {{").unwrap();
+            writeln!(out, "        pub const PATH: &str = {:?};", leaf.path).unwrap();
+            writeln!(out, "        pub const TAG: &str = \",{}\";", leaf.kind).unwrap();
+            writeln!(out, "    }}").unwrap();
+            continue;
+        }
+        let variants: Vec<String> = leaf.values.iter().map(|v| camel(v)).collect();
         writeln!(out, "    /// `{}`'s values, in the order the file lists them.", leaf.path).unwrap();
         writeln!(out, "    #[derive(Clone, Copy, PartialEq, Eq, Debug)]").unwrap();
         writeln!(out, "    pub enum {name} {{").unwrap();

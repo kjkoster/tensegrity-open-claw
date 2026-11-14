@@ -22,8 +22,34 @@ use std::fs;
 use std::path::PathBuf;
 use sunrise::{Coordinates, DawnType, SolarDay, SolarEvent};
 
+/// One entry in a rig's show table: a local `start` and `stop` such as `"2026-10-21 13:00"`,
+/// and how the show plays between them.
+pub enum Day {
+    /// The show plays only while it is dark, civil dusk to civil dawn, inside the range.
+    DuskShowDay(&'static str, &'static str),
+    /// The show plays for the whole range, light or dark.
+    TestDay(&'static str, &'static str),
+}
+
+impl Day {
+    fn range(&self) -> (&'static str, &'static str) {
+        match *self {
+            Day::DuskShowDay(start, stop) | Day::TestDay(start, stop) => (start, stop),
+        }
+    }
+
+    /// The `cortex::calendar::Kind` variant the generated table names.
+    fn kind(&self) -> &'static str {
+        match self {
+            Day::DuskShowDay(..) => "DuskShowDay",
+            Day::TestDay(..) => "TestDay",
+        }
+    }
+}
+
 /// One show, resolved.
 struct Show {
+    kind: &'static str,
     start: Timestamp,
     stop: Timestamp,
     /// The stretches of the show between civil dusk and civil dawn, clipped to the show.
@@ -31,12 +57,11 @@ struct Show {
 }
 
 /// Generates `shows.rs` into `OUT_DIR`: a `shows` module holding the site, and every show in
-/// `shows` with its dark stretches, as one `CALENDAR`.
+/// `shows` with its kind and its dark stretches, as one `CALENDAR`.
 ///
 /// `city` is a name from the `cities` gazetteer, or `"City, Country"` where the name alone
-/// is not unique. `shows` are local `(start, stop)` pairs such as
-/// `("2026-10-21 13:00", "2026-10-21 22:00")`, in order and not overlapping.
-pub fn calendar(city: &str, shows: &[(&str, &str)]) {
+/// is not unique. `shows` are in order and do not overlap.
+pub fn calendar(city: &str, shows: &[Day]) {
     let place = find_city(city);
     let zone = tzf_rs::DefaultFinder::new()
         .get_tz_name(place.longitude, place.latitude)
@@ -58,7 +83,8 @@ pub fn calendar(city: &str, shows: &[(&str, &str)]) {
     });
 
     let mut resolved: Vec<Show> = Vec::new();
-    for &(start_text, stop_text) in shows {
+    for day in shows {
+        let (start_text, stop_text) = day.range();
         let start = resolve(&tz, start_text);
         let stop = resolve(&tz, stop_text);
         if stop <= start {
@@ -75,7 +101,12 @@ pub fn calendar(city: &str, shows: &[(&str, &str)]) {
             );
         }
         let dark = dark_stretches(coordinates, start, stop);
-        resolved.push(Show { start, stop, dark });
+        resolved.push(Show {
+            kind: day.kind(),
+            start,
+            stop,
+            dark,
+        });
     }
 
     let site = format!("{}, {}", place.city, place.country);
@@ -195,7 +226,7 @@ fn render(site: &str, place: &cities::City, zone: &str, tz: &TimeZone, shows: &[
     writeln!(out, "// Generated from the rig's show table. Do not edit.").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "pub mod shows {{").unwrap();
-    writeln!(out, "    use cortex::calendar::{{Calendar, Show, Site, Span, Stamp}};").unwrap();
+    writeln!(out, "    use cortex::calendar::{{Calendar, Kind, Show, Site, Span, Stamp}};").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    pub static CALENDAR: Calendar = Calendar {{").unwrap();
     writeln!(out, "        site: Site {{").unwrap();
@@ -207,6 +238,7 @@ fn render(site: &str, place: &cities::City, zone: &str, tz: &TimeZone, shows: &[
     writeln!(out, "        shows: &[").unwrap();
     for show in shows {
         writeln!(out, "            Show {{").unwrap();
+        writeln!(out, "                kind: Kind::{},", show.kind).unwrap();
         writeln!(out, "                span: {},", span(tz, show.start, show.stop)).unwrap();
         writeln!(out, "                dark: &[").unwrap();
         for &(from, to) in &show.dark {

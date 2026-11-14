@@ -37,7 +37,7 @@
 mod calendar;
 mod osc;
 
-pub use calendar::calendar;
+pub use calendar::{Day, calendar};
 pub use osc::osc;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -6,8 +6,8 @@ the rig runs on a one-metre model of the *Headless Hug* sculpture, stepped throu
 cabinet door and watched live in Grafana on `memory-pi`. Its results are recorded by run, as
 §4 says. How to get from here to a running PoC is in
 [`TODO.md`](TODO.md). The component it introduces, Wrist, is described in
-[`DESIGN.md`](DESIGN.md), and its firmware in [`CONTROL_LOOP.md`](CONTROL_LOOP.md), not here;
-this file says only how this show uses it.
+[`DESIGN.md`](DESIGN.md), and its firmware is `wrist/`; this file says how this show builds and
+uses it.
 
 The previous show's components are on their tags: `last-version-with-eyeball-for-group-detection`,
 `last-version-with-retina` and `last-version-with-mouth`.
@@ -80,7 +80,7 @@ in `brain/src/show.rs`, with units.
 
 | experiment | what the rig does | what it answers |
 |---|---|---|
-| **Pluck** | Started by the right button only while Wrist's `/wrist/pluck` says `can`. The brain sends Pluck at the pluck amplitude, direction and speed, until `/wrist/pluck` leaves `can`, and on while it is `busy`; a press `/wrist/pluck` still answers `can` to after a second is dropped, because its Pluck never reached Wrist (a desk holding the universe), and the right button lights again: Wrist tugs once, dwells 0.5 s and returns to where it began over 2.5 s. When it says `cannot`, the brain sends Hold and the Pluck has finished; the ring-down is in the accelerometer's trace. It cannot be aborted: the right button is dark while it runs. | 3: resonance by free decay, no hands |
+| **Pluck** | Started by the right button only while Wrist's `/wrist/pluck` says `can`. The brain sends Pluck at the pluck amplitude, direction and speed, until `/wrist/pluck` leaves `can`, and on while it is `busy`; a press `/wrist/pluck` still answers `can` to after a second is dropped, because its Pluck never reached Wrist (a desk holding the universe), and the right button lights again: Wrist tugs once, dwells and returns slowly to where it began. When it says `cannot`, the brain sends Hold and the Pluck has finished; the ring-down is in the accelerometer's trace. It cannot be aborted: the right button is dark while it runs. | 3: resonance by free decay, no hands |
 | **Run** | The brain sends Run at the run amplitude for a few minutes, then finishes. Wrist homes, starts the model swinging if it is still, locks to the sway and drives in phase with its velocity, learning the drive's phase as it goes. | 2 and 3: the structure swings controllably at resonance, found and held by Wrist |
 
 Artist sessions and commissioning use QLC+'s takeover from any state, as on every show; the
@@ -93,24 +93,21 @@ it is driven at any amplitude, and in Manual, which the programme never sends.
 |---|---|---|
 | armed, experiment *k* of 2 | *k* flashes of 100 ms at full, then 1.5 s dark, repeating | armed Pluck: green while `/wrist/pluck` is `can` and the button has not been pressed, dark while it is `busy` or `cannot` or stale; armed Run: off |
 | Pluck | steady 100% | off |
-| Run | the driven sine | the measured sine |
+| Run | the measured sine | the driven sine |
 | finished | two 1 s fades up and down, then the armed pattern | off |
 | aborted | three 100 ms flashes, then the armed pattern | off |
 
-**In Run, the two lamps plot the two waveforms side by side.** The left lamp pulses with the
-driven sine, (1 + sin(φ + φ_off))/2; the right with the measured one, the sway on Wrist's
-accelerometer scaled to its amplitude, (1 + sway/a)/2. Side by side they show the drive leading
-the sway. Both come from Wrist's OSC to the brain: the driven phase from its state bundle,
-advanced at the oscillator's frequency between bundles so the lamp moves smoothly at the frame
-rate; the measured from its waveform bundle as it arrives. The brain writes both into the
-face's channels like any other look. While Wrist's OSC is stale, both lamps are at steady
-100%.
+**In Run, the two lamps plot the two waveforms side by side.** The right lamp shows the
+motor's phase, (1 + sin φ)/2, from `/wrist/run/phase` in each state bundle as it arrives,
+whenever `/wrist/mode` is `run`. The left, once the accelerometer is in, the measured sway,
+(1 + sway/a)/2, from the waveform bundle as it arrives. While Wrist's OSC is stale, both lamps
+are at steady 100%.
 
 ### 2.4 The e-stop, signal loss, and what the drive does
 
 The e-stop is the rig's show-stop, as the README has it, and the show runs on underneath it.
 What is specific to this show is what Wrist does — set by this show's `.qxf` and Wrist's
-firmware, in `CONTROL_LOOP.md`, used here:
+firmware, used here:
 
 - **Pressed:** the mask puts Wrist's Mode in its no-function band, **Blackout**. Wrist cannot
   tell that from a Blackout the show asks for: it releases its coils at once, as if the
@@ -119,7 +116,7 @@ firmware, in `CONTROL_LOOP.md`, used here:
   stops motion resuming on its own. The show runs on under the stop and reads the buttons, so
   an experiment aborted with the right button while the stop is pressed makes the release a
   Blackout, and nothing moves.
-- **Universe lost:** no frame for 2.5 s, or the brain ending its stream as it stops, and Wrist
+- **Universe lost:** no frame for E1.31's timeout, or the brain ending its stream as it stops, and Wrist
   releases its coils at once, as for a Blackout in the frame.
 - **Boot with the stop pressed:** nothing goes out, Wrist stays in Blackout, as every fixture
   does.
@@ -130,36 +127,46 @@ The workspace patches two fixtures: `Face` as the code has it, and `Wrist`.
 
 ### 3.1 Wrist
 
-The sway drive. What it is and why is `DESIGN.md` §3.10; its hardware, firmware, pins and
-constants are `CONTROL_LOOP.md`'s; its parts are in `OWNED-DEVICES.md`. The brain sets only
-its mode and amplitude, and reads its OSC for the face. How this show sets it up:
+The sway drive. What it is and why is `DESIGN.md` §3.10; its firmware, with its pins and
+constants, is `wrist/`; its parts are in `OWNED-DEVICES.md`. The brain sets its mode and what
+the mode reads, and reads its OSC for the face. How this show sets it up:
 
-**Patch.** `fixtures/wrist.qxf`, mode "4 Channel", at the top of the universe, address 500,
-named `Wrist`. Its address on the access point is in `clockwork.dot`, the rig's IP space.
+**Patch.** `fixtures/wrist.qxf`, patched as `Wrist` in `clockwork.qxw`; its channels and bands
+are the definition's, and its address on the access point is in `clockwork.dot`. Frequency is
+16 bits because 8 would not do: a Q of 30 at 2 Hz is a resonance 0.07 Hz wide, finer than 8
+bits step across the band.
 
-| ch | name | group | this show's use |
-|---|---|---|---|
-| 1 | Mode | Maintenance; no-function band **Blackout** (0–63) | Blackout 0–63 · Hold 64–127 · Pluck 128–191 · Manual 192–255; Run gets a band when it is built |
-| 2 | Amplitude | Nothing | in Pluck, read at its start: 0–255 → 0 … `A_max` steps, the size of the tug |
-| 3 | Direction | Nothing | in Manual, and in Pluck read at its start: 0–127 clockwise, 128–255 counter-clockwise |
-| 4 | Speed | Speed; stop band **Stopped** (0) | in Manual, and in Pluck read at its start: 0 stopped, 1–255 slow … the step generator's ceiling |
-
-**Motor.** The closed-loop stepper, set and supplied as `OWNED-DEVICES.md` has it. It runs at
-400 pulses per revolution, so the 12.5 kHz the firmware can make is 31 rev/s, for a sharper
-pluck than the 15.6 rev/s 800 gave; the model's fastest motion, about 8 rev/s, is 3.2 kHz.
+**Motor.** The closed-loop stepper, set and supplied as `OWNED-DEVICES.md` has it. Its pulses
+per revolution are set low, so the step generator's ceiling turns the shaft fast enough for a
+sharp pluck.
 
 **Supply.** If the e-stop button has a spare contact block, a relay on the motor's
 feed from that contact, its contacts rated for at least 50 V DC, makes "limp when pressed" a
 hardware fact as well as a DMX one; without one, Blackout over DMX is what the PoC has, and the full-scale rig
 gets the relay regardless.
 
-**Board.** Wrist's board, as `OWNED-DEVICES.md` has it, wired as `CONTROL_LOOP.md` §2 has it.
+**Board.** Wrist's board, as `OWNED-DEVICES.md` has it, on the pins `wrist/wrist.ino` names.
+The home switch goes on GPIO13 (D7), normally open to ground with the internal pull-up, and
+the ADXL345 on GPIO5 and GPIO4 (D1 and D2, SCL and SDA), I²C at 400 kHz; the boot-strapping
+pins, GPIO0, GPIO2 and GPIO15, take neither. The sensors run on the board's 3.3 V; the motor
+has its own supply, with no ground tie: the optos are the only link. The ADXL345's cable runs
+apart from the motor's.
 
-**Wire and home.** As `CONTROL_LOOP.md` §2 has it, the wire running to the chosen node. The
-rest position, the travel and the tension limits for the band set are measured at
-commissioning and coded into the firmware. The motor on its load cell sits on a wooden bridge
-spanning the model's base, clamped to the table; nothing is fixed to the sculpture but the
-wire and the accelerometer.
+**Wire.** The guy wire wrapped a few turns round the bare motor shaft, a capstan with its tail
+tied off, then a short cable, a hook, rubber bands in parallel, a hook and the wire to the
+chosen node. The shaft is taken to be 8 mm, 25 mm of wire a revolution; measure it. The bands
+are the series spring that turns the shaft's position into force, and their preload keeps the
+wire taut, so there is no backlash. Unpowered, the shaft holds only by its detent, taken to be
+8–15 N of wire tension; measure it. A preload above that unwinds the wraps in Blackout and
+lets the guy go slack, so either a backup guy, fixed and slightly longer, holds the structure
+without the motor's, or the preload stays below the detent hold. The motor on its load cell
+sits on a wooden bridge spanning the model's base, clamped to the table, the wire leaving the
+shaft along the cell's axis so the cell reads its tension; nothing is fixed to the sculpture
+but the wire and the accelerometer.
+
+**Load cell.** Calibrated once per rig, in Blackout: unhook the wire and average
+`/wrist/load/raw` from the recording, the tare; hang a known mass `m` and average again, so
+the scale is `m·g/(raw − tare)` newtons per count. Both are coded into the firmware.
 
 ### 3.2 The accelerometer
 

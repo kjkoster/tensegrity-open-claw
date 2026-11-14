@@ -1,37 +1,47 @@
 //! The show: the Director, which chooses the show state every frame, and what each state asks
 //! of the fixtures.
 //!
-//! Test mode first, then the calendar. Outside a show the state is `blackout`: dark. Inside
-//! one, or in test mode whatever the calendar says, it is `idle`: the face's left
-//! lamp breathes, a slow sine from dark to full, so the rig can be seen running from the
-//! cabinet door.
+//! Test mode first, then the calendar. Outside a show the state is `blackout`: Wrist is sent
+//! Blackout and both lamps are dark. Inside one it is `run`: Wrist is sent Run with `RUN_SINE`,
+//! and the face's right lamp shows the motor's phase, (1 + sin φ)/2, from Wrist's state
+//! bundles. The left lamp is dark.
 //!
-//! The chord enters test mode. Test mode ends itself after `TEST_MODE_TIMEOUT` without a chord,
-//! because a rig left in it would ignore the calendar unattended.
+//! The chord enters test mode, in `test.pluck`, whatever the calendar says, and leaves it, back
+//! to what the calendar says. In test mode the left button moves between `test.pluck` and
+//! `test.blackout`. Test mode ends itself after `TEST_MODE_TIMEOUT` without a chord, because a
+//! rig left in it would ignore the calendar unattended.
 //!
-//! Wrist is plucked from the right button, whatever the state: Wrist is sent Hold, and the
-//! right lamp is lit while Wrist says a pluck can start. A press while it is lit sends Pluck
-//! until Wrist no longer says it can, and Pluck goes on being sent while Wrist says the pluck
-//! is busy; then Hold again, until the next press, whatever Wrist says after. A press while
-//! the lamp is dark does nothing, and a press Wrist
-//! still says it can after a second of is let go of: the Pluck never reached it. The firmware
-//! decides nothing: the brain holds Pluck exactly as long as the pluck runs.
+//! In test mode the left lamp flashes, `TEST_FLASH_FRAMES` lit of every `TEST_FLASH_PERIOD`,
+//! in either test state.
+//!
+//! In `test.blackout`, as in `blackout`, Wrist is sent Blackout and the right lamp is dark.
+//!
+//! In `test.pluck` Wrist is plucked from the right button: Wrist is
+//! sent Hold, and the right lamp is lit while Wrist says a pluck can start. A press while it is
+//! lit sends Pluck until Wrist no longer says it can, and Pluck goes on being sent while Wrist
+//! says the pluck is busy; then Hold again, until the next press, whatever Wrist says after. A
+//! press while the lamp is dark does nothing, and a press Wrist still says it can after a
+//! second of is let go of: the Pluck never reached it. The firmware decides nothing: the brain
+//! holds Pluck exactly as long as the pluck runs.
 //!
 //! The show state is the brain's own: `brain/show` and `brain/testmode`, retained, published
 //! on every change, and logged with what caused it.
 
 use crate::face::FaceState;
 use crate::face_show;
-use crate::wrist::{Heard, Pluck};
-use crate::wrist_show::{self, Tug};
+use crate::wrist::{Heard, Mode, Pluck};
+use crate::wrist_show::{self, Ask, Sine, Tug};
 use cortex::calendar::{self, Calendar};
 use cortex::config::FRAME_RATE_HZ;
 use cortex::telemetry::Publisher;
-use std::f64::consts::TAU;
 use std::time::{Duration, Instant};
 
-/// One breath of the left lamp in `idle`, dark to full and back.
-const PULSE_SECS: f64 = 4.0;
+/// The left lamp's flash in test mode: lit for this many frames...
+const TEST_FLASH_FRAMES: u32 = 2;
+/// ...of every this many.
+const TEST_FLASH_PERIOD: u32 = 80;
+/// The flash's level, 0..1.
+const TEST_FLASH_LEVEL: f64 = 0.75;
 /// How long test mode lasts without a chord.
 const TEST_MODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// How long what Wrist says is believed: ten of its state bundles.
@@ -49,11 +59,19 @@ const PLUCK_TUG: Tug = Tug {
     speed: 1.0,
     clockwise: true,
 };
+/// Run's sine: a fifth of Wrist's Amplitude and Frequency, enough to see it is alive.
+const RUN_SINE: Sine = Sine {
+    amplitude: 0.2,
+    frequency: 0.2,
+    clockwise: true,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
     Blackout,
-    Idle,
+    Run,
+    TestPluck,
+    TestBlackout,
 }
 
 impl State {
@@ -61,7 +79,9 @@ impl State {
     fn word(self) -> &'static str {
         match self {
             State::Blackout => "blackout",
-            State::Idle => "idle",
+            State::Run => "run",
+            State::TestPluck => "test.pluck",
+            State::TestBlackout => "test.blackout",
         }
     }
 }
@@ -76,7 +96,8 @@ pub struct Show {
     state: State,
     /// Frames already played in the current state.
     frames: u32,
-    /// The face's right-button count as last read; the face counts from zero, and so does this.
+    /// The face's button counts as last read; the face counts from zero, and so do these.
+    seen_left_presses: u32,
     seen_right_presses: u32,
     /// A press of the lit right button, held until Wrist no longer says a pluck can start, or
     /// for `PLUCK_PRESS_FRAMES` if it goes on saying so: the frames it has been held.
@@ -99,6 +120,7 @@ impl Show {
             testing_since: None,
             state,
             frames: 0,
+            seen_left_presses: 0,
             seen_right_presses: 0,
             pluck_pressed: None,
             plucking: false,
@@ -125,7 +147,11 @@ impl Show {
         }
         let testing = self.testing_since.is_some();
 
-        if let Some((next, why)) = self.next(testing) {
+        // A press takes tens of milliseconds, so one frame never sees two.
+        let left_pressed = face.left_presses != self.seen_left_presses;
+        self.seen_left_presses = face.left_presses;
+
+        if let Some((next, why)) = self.next(testing, left_pressed) {
             self.enter(next, why);
         }
         let left = self.left_lamp();
@@ -133,10 +159,28 @@ impl Show {
 
         let wrist = wrist
             .filter(|(_, at)| at.elapsed() < WRIST_STALE_AFTER)
-            .map(|(pluck, _)| pluck);
-        let (pluck, can_pluck) = self.pluck(face, wrist);
-        face_show::fill(slots, left, can_pluck);
-        wrist_show::fill(slots, pluck, &PLUCK_TUG);
+            .map(|(report, _)| report);
+        // The right button counts only in `test.pluck`; a press anywhere else is let go of.
+        let (pluck, can_pluck) = self.pluck(face, wrist.map(|report| report.pluck));
+        let (ask, right) = match self.state {
+            State::Run => {
+                // The motor's phase, from each state bundle as it comes.
+                let right = match wrist {
+                    Some(report) if report.mode == Mode::Run && report.phase.is_finite() => {
+                        (1.0 + f64::from(report.phase).sin()) / 2.0
+                    }
+                    _ => 0.0,
+                };
+                (Ask::Run, right)
+            }
+            State::TestPluck => (
+                if pluck { Ask::Pluck } else { Ask::Hold },
+                if can_pluck { 1.0 } else { 0.0 },
+            ),
+            State::Blackout | State::TestBlackout => (Ask::Blackout, 0.0),
+        };
+        face_show::fill(slots, left, right);
+        wrist_show::fill(slots, ask, &PLUCK_TUG, &RUN_SINE);
     }
 
     /// Whether Wrist is sent Pluck this frame, and whether the right lamp is lit, given what
@@ -146,28 +190,31 @@ impl Show {
         let pressed = face.right_presses != self.seen_right_presses;
         self.seen_right_presses = face.right_presses;
 
+        let here = self.state == State::TestPluck;
         let can = wrist == Some(Pluck::Can);
         let mut expired = false;
         if let Some(held) = &mut self.pluck_pressed {
             *held += 1;
             expired = *held > PLUCK_PRESS_FRAMES;
         }
-        if pressed && can && self.pluck_pressed.is_none() {
+        if here && pressed && can && self.pluck_pressed.is_none() {
             self.pluck_pressed = Some(0);
         }
         // Until Wrist has seen the Pluck frame it goes on saying it can; after, the pluck is
         // Wrist's to say. One that never sees it is let go of.
-        if !can || expired {
+        if !here || !can || expired {
             self.pluck_pressed = None;
         }
         let pressing = self.pluck_pressed.is_some();
         // Busy only keeps a Pluck going, never starts one. Once Hold has gone out, a busy still
         // on its way, or arriving after a silence, is the pluck that was ended, and Wrist, in
         // Hold, would take Pluck again as a new one.
-        let pluck = pressing || (self.plucking && wrist == Some(Pluck::Busy));
+        let pluck = here && (pressing || (self.plucking && wrist == Some(Pluck::Busy)));
         if pluck != self.plucking {
             let why = if pressing {
                 "right button"
+            } else if !here {
+                "left test.pluck"
             } else if expired {
                 "Wrist never saw the press"
             } else if wrist.is_none() {
@@ -182,12 +229,19 @@ impl Show {
     }
 
     /// The state this frame moves to, if it moves, and why.
-    fn next(&self, testing: bool) -> Option<(State, &'static str)> {
-        let on = self.calendar.current(calendar::now()).is_some();
+    fn next(&self, testing: bool, left_pressed: bool) -> Option<(State, &'static str)> {
+        let on = self.calendar.plays(calendar::now());
         match self.state {
-            State::Idle if !testing && !on => Some((State::Blackout, "outside a show")),
-            State::Blackout if testing => Some((State::Idle, "test mode")),
-            State::Blackout if on => Some((State::Idle, "a show has begun")),
+            State::Blackout | State::Run if testing => Some((State::TestPluck, "test mode")),
+            State::TestPluck | State::TestBlackout if !testing => Some(if on {
+                (State::Run, "test mode off, in a show")
+            } else {
+                (State::Blackout, "test mode off, outside a show")
+            }),
+            State::Run if !on => Some((State::Blackout, "outside a show")),
+            State::Blackout if on => Some((State::Run, "a show has begun")),
+            State::TestPluck if left_pressed => Some((State::TestBlackout, "left button")),
+            State::TestBlackout if left_pressed => Some((State::TestPluck, "left button")),
             _ => None,
         }
     }
@@ -199,13 +253,17 @@ impl Show {
         self.frames = 0;
     }
 
-    /// The left lamp's level this frame, 0..1. Starting dark, so `idle` fades in.
+    /// The left lamp's level this frame, 0..1. The test flash counts from the state's first
+    /// frame, so each test state starts lit.
     fn left_lamp(&self) -> f64 {
         match self.state {
-            State::Blackout => 0.0,
-            State::Idle => {
-                let secs = f64::from(self.frames) / FRAME_RATE_HZ as f64;
-                (1.0 - (TAU * secs / PULSE_SECS).cos()) / 2.0
+            State::Blackout | State::Run => 0.0,
+            State::TestPluck | State::TestBlackout => {
+                if self.frames % TEST_FLASH_PERIOD < TEST_FLASH_FRAMES {
+                    TEST_FLASH_LEVEL
+                } else {
+                    0.0
+                }
             }
         }
     }

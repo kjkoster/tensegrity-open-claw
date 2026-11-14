@@ -9,7 +9,7 @@ own, in [`OWNED-DEVICES.md`](OWNED-DEVICES.md).
 The system is four parts:
 
 - **`chaos-pi`** — a Raspberry Pi in the cabinet running the `brain` daemon. It reads its
-  sensors, runs the show, and sends one DMX universe at 40 Hz two ways: out of the RS-485 HAT
+  sensors, runs the show, and sends one DMX universe two ways: out of the RS-485 HAT
   as wired DMX-512, and over the network as E1.31 sACN.
 - **`memory-pi`** — a second Pi in the cabinet, on the first one's WiFi, running the telemetry
   broker and recording everything published on it.
@@ -25,30 +25,25 @@ binary. Once per Mac: `rustup target add aarch64-unknown-linux-musl`.
 
 ## Access
 
-- SSH alias **`chaos-pi`** → `10.8.0.3` over WireGuard, user `kjkoster`, key `~/.ssh/id_rsa`
-  (`IdentitiesOnly yes`). The Mac is a peer at `10.8.0.4` routing that single `/32`, not a
-  general VPN. The tunnel's config is not versioned here.
-- SSH alias **`memory-pi`** → `10.0.10.3`, jumping through `chaos-pi` (why: DESIGN §3.9). In
-  `~/.ssh/config`:
+Every address below is `clockwork.dot`'s: the Pi's interfaces — the wired segment for a
+laptop, the WiFi access point, WireGuard for remote access over 4G, and the 4G uplink — and the
+Mac's.
+
+- SSH alias **`chaos-pi`** → the Pi's WireGuard address, user `kjkoster`, key
+  `~/.ssh/id_rsa` (`IdentitiesOnly yes`). The Mac is a WireGuard peer routing that single
+  address, not a general VPN. The tunnel's config is not versioned here.
+- SSH alias **`memory-pi`** → its WiFi address, jumping through `chaos-pi` (why: DESIGN
+  §3.9). In `~/.ssh/config`:
 
   ```
   Host memory-pi
-      HostName 10.0.10.3
+      HostName <memory-pi's wlan0 address>
       User kjkoster
       ProxyJump chaos-pi
   ```
 
-The Pi's addresses, as `clockwork.dot` sets them, where it calls the Pi `chaos-pi`:
-
-| Interface | Address | Purpose |
-|---|---|---|
-| `eth0` | `10.0.1.1/24`, DHCP `.100`–`.199` | the wired segment, for a laptop |
-| `wlan0` | `10.0.10.2/24`, DHCP `.100`–`.199` | the WiFi access point |
-| `wg0` | `10.8.0.3/32` | WireGuard, remote access over 4G |
-| `wwan0` | DHCP | 4G uplink |
-
-`wg0` is point-to-point with no multicast, so anything reaching the Pi over the tunnel must
-unicast.
+WireGuard is point-to-point with no multicast, so anything reaching the Pi over the tunnel
+must unicast.
 
 ## Networking
 
@@ -71,17 +66,17 @@ ModemManager can neither keep it off 2G nor report signal in dBm, so Stem publis
 signal quality.
 
 > ⚠️ **The `cellular` profile is not in the repo.** Its APN, SIM and routing metrics (4G the
-> default route, `10.0.10.0/24` and `10.0.1.0/24` local) live only in
+> default route, the WiFi and wired networks local) live only in
 > `/etc/NetworkManager/system-connections/cellular.nmconnection` on the Pi.
 
 **The watchdog** is `pi/chaos-pi/4g-watchdog.sh`, installed to `/usr/local/sbin/` with its `.service`
 and `.timer`; only the timer is enabled, running a check every minute. Its configuration — the
 modem's USB vendor, ping targets, tunnel address, thresholds — is at the top of the script;
 change the repo's copy, since the next deploy overwrites the Pi's. On consecutive failed pings
-through the modem it escalates, touching the modem alone (why: DESIGN §3.2): at minute 3
-NetworkManager reconnects it, at minute 5 ModemManager resets it, and from minute 8 it is
-re-enumerated on the USB bus, again every 5 minutes for as long as the outage lasts. When the
-internet is up but the tunnel is not, it restarts `wg-quick`.
+through the modem it escalates, touching the modem alone (why: DESIGN §3.2): NetworkManager
+reconnects it, then ModemManager resets it, then it is re-enumerated on the USB bus, again for
+as long as the outage lasts; the thresholds are the script's. When the internet is up but the
+tunnel is not, it restarts `wg-quick`.
 
 ```
 systemctl list-timers 4g-watchdog.timer
@@ -97,7 +92,7 @@ What the cabinet holds whatever the show; the show's fixtures are in [`SHOW.md`]
 | Device | Interface | Notes |
 |---|---|---|
 | The DMX HAT | 40-pin header + PL011 UART | wired DMX-512 out; see [the HAT](#the-dmx-hat) |
-| Cabinet door (the face) | GPIO (BCM) | e-stop on 23/24, left and right buttons on 27/25, their lamps on 13/12 through hardware PWM; patched as the `Face` fixture |
+| Cabinet door (the face) | GPIO | e-stop, left and right buttons, their lamps through hardware PWM, on the pins `brain/src/face.rs` names; patched as the `Face` fixture |
 
 The cabinet has no off switch: the Pis are never shut down, only lose power, so nothing on
 the rig may depend on a clean shutdown.
@@ -122,7 +117,7 @@ reboots: a changed boot configuration waits for your `sudo reboot`.
 
 ### Face lamps
 
-The boot configuration routes the two hardware PWM channels to GPIO12 and GPIO13. Confirm with
+The boot configuration routes the two hardware PWM channels to the lamps' pins. Confirm with
 `ls /sys/class/pwm/pwmchip0`; without them `brain` stops at startup with `no PWM`.
 
 ### DMX timing
@@ -145,21 +140,20 @@ prints the show table again when that changes.
 
 ## The DMX HAT
 
-`brain` generates the DMX break itself, so direction is manual, on GPIO18; the HAT's switches
+`brain` generates the DMX break itself, so direction is manual, on a GPIO; the HAT's switches
 and wiring are set for that, as `OWNED-DEVICES.md` has them. Its pigtail is female; check each
 fixture's connector gender, since some makers reverse the convention. Put a **120 Ω terminator** in the DMX out of the last device.
 
 ## systemd
 
-- `brain/brain.service` → `/etc/systemd/system/brain.service`: `Restart=always`,
-  `RestartSec=5`, `After=network.target`, and no scheduling settings — each thread sets its
-  own.
+- `brain/brain.service` → `/etc/systemd/system/brain.service`, restarting the brain whenever
+  it stops, with no scheduling settings — each thread sets its own.
 - `sudo systemctl restart brain`; `journalctl -u brain -f`.
 - **Disabled** for the DMX serial: `serial-getty@ttyAMA0.service`, `hciuart`.
 
 The deploy also installs `stem.service`, the watchdog's unit and timer, and the network
-profiles. Stem's broker runs on [`memory-pi`](#the-memory-pi-memory-pi), at `10.0.10.30`;
-Stem's unit is a template too, its broker's address filled from Stem's MQTT edge in the dot.
+profiles. Stem's broker runs on [`memory-pi`](#the-memory-pi-memory-pi); Stem's unit is a
+template too, its broker's address filled from Stem's MQTT edge in the dot.
 
 ## Build & deploy
 
@@ -218,15 +212,16 @@ any repatch:
 
 ```
 brain: 2 fixtures
-brain:   Face @ 1–2 — Tensegrity Face, 2 Channel
+brain:   Face @ 1–2 — Clockwork Chaos Face, 2 Channel
+brain:   Wrist @ 3–8 — Clockwork Chaos Wrist, 6 Channel
 brain: 4 e-stop overrides
 ```
 
 ### Show times
 
-The rig plays only during the shows in `brain/shows.rs`: a `CITY`, and local `(start, stop)`
-pairs in order. Edit it and deploy. The build resolves the city's zone and every show's
-instants and dark stretches offline, and fails on:
+The rig plays only during the shows in `brain/shows.rs`, which says where the rig stands and
+how each kind of day plays. Edit it and deploy. The build resolves the city's zone and every
+show's instants and dark stretches offline, and fails on:
 
 | | |
 |---|---|
@@ -237,15 +232,8 @@ instants and dark stretches offline, and fails on:
 | a stop not after its start | fails, naming the show |
 | a show starting before the one above it ends | fails, naming the show |
 
-The startup log lists the site and every show yet to end:
-
-```
-show: Amsterdam, Netherlands (52.3731°, 4.8999°), Europe/Amsterdam
-show: the clock is NTP-synchronised
-show: 3 of 3 shows to come
-show:   2026-10-21 13:00 CEST (+02:00, summer time) → 2026-10-21 22:00 CEST (+02:00, summer time)
-show:     dark 19:08 → 22:00
-```
+The startup log lists the site, whether the clock is synchronised, and every show yet to end
+with its kind, and for a dusk show day its dark stretches; check it after a change.
 
 ### Topics
 
@@ -254,7 +242,7 @@ The brain publishes its state retained, and logs a `rig: …` or `show: …` lin
 | topic | values |
 |---|---|
 | `brain/rig` | `boot_hold`, `running`, `estop` or `shutdown` |
-| `brain/show` | the show state, as [`SHOW.md`](SHOW.md) lists it |
+| `brain/show` | the show state, as `brain/src/show.rs` names it |
 | `brain/testmode` | whether test mode is on |
 
 Rig-wide facts go under a root with their owner beneath it, retained: `sys/<owner>/…` (what
@@ -302,9 +290,8 @@ rig: shutdown — releasing the sACN source (3 terminate frames)
 # The memory Pi (`memory-pi`)
 
 Stem's broker, GreptimeDB recording everything published on it onto an external SSD, and
-Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0` at
-**`10.0.10.3/24`**, as `clockwork.dot` sets it, set on the Pi itself by
-`pi/memory-pi/claw.nmconnection`.
+Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0`, at the address
+`clockwork.dot` gives it, set on the Pi itself by `pi/memory-pi/claw.nmconnection`.
 
 ## Setting up a fresh `memory-pi`
 
@@ -318,7 +305,7 @@ Headless, in the cabinet; the card only has to get it onto the access point once
   `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases`
 - **Format the SSD** if it is new or wiped, which erases it: `sudo mkfs.ext4 -L memory /dev/sda1`
 - **Deploy** with the alias pointed at that DHCP address: `./deploy-memory-pi.sh`, then
-  `ssh memory-pi sudo reboot`, then the alias back to `10.0.10.3`.
+  `ssh memory-pi sudo reboot`, then the alias back to its address in the dot.
 - **Remove Imager's network profiles**, including a DHCP one for `eth0`:
   `sudo rm /etc/netplan/90-NM-*.yaml && sudo netplan generate && sudo nmcli connection reload`
 
@@ -326,11 +313,11 @@ Headless, in the cabinet; the card only has to get it onto the access point once
 
 | Unit | What | Installed from |
 |---|---|---|
-| `mosquitto.service` | Stem's broker, port `1883` on every interface | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
+| `mosquitto.service` | Stem's broker, on every interface | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
 | `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `pi/memory-pi/memory.py`, venv in `/opt/memory/venv` |
-| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only: HTTP `4000`, gRPC `4001`, MySQL `4002` | the release pinned in `pi/memory-pi/greptime.version`, in `/opt/greptimedb` |
+| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only | the release pinned in `pi/memory-pi/greptime.version`, in `/opt/greptimedb`, set up by `greptimedb.toml` |
 | `recorder.service` | every live message into Greptime's `rig` database | `pi/memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
-| `grafana-server.service` | Grafana on `127.0.0.1:3000` | Grafana's apt repository, settings and data source from `pi/memory-pi/grafana/` |
+| `grafana-server.service` | Grafana, loopback only | Grafana's apt repository, settings and data source from `pi/memory-pi/grafana/` |
 
 To watch the broker from the Mac:
 
@@ -382,8 +369,8 @@ ssh memory-pi "curl -s 'localhost:4000/v1/sql?db=rig' --data-urlencode 'sql=SHOW
 
 `ssh -L 3000:localhost:3000 memory-pi`, then **`http://localhost:3000`**. Viewing needs no
 login; editing takes `admin` / `admin` until Grafana asks for a new password. Its data source,
-**Greptime**, is Greptime as a MySQL server on `127.0.0.1:4002`, database `rig`; a panel is SQL
-with Grafana's time filter:
+**Greptime**, is Greptime as a MySQL server, database `rig`, as
+`pi/memory-pi/grafana/datasources.yaml` has it; a panel is SQL with Grafana's time filter:
 
 ```sql
 SELECT greptime_timestamp AS time, 'chaos-pi' AS metric, value
@@ -420,8 +407,9 @@ signature, and an update wipes it.
 
 ## Taking the rig over
 
-The workspace's E1.31 output unicasts at priority 200 to the address the brain binds, port
-`5568`. Open the workspace and drive anything — Simple Desk for raw channels, or a scene — and
+The workspace's E1.31 output unicasts, at a priority above the brain's, to the address and
+port the brain binds; `clockwork.qxw` holds the output and `clockwork.dot` the binding. Open
+the workspace and drive anything — Simple Desk for raw channels, or a scene — and
 the rig is yours within a frame:
 
 ```
@@ -438,8 +426,7 @@ sacn: released by <source> … — internal engine resumes
 - **Handback takes about 2.5 s.** QLC+ does not send E1.31's stream-terminated bit, so the
   data-loss timeout does the work.
 - **The e-stop beats a takeover.** Release it and your universe goes out again at once. A
-  fixture that moves by itself may resume on release, unless its firmware refuses, as Wrist's
-  does.
+  fixture that moves by itself resumes on release if your frame still asks it to; Wrist does.
 - **Simple Desk faders are not saved.** A persistent look is a Scene.
 
 ## If nothing reaches the rig

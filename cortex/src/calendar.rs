@@ -30,9 +30,19 @@ pub struct Site {
 }
 
 pub struct Show {
+    pub kind: Kind,
     pub span: Span,
     /// The stretches of the show between civil dusk and civil dawn.
     pub dark: &'static [Span],
+}
+
+/// How a show plays inside its span.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    /// Only while it is dark.
+    DuskShowDay,
+    /// For the whole span.
+    TestDay,
 }
 
 /// From `start`, up to but not including `stop`.
@@ -58,6 +68,15 @@ impl Calendar {
         self.shows.iter().find(|show| show.span.contains(now))
     }
 
+    /// Whether the show plays at `now`: inside a test day, or inside a dusk show day while it
+    /// is dark.
+    pub fn plays(&self, now: f64) -> bool {
+        self.current(now).is_some_and(|show| match show.kind {
+            Kind::TestDay => true,
+            Kind::DuskShowDay => show.dark_stretch(now).is_some(),
+        })
+    }
+
     /// Prints the site and every show that has not yet ended by the clock as it stands.
     fn announce(&self, synchronised: bool) {
         let site = &self.site;
@@ -81,11 +100,13 @@ impl Calendar {
         eprintln!("show: {} of {} shows to come", remaining().count(), self.shows.len());
         for show in remaining() {
             eprintln!(
-                "show:   {} → {}",
-                show.span.start.local, show.span.stop.local
+                "show:   {:?} {} → {}",
+                show.kind, show.span.start.local, show.span.stop.local
             );
-            for dark in show.dark {
-                eprintln!("show:     dark {} → {}", dark.start.time, dark.stop.time);
+            if show.kind == Kind::DuskShowDay {
+                for dark in show.dark {
+                    eprintln!("show:     dark {} → {}", dark.start.time, dark.stop.time);
+                }
             }
         }
     }
