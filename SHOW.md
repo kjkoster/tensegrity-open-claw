@@ -165,7 +165,7 @@ shaft along the cell's axis so the cell reads its tension; nothing is fixed to t
 but the wire and the accelerometer.
 
 **Load cell.** Calibrated once per rig, in Blackout: unhook the wire and average
-`/wrist/load/raw` from the recording, the tare; hang a known mass `m` and average again, so
+`/sole/raw` from the recording, the tare; hang a known mass `m` and average again, so
 the scale is `m·g/(raw − tare)` newtons per count. Both are coded into the firmware.
 
 ### 3.2 The accelerometer

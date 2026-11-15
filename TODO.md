@@ -135,7 +135,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
     amplitude, the drive's amplitude and phase offset, the regime, the shaft's position; the
     accelerometer's axes and the sway on each reading; the transitions and ring-down results
     as they happen.
-- Calibrate the load cell per `SHOW.md` §3.1; measure the rest position, the travel and
+- Calibrate Sole, the load cell, per `SHOW.md` §3.1, from `/sole/raw`; measure the rest position, the travel and
   the tension limits for the band set; all into the firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
 

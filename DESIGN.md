@@ -451,7 +451,7 @@ workspace patches them.
 | the ponytail (§3.7) | no: `last-version-with-ponytails` |
 | the mouth (§3.8) | no: `last-version-with-mouth` |
 | moving heads: their aiming and the QLC+ pointing presets (§1.1) | no: `last-version-with-mouth` |
-| Wrist (§3.10) | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json` |
+| Wrist (§3.10), and Sole in its firmware | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json`, `fixtures/sole.oscquery.json` |
 | Wrist's OSC in the brain, and the pluck it is sent | `brain/src/wrist.rs`, `brain/src/wrist_show.rs`, `show.rs`; decoders by `cortex-build` through `clockwork/oscquery.py` |
 
 ### 3.1 Stem
@@ -801,6 +801,12 @@ closed-loop stepper reeling the wire through a series spring, and a load cell un
 on one board that follows the universe. Its firmware is C++ on the Arduino core for the
 ESP8266, which the chip forces (§2.4).
 
+**Sole is the load cell, a device of its own.** It is compiled into Wrist's firmware, as the
+face is into the brain, and reports as a device of its own, `fixtures/sole.oscquery.json`, with
+its own `sys`, `wifi` and `health`, so it can move to a board of its own. It takes no DMX, so it
+has no fixture definition and no place in the workspace. The firmware's encoders cover both
+devices' files, in one set of bundles.
+
 **A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told to
 move, which lets the e-stop, a takeover and signal loss cover the drive with no rule of their
 own, and lets an artist session drive it from a fader. The frame sets a mode and what that mode
@@ -840,7 +846,7 @@ No mode needs a home: each counts from where the shaft is as it begins.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
 latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
-in-position signal. Wrist's other evidence is the load cell's tension. Both are reported, not
+in-position signal. The other evidence is Sole's, the wire's tension. Both are reported, not
 acted on: the desk decides.
 
 **Step pulses from a timer NMI.** The ESP8266 has one core, shared with WiFi; pulses timed in
@@ -849,5 +855,6 @@ makes them from a velocity the control tick sets.
 
 **Telemetry is OSC, out only.** Wrist sends its state and raw inputs as OSC, whether a pluck
 can start and Run's phase among them. Nothing is computed for telemetry; what can be derived is
-derived from the recording. The address space is `fixtures/wrist.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
+derived from the recording. The address space is `fixtures/wrist.oscquery.json` and Sole's
+`fixtures/sole.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
 coded in, worked out from raw readings in the telemetry.

@@ -23,7 +23,7 @@ use crate::osc::wrist::WristRunPhase as RunPhase;
 
 /// The longest wait between attempts to bind, while the access point's address is not up.
 const BIND_RETRY_MAX_S: u64 = 30;
-/// Larger than any datagram Wrist sends: its packets are built in 1024 bytes.
+/// Larger than any datagram Wrist sends: its packets are built in 1472 bytes.
 const MAX_PACKET_LEN: usize = 1536;
 /// A gap in the state bundle this long is logged when it ends: five of them.
 const GAP_LOGGED: Duration = Duration::from_millis(500);

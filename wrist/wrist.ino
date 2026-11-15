@@ -26,7 +26,7 @@ const uint8_t PIN_HX_SCK = 15;  // D8
 const uint8_t PIN_LED = 2;      // D4, lit when low
 
 // The load cell's calibration: force = (raw − tare) · scale. The scale is NaN, so
-// /wrist/load/force reads NaN rather than a tension nobody measured.
+// /sole/force reads NaN rather than a tension nobody measured.
 const int32_t LOAD_TARE = 0;            // raw counts
 const float LOAD_SCALE = NAN;           // N per count
 
@@ -60,9 +60,10 @@ const float US_PER_S = 1e6f;
 // 1 Hz: half a second lit, half dark.
 const uint32_t BLINK_HALF_PERIOD_MS = 500;
 
-// Room for the largest bundle with a margin; an encoder that would overrun it sends nothing. The
-// largest is the connect bundle, at most 580 bytes with its longest strings.
-uint8_t packet[1024];
+// Room for the largest bundle; an encoder that would overrun it sends nothing. The largest is the
+// connect bundle, Wrist's and Sole's leaves together, about 1100 bytes with its longest strings.
+// 1472 is the most one UDP datagram carries in a 1500-byte WiFi frame unfragmented.
+uint8_t packet[1472];
 
 WiFiUDP udp;
 WiFiUDP sacnUdp;
@@ -512,21 +513,31 @@ void sendOnConnect() {
   const String mac = WiFi.macAddress();
   const String ip = WiFi.localIP().toString();
   const String bssid = WiFi.BSSIDstr();
+  // No device tree: the board as the core names it, from the FQBN the sketch is built for. The
+  // triplet is the core's compiler's, which is what the firmware is compiled for. Wrist and
+  // Sole share the board today, and each reports it for itself, so either can move.
+  const char *board = ARDUINO_BOARD;
+  const char *triplet = "xtensa-lx106-elf";
+  const int32_t cpuFreqMhz = ESP.getCpuFreqMHz();
   osc::OnConnect v;
-  v.wrist_load_tare = LOAD_TARE;
-  v.wrist_load_scale = LOAD_SCALE;
   v.dmx_wrist_universe = patch::SACN_UNIVERSE;
   v.dmx_wrist_address = patch::DMX_ADDRESS;
-  // No device tree: the board as the core names it, from the FQBN the sketch is built for. The
-  // triplet is the core's compiler's, which is what the firmware is compiled for.
-  v.sys_wrist_board = ARDUINO_BOARD;
+  v.sys_wrist_board = board;
   v.sys_wrist_cores = 1;
-  v.sys_wrist_triplet = "xtensa-lx106-elf";
-  v.sys_wrist_cpu_freq_mhz = ESP.getCpuFreqMHz();
+  v.sys_wrist_triplet = triplet;
+  v.sys_wrist_cpu_freq_mhz = cpuFreqMhz;
   v.sys_wrist_reset_reason = resetReason();
   v.sys_wrist_flash_size = static_cast<int32_t>(ESP.getFlashChipRealSize());
   v.wifi_wrist_mac = mac.c_str();
   v.wifi_wrist_ip = ip.c_str();
+  v.sole_tare = LOAD_TARE;
+  v.sole_scale = LOAD_SCALE;
+  v.sys_sole_board = board;
+  v.sys_sole_cores = 1;
+  v.sys_sole_triplet = triplet;
+  v.sys_sole_cpu_freq_mhz = cpuFreqMhz;
+  v.wifi_sole_mac = mac.c_str();
+  v.wifi_sole_ip = ip.c_str();
   v.wifi_wrist_channel = WiFi.channel();
   v.wifi_wrist_bssid = bssid.c_str();
   v.wifi_wrist_disconnects = static_cast<int32_t>(disconnects);
@@ -541,17 +552,23 @@ void sendState() {
   v.wrist_pluck = pluckState();
   v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
-  v.wrist_load_force = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
+  v.sole_force = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
 }
 
 // The heartbeat, which starts again from 0 every 49.7 days, when the chip's millisecond clock
-// wraps; and the heap and the link.
+// wraps; and the heap and the link. Wrist's and Sole's alike: they share the board.
 void sendHealth() {
+  const int32_t uptime = static_cast<int32_t>(millis() / 1000);
+  const int32_t memAvailKb = static_cast<int32_t>(ESP.getFreeHeap() / 1024);
+  const int32_t rssi = WiFi.RSSI();
   osc::At1hz v;
-  v.health_wrist_uptime_s = static_cast<int32_t>(millis() / 1000);
-  v.sys_wrist_mem_avail_kb = static_cast<int32_t>(ESP.getFreeHeap() / 1024);
-  v.wifi_wrist_rssi = WiFi.RSSI();
+  v.health_wrist_uptime_s = uptime;
+  v.sys_wrist_mem_avail_kb = memAvailKb;
+  v.wifi_wrist_rssi = rssi;
+  v.health_sole_uptime_s = uptime;
+  v.sys_sole_mem_avail_kb = memAvailKb;
+  v.wifi_sole_rssi = rssi;
   sendToRecipients(osc::encodeAt1hz(v, packet, sizeof packet));
 }
 
@@ -678,7 +695,7 @@ void loop() {
   }
 
   if (fresh) {
-    sendToRecipients(osc::encodeWristLoadRaw(raw, packet, sizeof packet));
+    sendToRecipients(osc::encodeSoleRaw(raw, packet, sizeof packet));
   }
   // Due times step by the period, so the rate does not drift with the time a pass takes.
   if (static_cast<int32_t>(now - stateDue) >= 0) {

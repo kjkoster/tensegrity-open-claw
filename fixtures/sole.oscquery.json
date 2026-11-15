@@ -1,0 +1,50 @@
+{
+  "HOST_INFO": {
+    "NAME": "sole",
+    "OSC_TRANSPORT": "UDP",
+    "CLOCKWORK_CHAOS_IMPLEMENTS": ["health", "sys", "wifi"]
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "sole": {
+      "FULL_PATH": "/sole",
+      "DESCRIPTION": "Sole, the load cell under Wrist's motor and its HX711, reading the wire's tension. Compiled into Wrist's firmware today, it reports as a device of its own, so it can move. It takes no DMX, so it has no fixture definition and no place in the QLC+ workspace. Out only: nothing is received over OSC.",
+      "CONTENTS": {
+        "force": {
+          "FULL_PATH": "/sole/force",
+          "DESCRIPTION": "The wire's tension, from the raw reading through the coded-in tare and scale.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["N"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "raw": {
+          "FULL_PATH": "/sole/raw",
+          "DESCRIPTION": "Each HX711 reading as read, sent once when it arrives: 10 a second, 80 once the RATE leg is lifted.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data"
+        },
+        "tare": {
+          "FULL_PATH": "/sole/tare",
+          "DESCRIPTION": "The coded-in tare: the raw reading with no tension on the wire.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+        },
+        "scale": {
+          "FULL_PATH": "/sole/scale",
+          "DESCRIPTION": "The coded-in scale: the tension one count above the tare stands for, so the force is (raw − tare) · scale. NaN until it is measured.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["N/count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+        }
+      }
+    }
+  }
+}

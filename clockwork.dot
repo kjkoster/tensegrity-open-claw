@@ -60,6 +60,9 @@ digraph clockwork {
             <tr><td port="sacn">sACN udp wg0:5568</td></tr>
             <tr><td port="osc">OSC udp wlan0:9001</td></tr>
         </table>>];
+        chaos_pi_face [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>face</b></td></tr>
+        </table>>];
         chaos_pi_stem [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>stem</b></td></tr>
         </table>>];
@@ -108,6 +111,9 @@ digraph clockwork {
         wrist_firmware [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>firmware</b></td></tr>
             <tr><td port="sacn">sACN udp wifi:5568</td></tr>
+        </table>>];
+        wrist_sole [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>sole</b></td></tr>
         </table>>];
     }
 
@@ -160,7 +166,9 @@ digraph clockwork {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
         wrist_firmware:title -> memory_pi_memory:osc     [xlabel="OSC"];
+        wrist_sole:title     -> memory_pi_memory:osc     [xlabel="OSC"];
         chaos_pi_brain:title -> memory_pi_memory:osc     [xlabel="OSC"];
+        chaos_pi_face:title  -> memory_pi_memory:osc     [xlabel="OSC"];
     }
 
     subgraph mqtt {
