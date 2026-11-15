@@ -5,7 +5,7 @@ it: Monday's test first, then Wrist's Run, then soldering, then clean up, then W
 and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
-[`DESIGN.md`](DESIGN.md), and the PoC's measurements are recorded by `brain/run`.
+[`DESIGN.md`](DESIGN.md), and the PoC's measurements are recorded by `/brain/run`.
 Wrist's open decisions are steps here, and so is the design of what its firmware does not do
 yet.
 
@@ -142,8 +142,6 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: test mode disabled, left in the code, as the calendar is.
-- Brain: an `await_estop` rig state after power-up, so nothing starts without a person there to
-  press and release the e-stop first.
 - Brain: the OSC receiver takes Wrist's waveform bundle as well.
 - The Director's states — `armed_pluck`, `pluck`, `armed_run`, `run` — with the button rules
   of `SHOW.md` §2.2, `/brain/run`, and the lamp patterns of §2.3, Run's two sines included;
@@ -166,22 +164,24 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 ## Commissioning the whole
 
-- Power the cabinet up cold with nobody touching anything: both Pis, broker, Memory,
-  brain, Wrist on the AP in Blackout, dashboard live.
+- Power the cabinet up cold with nobody touching anything: both Pis, broker, Memory, Wrist on
+  the AP in Blackout, dashboard live, the brain in `await_estop` with the rig dark. Then a press
+  shorter than the hold, released: still dark; a press held past it, released: the show starts.
 - Press the e-stop in every state: Wrist releases at once; release: Wrist takes up whatever
   the frame asks.
 - Power Wrist's board down and up mid-Run: the lamps go to steady 100% while its OSC is
   stale; it rejoins, homes and resumes the Run; the gap shows on the dashboard.
-- Stop the brain mid-Run: Wrist releases at once.
+- Stop the brain mid-Run: Wrist releases at once. Start it again: the rig stays dark in
+  `await_estop` until the e-stop is held and released.
 - The full programme from the buttons, each run annotated.
 - Walk README's setup sections against the cabinet as it is and fix the text where it lies.
 
 ## Results, decisions, clean-up
 
-- The results: every experiment's numbers by `brain/run`; the model's height and mass at
+- The results: every experiment's numbers by `/brain/run`; the model's height and mass at
   the top, its static stiffness from the pull test, the guy wire and band set with their
   preload, the backup guy or the preload below the detent hold, and the accelerometer's
-  placement and why; Wrist's control-tick timing and frame age per session; the dashboard
+  placement and why; Wrist's control-tick timing and sACN counts per session, from its `status:` lines; the dashboard
   panels and the SQL behind them committed under `pi/memory-pi/grafana/`; the answers to the
   three questions, with the measurement behind each; and what the PoC did not settle.
 - `DESIGN.md`: correct §3.10 by what was measured.

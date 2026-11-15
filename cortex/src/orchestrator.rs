@@ -14,18 +14,17 @@
 //! The rig state says whether, and what, goes out. Its machine is the layer above the show's,
 //! and the show knows nothing of it:
 //!
-//! | from      | when                     | to                                            |
-//! |-----------|--------------------------|-----------------------------------------------|
-//! | boot hold | the e-stop is released   | running                                       |
-//! | boot hold | the e-stop is pressed    | e-stop, holding nothing                       |
-//! | running   | the e-stop is pressed    | e-stop, holding the last frame under the mask |
-//! | e-stop    | the e-stop is released   | running                                       |
-//! | any       | SIGINT or SIGTERM        | shutdown                                      |
+//! | from         | when                                       | to                                            |
+//! |--------------|--------------------------------------------|-----------------------------------------------|
+//! | await e-stop | pressed, unbroken, for `ESTOP_ARM_HOLD_US` | e-stop, holding the stop frame                |
+//! | e-stop       | the e-stop is released                     | running                                       |
+//! | running      | the e-stop is pressed                      | e-stop, holding the last frame under the mask |
+//! | any          | SIGINT or SIGTERM                          | shutdown                                      |
 //!
-//! Boot hold is where the machine starts, and it leaves on the first frame. Nothing goes out
-//! in an e-stop entered from it: until a frame has gone out the brain does not know what the
-//! fixtures are doing, and silence leaves them where they were, by their own signal-loss
-//! behaviour. Neither boot hold nor shutdown can be returned to.
+//! Await e-stop is where the machine starts, every time the brain does, so nothing runs
+//! without a person at the cabinet to hold the e-stop and release it. A press released before
+//! the hold is done starts the wait again. Until the first release the stop frame goes out:
+//! blackout under the mask. Neither await e-stop nor shutdown can be returned to.
 //!
 //! The rig state is handed to the rig with the takeover as a [`Decision`], on every change, for
 //! it to report.
@@ -46,22 +45,25 @@ use zihatec_rs_485_dmx::{DmxHat, DmxTiming};
 
 /// Whether, and what, goes out.
 enum RigState {
-    /// Before the first frame: nothing has gone out yet.
-    BootHold,
+    /// Since the brain started: the stop frame goes out while the e-stop is waited for, and
+    /// when the current press began, if it is pressed.
+    AwaitEstop { pressed_since_us: Option<u64> },
     /// The frame goes out as the show or the console made it, and is kept as the last frame
     /// that went out.
     Running(Frame),
-    /// The held frame goes out, unchanged, every frame; or nothing, when the e-stop was
-    /// pressed before anything had gone out.
-    Estop(Option<Frame>),
+    /// The held frame goes out, unchanged, every frame.
+    Estop(Frame),
     /// The sACN source is released, and the process exits.
     Shutdown,
 }
 
 impl Decision {
-    /// Before the first frame: in boot hold, nobody having taken the universe over.
+    /// When the brain starts: awaiting the e-stop, nobody having taken the universe over.
     pub const BOOT: Decision = Decision {
-        rig: RigState::BootHold.word(),
+        rig: RigState::AwaitEstop {
+            pressed_since_us: None,
+        }
+        .word(),
         takeover: None,
     };
 }
@@ -70,36 +72,50 @@ impl RigState {
     /// The rig state as it is reported in a [`Decision`].
     const fn word(&self) -> &'static str {
         match self {
-            RigState::BootHold => "boot_hold",
+            RigState::AwaitEstop { .. } => "await_estop",
             RigState::Running(_) => "running",
             RigState::Estop(_) => "estop",
             RigState::Shutdown => "shutdown",
         }
     }
 
-    /// The rig state this frame moves to, if it moves, given whether the e-stop is pressed and
-    /// whether shutdown was asked for. Running starts with no frame of its own yet, which the
+    /// The rig state this frame moves to, if it moves, given whether the e-stop is pressed,
+    /// whether shutdown was asked for, and the time. Awaiting the e-stop, it keeps the time
+    /// the current press began itself. Running starts with no frame of its own yet, which the
     /// frame loop fills before anything reads it.
     fn next(
-        &self,
+        &mut self,
         pressed: bool,
         shutdown: bool,
+        now_us: u64,
         overrides: &[estop::StopOverride],
     ) -> Option<RigState> {
         if shutdown {
             return Some(RigState::Shutdown);
         }
         match (self, pressed) {
-            (RigState::BootHold, false) | (RigState::Estop(_), false) => {
-                Some(RigState::Running(dmx::BLACKOUT))
+            (RigState::AwaitEstop { pressed_since_us }, true) => {
+                let since = *pressed_since_us.get_or_insert(now_us);
+                (now_us - since >= cfg::ESTOP_ARM_HOLD_US)
+                    .then(|| RigState::Estop(stop_frame(overrides)))
             }
-            (RigState::BootHold, true) => Some(RigState::Estop(None)),
+            (RigState::AwaitEstop { pressed_since_us }, false) => {
+                *pressed_since_us = None;
+                None
+            }
+            (RigState::Estop(_), false) => Some(RigState::Running(dmx::BLACKOUT)),
             (RigState::Running(last), true) => {
-                Some(RigState::Estop(Some(estop::held(last, overrides))))
+                Some(RigState::Estop(estop::held(last, overrides)))
             }
             _ => None,
         }
     }
+}
+
+/// What goes out until the e-stop is first released: blackout under the e-stop's mask, so the
+/// rig is dark and still, whatever the fixtures were doing before the brain started.
+fn stop_frame(overrides: &[estop::StopOverride]) -> Frame {
+    estop::held(&dmx::BLACKOUT, overrides)
 }
 
 #[embassy_executor::task]
@@ -124,8 +140,15 @@ pub async fn frame_task(
     let mut overridden = false;
     // Which recipients' last send failed, one bit each, so each failure is logged once.
     let mut failing = 0u32;
-    let mut state = RigState::BootHold;
+    let mut state = RigState::AwaitEstop {
+        pressed_since_us: None,
+    };
     let mut decided = Decision::BOOT;
+    eprintln!(
+        "rig: awaiting the e-stop — hold it for {} ms, then release it; the stop frame goes out \
+         until then",
+        cfg::ESTOP_ARM_HOLD_US / 1000
+    );
 
     loop {
         ticker.next().await;
@@ -162,14 +185,17 @@ pub async fn frame_task(
         }
 
         // Last, on the frame as it will go out, so it beats the show and a console alike.
-        if let Some(next) = state.next((rig.estop)(), shutdown.load(Ordering::Relaxed), rig.stop) {
+        let pressed = (rig.estop)();
+        let asked = shutdown.load(Ordering::Relaxed);
+        if let Some(next) = state.next(pressed, asked, clock::now_us(), rig.stop) {
+            let awaiting = matches!(state, RigState::AwaitEstop { .. });
             match &next {
-                RigState::BootHold => unreachable!("boot hold cannot be returned to"),
+                RigState::AwaitEstop { .. } => unreachable!("await e-stop cannot be returned to"),
                 RigState::Running(_) => eprintln!("rig: e-stop released — the frame goes out"),
-                RigState::Estop(None) => {
-                    eprintln!("rig: e-stop pressed at boot — nothing goes out until it is released")
+                RigState::Estop(_) if awaiting => {
+                    eprintln!("rig: e-stop held — release it to start")
                 }
-                RigState::Estop(Some(_)) => eprintln!(
+                RigState::Estop(_) => eprintln!(
                     "rig: e-stop pressed — holding the last frame, {} channels overridden",
                     rig.stop.len()
                 ),
@@ -191,9 +217,9 @@ pub async fn frame_task(
         }
 
         match &mut state {
-            RigState::BootHold | RigState::Estop(None) => continue,
+            RigState::AwaitEstop { .. } => slots = stop_frame(rig.stop),
             RigState::Running(last) => *last = slots,
-            RigState::Estop(Some(held)) => slots = *held,
+            RigState::Estop(held) => slots = *held,
             RigState::Shutdown => {
                 // A burst rather than one frame, because UDP is lossy and any one arriving
                 // hands the fixtures over at once instead of after the data-loss timeout.

@@ -52,6 +52,11 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 // are not here: they are generated from the rig's QLC+ workspace into the rig's own `patch`
 // module, the single source of truth for what is patched where.
 
+// ── The rig state ────────────────────────────────────────────────────────────
+// How long the e-stop must be held, without a break, after the brain starts, before its
+// release lets the rig run: long enough to be a deliberate press by a person at the cabinet,
+// not a bounce or a brush.
+pub const ESTOP_ARM_HOLD_US: u64 = 500_000;
 
 // ── Wired DMX-512 output (Zihatec RS-485 HAT) ─────────────────────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe

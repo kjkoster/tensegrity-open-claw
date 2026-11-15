@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PI="memory-pi"             # ssh alias (key-based)
+PI="memory-pi-deploy"             # ssh alias (key-based)
 PI_DIR="tensegrity-open-claw"
 
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }

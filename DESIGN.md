@@ -318,7 +318,8 @@ component's section.
 
 The brain runs **two state machines, layered**, and keeps their states apart by name:
 
-- The **rig state** — boot hold, running, e-stop, shutdown — says whether, and what, goes out.
+- The **rig state** — await e-stop, running, e-stop, shutdown — says whether, and what, goes
+  out.
   It lives in `cortex`'s frame loop, after the arbitration, and is in the brain's telemetry.
 - The **show state** says what the show asks for. It is the rig crate's Director, described in
   [`SHOW.md`](SHOW.md).
@@ -326,12 +327,35 @@ The brain runs **two state machines, layered**, and keeps their states apart by 
 The show state machine never sees the rig state, so it has no e-stop, boot or shutdown cases,
 and runs on unchanged underneath a stop.
 
-The rig state runs boot hold → running ⇄ e-stop → shutdown. Boot hold leaves on the first
-frame: to running if the e-stop is released, or to an e-stop holding nothing, silent until
-release. Until a frame has gone out the brain does not know what the fixtures are doing, so
-silence, which their signal-loss behaviour answers by holding, is the only honest stop frame.
+```mermaid
+stateDiagram-v2
+    [*] --> await_estop: power-up
+    await_estop --> await_estop: pressed, or released before the minimum hold
+    await_estop --> estop: pressed without a break for the minimum hold, holding the stop frame
+    estop --> running: released
+    running --> estop: pressed, holding the last frame under the mask
+    await_estop --> shutdown: SIGINT or SIGTERM
+    estop --> shutdown: SIGINT or SIGTERM
+    running --> shutdown: SIGINT or SIGTERM
+    shutdown --> [*]
+```
+
+**Nothing starts without a person at the cabinet.** After power-up the rig waits for the
+e-stop to be pressed and held, then released: pressed at power-up, the hold counts from boot;
+released, as after a power cut mid-show, it waits for the press. A press released before the
+minimum hold starts the wait again.
+
+**The stop frame goes out until the first release**: blackout under the e-stop's mask, in await
+e-stop and in the e-stop entered from it. A restart mid-show therefore darkens the rig rather
+than leaving the wired fixtures holding their last look, by their own signal-loss behaviour,
+until someone reaches the cabinet.
+
+**A broken button reads as released.** With its top torn off, the e-stop's contacts are where
+they are when it is released, and nothing electrical tells the two apart. A cable or contact
+fault does read as pressed, and as it never reads as released, the rig stays in e-stop.
+
 Shutdown releases the sACN source on the frame loop's own send path, so there is only ever one
-sender. Neither boot hold nor shutdown can be returned to.
+sender. Neither await e-stop nor shutdown can be returned to.
 
 ### 2.6 The Pi controller
 

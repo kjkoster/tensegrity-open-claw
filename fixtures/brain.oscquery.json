@@ -26,7 +26,7 @@
           "TYPE": "s",
           "ACCESS": 1,
           "RANGE": [
-            { "VALS": ["boot_hold", "running", "estop", "shutdown"] }
+            { "VALS": ["await_estop", "running", "estop", "shutdown"] }
           ],
           "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
         },

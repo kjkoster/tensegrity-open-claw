@@ -266,7 +266,12 @@ last frame it sent with these overrides (why: DESIGN §1.2):
 - It acts on the frame as it goes out, so it stops a [takeover](#taking-the-rig-over) too.
 - The held frame goes out continuously at the normal rate.
 - Twisting the button out releases it; the live frame goes out at once.
-- Booted with it pressed, the rig sends nothing until it is released.
+- **Every time the brain starts, it waits for the e-stop**: after a power-up, a crash, a
+  restart or a deploy alike. Hold the e-stop pressed for `ESTOP_ARM_HOLD_US` in
+  `cortex/src/config.rs`, without a break, then release it, and the rig runs. Pressed at
+  start, the hold counts from then. Until the release, blackout under the overrides above
+  goes out, and a console cannot take over. There is no cue at the cabinet: the face's lamps
+  are dark, like everything else.
 - The show runs on underneath: `/brain/show` keeps reporting; `/brain/rig` is the rig state
   and `/face/estop` the button.
 - A shutter, Effect or Maintenance channel whose `.qxf` marks no band for the stop fails the
@@ -276,9 +281,10 @@ Set every fixture's own **DMX-loss behaviour to hold last values**, unless its s
 DESIGN says otherwise, so a cable fault behaves like the stop.
 
 ```
+rig: awaiting the e-stop — hold it for 500 ms, then release it; the stop frame goes out until then
+rig: e-stop held — release it to start
 rig: e-stop released — the frame goes out
 rig: e-stop pressed — holding the last frame, 32 channels overridden
-rig: e-stop pressed at boot — nothing goes out until it is released
 rig: shutdown — releasing the sACN source (3 terminate frames)
 ```
 
