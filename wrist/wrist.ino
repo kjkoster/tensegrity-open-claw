@@ -25,10 +25,13 @@ const uint8_t PIN_HX_DT = 16;   // D0
 const uint8_t PIN_HX_SCK = 15;  // D8
 const uint8_t PIN_LED = 2;      // D4, lit when low
 
-// The load cell's calibration: force = (raw − tare) · scale. The scale is NaN, so
-// /sole/force reads NaN rather than a tension nobody measured.
-const int32_t LOAD_TARE = 0;            // raw counts
-const float LOAD_SCALE = NAN;           // N per count
+// The load cell's calibration: force = (raw − tare) · scale. Measured 2026-11-15, mounted with
+// the motor and no wire, against 737, 1070 and 1370 g weighed on a kitchen scale and set on
+// the motor, g = 9.81; the three agree to 0.1%. Weight on the motor lowers the counts; the
+// wire pulls the other way, up, so the scale is positive and tension reads positive. Taken to
+// be symmetric: the pull up itself was not calibrated.
+const int32_t LOAD_TARE = -553801;      // raw counts
+const float LOAD_SCALE = 2.3109e-5f;    // N per count
 
 // The motion. The driver is set to 400 steps a revolution, SW1–SW4; every
 // figure here is in its steps. The top speed is the step generator's ceiling, half its 25 kHz
@@ -552,7 +555,7 @@ void sendState() {
   v.wrist_pluck = pluckState();
   v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
-  v.sole_force = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
+  v.sole_force_n = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
 }
 

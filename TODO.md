@@ -15,13 +15,9 @@ yet.
 
 With the test sculpture, Monday 2026-11-16. Everything bought before then.
 
-- Buy: rubber bands, two hooks, a short cable and the guy wire; a plank and two G-clamps; for
-  the motor, four M4 bolts as long as the flange, what it bolts to, a washer and a nut, with
-  washers and nylon-insert locknuts.
 - The 4700 µF / 50 V at the motor, once it arrives.
-- Decide: a backup guy, or the bands' preload below the detent hold; into `SHOW.md` §3.1.
-- Build the bridge: plank across the model's base, clamped to the table; the motor bolted on
-  the load cell, the wire leaving the shaft along the cell's axis; the wire wrapped a few
+- Build the bridge: plank across the model's base, held down by its own weight; the wire
+  leaving the shaft along the cell's axis, wrapped a few
   turns round the bare shaft, tail tied off, then cable, hook, bands, hook and wire to the
   node. Nothing fixed to the sculpture but the wire.
 - By test, into the firmware's constants: `A_max`, the largest tug the band set takes. Which
@@ -72,9 +68,7 @@ QLC+ faders under takeover, its frequency found by hand.
 The target: E0, the accelerometer's trace on the dashboard from Wrist's board, the motor in
 Blackout. The dashboard comes first because it is how everything after it is read.
 
-- Buy: a microswitch for home; for the load cell, four bolts in
-  its threads (M4 or M5, try them), shorter than the threads are deep, and spacers so only the
-  bar's ends are clamped; Velcro dots; a luggage scale and string; a known mass for the load cell.
+- Buy: a microswitch for home; Velcro dots; a luggage scale and string.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
   feed, contacts rated for at least 50 V DC.
 - Wrist's, the brain's, the face's and Memory's OSC in the `rig` database and on the broker.
@@ -135,8 +129,8 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
     amplitude, the drive's amplitude and phase offset, the regime, the shaft's position; the
     accelerometer's axes and the sway on each reading; the transitions and ring-down results
     as they happen.
-- Calibrate Sole, the load cell, per `SHOW.md` §3.1, from `/sole/raw`; measure the rest position, the travel and
-  the tension limits for the band set; all into the firmware's constants.
+- Measure the rest position, the travel and the tension limits for the band set; into the
+  firmware's constants.
 - E1 from `SHOW.md` §4 under takeover from QLC+.
 
 ## The brain runs the programme

@@ -10,8 +10,8 @@
       "FULL_PATH": "/sole",
       "DESCRIPTION": "Sole, the load cell under Wrist's motor and its HX711, reading the wire's tension. Compiled into Wrist's firmware today, it reports as a device of its own, so it can move. It takes no DMX, so it has no fixture definition and no place in the QLC+ workspace. Out only: nothing is received over OSC.",
       "CONTENTS": {
-        "force": {
-          "FULL_PATH": "/sole/force",
+        "force_n": {
+          "FULL_PATH": "/sole/force_n",
           "DESCRIPTION": "The wire's tension, from the raw reading through the coded-in tare and scale.",
           "TYPE": "f",
           "ACCESS": 1,

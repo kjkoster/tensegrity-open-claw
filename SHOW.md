@@ -158,9 +158,9 @@ chosen node. The shaft is taken to be 8 mm, 25 mm of wire a revolution; measure 
 are the series spring that turns the shaft's position into force, and their preload keeps the
 wire taut, so there is no backlash. Unpowered, the shaft holds only by its detent, taken to be
 8–15 N of wire tension; measure it. A preload above that unwinds the wraps in Blackout and
-lets the guy go slack, so either a backup guy, fixed and slightly longer, holds the structure
-without the motor's, or the preload stays below the detent hold. The motor on its load cell
-sits on a wooden bridge spanning the model's base, clamped to the table, the wire leaving the
+lets the guy go slack, so the preload stays below the detent hold; there is no backup guy.
+The motor on its load cell
+sits on a wooden bridge spanning the model's base, held down by its own weight, the wire leaving the
 shaft along the cell's axis so the cell reads its tension; nothing is fixed to the sculpture
 but the wire and the accelerometer.
 
