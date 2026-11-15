@@ -1,0 +1,234 @@
+{
+  "HOST_INFO": {
+    "NAME": "memory",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "memory": {
+      "FULL_PATH": "/memory",
+      "DESCRIPTION": "Memory, the daemon on memory-pi that records the OSC every device sends into GreptimeDB and relays it onto MQTT. It hands its own OSC to itself rather than sending it, so it is recorded while the WiFi is down. Sent on connect means once, as soon as the clock has synchronised, which is when it can be recorded.",
+      "CONTENTS": {
+        "uptime": {
+          "FULL_PATH": "/memory/uptime",
+          "DESCRIPTION": "Time since the daemon started: its heartbeat. A gap in it is Memory down; a drop to 0 is a restart.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": 0 }],
+          "UNIT": ["s"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+        }
+      }
+    },
+    "sys": {
+      "FULL_PATH": "/sys",
+      "DESCRIPTION": "What each device runs on, under its own name.",
+      "CONTENTS": {
+        "memory": {
+          "FULL_PATH": "/sys/memory",
+          "DESCRIPTION": "memory-pi, and how it is holding up.",
+          "CONTENTS": {
+            "board": {
+              "FULL_PATH": "/sys/memory/board",
+              "DESCRIPTION": "The board, as its device tree names it.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "cores": {
+              "FULL_PATH": "/sys/memory/cores",
+              "DESCRIPTION": "CPU cores.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1 }],
+              "UNIT": ["count"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "cpu_freq": {
+              "FULL_PATH": "/sys/memory/cpu_freq",
+              "DESCRIPTION": "The top clock the CPU is allowed, which is what it sustains under load.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MHz"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "ram": {
+              "FULL_PATH": "/sys/memory/ram",
+              "DESCRIPTION": "The RAM fitted, from the board's revision code; not what the kernel is left after the GPU's share.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MB"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "uptime": {
+              "FULL_PATH": "/sys/memory/uptime",
+              "DESCRIPTION": "Time since the Pi booted. Against /memory/uptime it tells a reboot from a restart of the daemon.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["s"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "temperature": {
+              "FULL_PATH": "/sys/memory/temperature",
+              "DESCRIPTION": "The SoC's temperature.",
+              "TYPE": "f",
+              "ACCESS": 1,
+              "UNIT": ["°C"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "throttling": {
+              "FULL_PATH": "/sys/memory/throttling",
+              "DESCRIPTION": "The firmware's throttling word, as vcgencmd get_throttled gives it.",
+              "CONTENTS": {
+                "raw": {
+                  "FULL_PATH": "/sys/memory/throttling/raw",
+                  "DESCRIPTION": "The word as read, for the bits the flags below do not name.",
+                  "TYPE": "i",
+                  "ACCESS": 1,
+                  "RANGE": [{ "MIN": 0 }],
+                  "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                },
+                "now": {
+                  "FULL_PATH": "/sys/memory/throttling/now",
+                  "DESCRIPTION": "What is happening at this moment.",
+                  "CONTENTS": {
+                    "under_voltage": {
+                      "FULL_PATH": "/sys/memory/throttling/now/under_voltage",
+                      "DESCRIPTION": "The supply is below what the board needs.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "arm_capped": {
+                      "FULL_PATH": "/sys/memory/throttling/now/arm_capped",
+                      "DESCRIPTION": "The CPU's clock is capped.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "throttled": {
+                      "FULL_PATH": "/sys/memory/throttling/now/throttled",
+                      "DESCRIPTION": "The CPU is throttled.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "soft_temp_limit": {
+                      "FULL_PATH": "/sys/memory/throttling/now/soft_temp_limit",
+                      "DESCRIPTION": "The soft temperature limit is active.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    }
+                  }
+                },
+                "since_boot": {
+                  "FULL_PATH": "/sys/memory/throttling/since_boot",
+                  "DESCRIPTION": "What has happened at any time since boot: the brownout nobody was watching for. Each is logged the first time it is seen.",
+                  "CONTENTS": {
+                    "under_voltage": {
+                      "FULL_PATH": "/sys/memory/throttling/since_boot/under_voltage",
+                      "DESCRIPTION": "The supply has been below what the board needs.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "arm_capped": {
+                      "FULL_PATH": "/sys/memory/throttling/since_boot/arm_capped",
+                      "DESCRIPTION": "The CPU's clock has been capped.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "throttled": {
+                      "FULL_PATH": "/sys/memory/throttling/since_boot/throttled",
+                      "DESCRIPTION": "The CPU has been throttled.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    },
+                    "soft_temp_limit": {
+                      "FULL_PATH": "/sys/memory/throttling/since_boot/soft_temp_limit",
+                      "DESCRIPTION": "The soft temperature limit has been active.",
+                      "TYPE": "T",
+                      "ACCESS": 1,
+                      "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                    }
+                  }
+                }
+              }
+            },
+            "mem_total": {
+              "FULL_PATH": "/sys/memory/mem_total",
+              "DESCRIPTION": "The RAM the kernel has, MemTotal.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MB"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "mem_available": {
+              "FULL_PATH": "/sys/memory/mem_available",
+              "DESCRIPTION": "The RAM available to start programs in, MemAvailable: free, and the page cache that can be given up.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MB"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "disk_free": {
+              "FULL_PATH": "/sys/memory/disk_free",
+              "DESCRIPTION": "Free space on the SD card, for an unprivileged user.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MB"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "tank_free": {
+              "FULL_PATH": "/sys/memory/tank_free",
+              "DESCRIPTION": "Free space on the SSD the recordings are on, at /tank. NaN while it is not mounted, so the SD card's free space under the empty mount point never reads as the SSD's.",
+              "TYPE": "f",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MB"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "wifi": {
+              "FULL_PATH": "/sys/memory/wifi",
+              "DESCRIPTION": "memory-pi's end of the WiFi link, its only network. Stem reports the other end, how strongly the access point hears memory-pi.",
+              "CONTENTS": {
+                "rssi": {
+                  "FULL_PATH": "/sys/memory/wifi/rssi",
+                  "DESCRIPTION": "How strongly memory-pi hears the access point. 0 while it is not associated, which no real reading is.",
+                  "TYPE": "i",
+                  "ACCESS": 1,
+                  "RANGE": [{ "MAX": 0 }],
+                  "UNIT": ["dBm"],
+                  "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                },
+                "ip": {
+                  "FULL_PATH": "/sys/memory/wifi/ip",
+                  "DESCRIPTION": "wlan0's IPv4 address, in dotted-quad form; empty while it has none. Any other address than the WiFi profile's means that profile did not take, as when Imager's is still in place.",
+                  "TYPE": "s",
+                  "ACCESS": 1,
+                  "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+                },
+                "mac": {
+                  "FULL_PATH": "/sys/memory/wifi/mac",
+                  "DESCRIPTION": "wlan0's MAC address, as six colon-separated hex pairs.",
+                  "TYPE": "s",
+                  "ACCESS": 1,
+                  "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -106,7 +106,7 @@ sends comes back to its receiver.
 ### 1.3 Telemetry; the show must go on
 
 Telemetry reports; nothing the show does reads it. The show's inputs are its sensors and the
-clock. That keeps telemetry optional — a recorder that is down or slow costs the recording and
+clock. That keeps telemetry optional — a Memory that is down or slow costs the recording and
 never a frame — and keeps the show's behaviour explainable from its inputs alone. Telemetry is
 OSC (§2.7). A device's OSC to the brain is a sensor input (§1.4), not telemetry, even when the
 same message also goes to Memory (§3.9).
@@ -273,11 +273,12 @@ reporting a healthy signal, which reads as a wiring fault and is not one. The pa
 | `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
 | `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
 | `brain/` | the rig crate: the rig's patch, its show times, and its show |
+| `memory/` | Memory (§3.9), on `memory-pi` |
 | `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
 
-**Beside the crates**: `stem/` holds Stem's daemon and the Python modules every health daemon
-shares; `pi/chaos-pi/` is what `chaos-pi` runs that belongs to no crate; `pi/memory-pi/` is
-everything `memory-pi` runs. A daemon's systemd unit lives in its own directory. `clockwork/`
+**Beside the crates**: `stem/` holds Stem's daemon and its Python modules; `pi/chaos-pi/` is
+what `chaos-pi` runs that belongs to no crate; `pi/memory-pi/` is what `memory-pi` runs that
+belongs to no crate. A daemon's systemd unit lives in its own directory. `clockwork/`
 holds what reads `clockwork.dot` at build time: the dot's reader, and the renderer that fills
 the Pis' configuration from it.
 
@@ -404,7 +405,7 @@ workspace patches them.
 | the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
 | the brain's telemetry, over OSC (§2.7) | `cortex::telemetry` |
 | Stem (§3.1) | `stem/` |
-| Memory (§3.9) | `pi/memory-pi/` |
+| Memory (§3.9) | `memory/`, `pi/memory-pi/`, `fixtures/memory.oscquery.json` |
 | the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `pi/chaos-pi/` |
 
 | Component | In the code |
@@ -434,7 +435,8 @@ whose heartbeat has stopped, and nothing watches anything else. A part inside th
 the face, lives and dies with it, so a heartbeat of its own would only repeat the brain's; its
 telemetry goes out with the brain's.
 
-`stem/rig_board.py` holds the board readers every Python health daemon shares.
+`stem/rig_board.py` holds Stem's board readers. Memory reads memory-pi with its own, in Rust,
+so a fix to a reading on one Pi does not reach the other.
 
 ### 3.2 The 4G watchdog
 
@@ -724,12 +726,15 @@ nothing, because a dead `chaos-pi` leaves little to do remotely anyway.
 
 **Three processes:**
 
-- **Memory itself**, `memory.py`. It ingests the OSC every device sends to `memory-pi`
-  directly, decoded from that device's OSCQuery file (§1.4), and writes it into Greptime in
-  batches, so a device is recorded without the brain in the path; Greptime has no OSC listener,
-  and a bridge is a page of Python. It is also Stem's counterpart for `memory-pi`: it shares
-  Stem's board readers through `stem/rig_board.py`, so a fix to a reading lands on both Pis,
-  and adds the SSD's free space and its end of the WiFi link.
+- **Memory itself**, in Rust, `memory/`, built on the Mac as the brain is. It ingests the OSC
+  every device sends to `memory-pi` directly and writes it into Greptime in batches, so a
+  device is recorded without the brain in the path; Greptime has no OSC listener. An address
+  no device's OSCQuery file (§1.4) has is recorded all the same and logged once. It relays
+  every value onto the broker as it arrives, not retained, so a subscriber on the Mac watches
+  the rig live and nothing crosses the 4G link while none is connected. It is also Stem's
+  counterpart for `memory-pi`: its heartbeat and the Pi's health are its own OSC,
+  `fixtures/memory.oscquery.json`, handed to itself rather than sent, so they are recorded
+  while the WiFi is down.
 - **GreptimeDB**, standalone, on loopback alone.
 - **Grafana**, reading Greptime as a MySQL server, on loopback.
 

@@ -11,10 +11,10 @@ enable_telemetry = false
 global_rt_size = 4
 compact_rt_size = 2
 
-# Loopback only, for every protocol that stays on: the recorder and Grafana are local, and the
+# Loopback only, for every protocol that stays on: Memory and Grafana are local, and the
 # Mac reaches both through SSH.
 #
-# HTTP carries the recorder's writes, as InfluxDB line protocol, and the API and dashboard.
+# HTTP carries Memory's writes, as InfluxDB line protocol, and the API and dashboard.
 [http]
 addr = "127.0.0.1:4000"
 
@@ -28,7 +28,7 @@ runtime_size = 2
 enable = true
 addr = "127.0.0.1:4002"
 
-# InfluxDB line protocol is how the recorder writes.
+# InfluxDB line protocol is how Memory writes.
 [influxdb]
 enable = true
 

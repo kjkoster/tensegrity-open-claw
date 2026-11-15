@@ -24,8 +24,8 @@ Liveness is not published here. Every daemon publishes its own on `health/<servi
 will behind it, so a crashed process says so without Stem having to notice — including a
 crashed Stem.
 
-What any Pi has is read through `rig_board`, which memory-pi's health daemon shares; what is
-chaos-pi's alone — the access point's stations and the 4G modem — is read here.
+What any Pi has is read through `rig_board`; what is chaos-pi's alone — the access point's
+stations and the 4G modem — is read here.
 """
 
 import os

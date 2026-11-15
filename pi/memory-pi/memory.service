@@ -1,20 +1,15 @@
 [Unit]
-Description=Tensegrity Memory Health Daemon
-# Wanted, not Required: a broker that is down must leave the daemon running and publishing
-# nothing, because a health daemon that exits when the transport fails is silent in precisely
-# the situation it exists for. Ordered after it so that its goodbye reaches the broker before
-# the broker stops.
-Wants=mosquitto.service
-After=mosquitto.service
+Description=Tensegrity Memory
+# Wanted, not Required: with the broker down Memory keeps recording, and with GreptimeDB down it
+# holds what it receives and keeps relaying, rather than vanishing along with either. Ordered
+# after both, so its goodbye reaches the broker before the broker stops.
+Wants=mosquitto.service greptimedb.service
+After=mosquitto.service greptimedb.service
 
 [Service]
-# Its own venv, not a shared one, so it keeps reporting when the recorder's dependencies are
-# what has gone wrong. The broker is on this Pi, so the client's loopback default is right.
-ExecStart=/opt/memory/venv/bin/python3 /usr/local/bin/memory.py
+ExecStart=/usr/local/bin/memory
 Restart=always
 RestartSec=5
-# A positive Nice, as Stem's: everything this reads is slow-moving.
-Nice=10
 
 [Install]
 WantedBy=multi-user.target

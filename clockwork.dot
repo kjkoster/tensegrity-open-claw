@@ -11,8 +11,9 @@
 //                           them the gateway and the DHCP range. A WiFi network adds its
 //                           `ssid "<name>"`, `psk "<passphrase>"` and `channel <n>`; this is
 //                           the one place the WiFi is defined.
-//   subgraph cluster_<dev>  a device, labelled with its host name.
-//   <dev>_if                the device's addresses, one field each: interface, address,
+//   subgraph cluster_<dev>  a device. Its label, drawn at the bottom of its box, is its host
+//                           name in bold, then its addresses, a line each, every line ended by
+//                           `<br align="left"/>`: interface, address,
 //                           network. "dhcp" for an address taken from a lease. The network
 //                           may be left out where the address lies in its CIDR; a lease
 //                           always names it. The device that is a WiFi network's access
@@ -48,9 +49,9 @@ digraph clockwork {
     // ── Devices ──────────────────────────────────────────────────────────────────────────────
 
     subgraph cluster_chaos_pi {
-        label="chaos-pi";
-
-        chaos_pi_if [label="addresses|wlan0 10.0.10.2 ap|eth0 10.0.1.1 wired|wg0 10.8.0.3 wireguard|wwan0 dhcp 4g"];
+        label=<<b>chaos-pi</b><br align="left"/>wlan0 10.0.10.2 ap<br align="left"/>eth0 10.0.1.1 wired<br align="left"/>wg0 10.8.0.3 wireguard<br align="left"/>wwan0 dhcp 4g<br align="left"/>>;
+        labelloc="b";
+        labeljust="l";
 
         node [shape=plain];
 
@@ -62,17 +63,6 @@ digraph clockwork {
         chaos_pi_stem [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>stem</b></td></tr>
         </table>>];
-        chaos_pi_dnsmasq [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>dnsmasq</b></td></tr>
-            <tr><td port="dns_ap">DNS udp wlan0:53</td></tr>
-            <tr><td port="dhcp_ap">DHCP udp wlan0:67</td></tr>
-            <tr><td port="dns_wired">DNS udp eth0:53</td></tr>
-            <tr><td port="dhcp_wired">DHCP udp eth0:67</td></tr>
-        </table>>];
-        chaos_pi_sshd [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>sshd</b></td></tr>
-            <tr><td port="ssh">SSH tcp *:22</td></tr>
-        </table>>];
         chaos_pi_wg [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>wireguard</b></td></tr>
         </table>>];
@@ -82,18 +72,15 @@ digraph clockwork {
     }
 
     subgraph cluster_memory_pi {
-        label="memory-pi";
-
-        memory_pi_if [label="addresses|wlan0 10.0.10.3"];
+        label=<<b>memory-pi</b><br align="left"/>wlan0 10.0.10.3<br align="left"/>>;
+        labelloc="b";
+        labeljust="l";
 
         node [shape=plain];
 
         memory_pi_mosquitto [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>mosquitto</b></td></tr>
             <tr><td port="mqtt">MQTT tcp *:1883</td></tr>
-        </table>>];
-        memory_pi_recorder [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>recorder</b></td></tr>
         </table>>];
         memory_pi_memory [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>memory</b></td></tr>
@@ -109,16 +96,12 @@ digraph clockwork {
             <tr><td port="title"><b>grafana</b></td></tr>
             <tr><td port="http">HTTP tcp lo:3000</td></tr>
         </table>>];
-        memory_pi_sshd [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>sshd</b></td></tr>
-            <tr><td port="ssh">SSH tcp *:22</td></tr>
-        </table>>];
     }
 
     subgraph cluster_wrist {
-        label="wrist";
-
-        wrist_if [label="addresses|wifi 10.0.10.4 mac 18:fe:34:f3:99:56 chip esp8266"];
+        label=<<b>wrist</b><br align="left"/>wifi 10.0.10.4 mac 18:fe:34:f3:99:56 chip esp8266<br align="left"/>>;
+        labelloc="b";
+        labeljust="l";
 
         node [shape=plain];
 
@@ -129,27 +112,27 @@ digraph clockwork {
     }
 
     subgraph cluster_mac {
-        label="mac";
-
-        mac_if [label="addresses|en0 dhcp wifi|utun 10.8.0.4 wireguard"];
+        label=<<b>mac</b><br align="left"/>en0 dhcp wifi<br align="left"/>utun 10.8.0.4 wireguard<br align="left"/>>;
+        labelloc="b";
+        labeljust="l";
 
         node [shape=plain];
 
         mac_qlc [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>QLC+</b></td></tr>
         </table>>];
-        mac_ssh [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>ssh</b></td></tr>
-        </table>>];
         mac_browser [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>browser</b></td></tr>
+        </table>>];
+        mac_mqttanalyzer [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>MQTTAnalyzer</b></td></tr>
         </table>>];
     }
 
     subgraph cluster_wg_hub {
-        label="wireguard hub";
-
-        wg_hub_if [label="addresses|wg 10.8.0.1 wireguard"];
+        label=<<b>wireguard hub</b><br align="left"/>wg 10.8.0.1 wireguard<br align="left"/>>;
+        labelloc="b";
+        labeljust="l";
 
         node [shape=plain];
 
@@ -183,13 +166,13 @@ digraph clockwork {
         edge [color="#ff7f0e", fontcolor="#ff7f0e", penwidth=1.5];
         chaos_pi_brain:title     -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
         chaos_pi_stem:title      -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
-        memory_pi_memory:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
-        memory_pi_recorder:title -> memory_pi_mosquitto:mqtt [xlabel="MQTT, subscribed", dir=back];
+        memory_pi_memory:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, the OSC it receives"];
+        mac_mqttanalyzer:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, subscribed, tunnelled over SSH", dir=back];
     }
 
     subgraph influx {
-        edge [color="#17becf", fontcolor="#17becf", penwidth=1.5, style=dashed];
-        memory_pi_recorder:title -> memory_pi_greptime:http [xlabel="InfluxDB line protocol"];
+        edge [color="#17becf", fontcolor="#17becf", penwidth=1.5];
+        memory_pi_memory:title -> memory_pi_greptime:http [xlabel="InfluxDB line protocol"];
     }
 
     subgraph mysql {
@@ -202,12 +185,6 @@ digraph clockwork {
         mac_browser:title -> memory_pi_grafana:http [xlabel="HTTP, tunnelled over SSH"];
     }
 
-    subgraph ssh {
-        edge [color="#7f7f7f", fontcolor="#7f7f7f", penwidth=1];
-        mac_ssh:title -> chaos_pi_sshd:ssh  [xlabel="SSH over WireGuard"];
-        mac_ssh:title -> memory_pi_sshd:ssh [xlabel="SSH, jumping through chaos-pi"];
-    }
-
     subgraph wireguard {
         edge [color="#8c564b", fontcolor="#8c564b", penwidth=2, style=bold];
         chaos_pi_wg:title -> wg_hub_wg:wg [xlabel="WireGuard over 4G"];
@@ -218,10 +195,5 @@ digraph clockwork {
         chaos_pi_watchdog:title -> internet_ping:cloudflare [xlabel="ICMP over 4G"];
         chaos_pi_watchdog:title -> internet_ping:google     [xlabel="ICMP over 4G"];
         chaos_pi_watchdog:title -> wg_hub_wg:wg             [xlabel="ICMP over WireGuard"];
-    }
-
-    subgraph undecided {
-        edge [color="#000000", fontcolor="#000000", penwidth=1, style=dotted, arrowhead=empty];
-        memory_pi_memory:title -> memory_pi_greptime:http [xlabel="undecided"];
     }
 }

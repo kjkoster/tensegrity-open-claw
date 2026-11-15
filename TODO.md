@@ -26,8 +26,6 @@ With the test sculpture, Monday 2026-11-16. Everything bought before then.
   node. Nothing fixed to the sculpture but the wire.
 - By test, into the firmware's constants: `A_max`, the largest tug the band set takes. Which
   Direction reels in, noted for the desk.
-- Pluck under takeover from QLC+: Hold, then Pluck; Amplitude small first, then up, watching
-  the model.
 
 ## Wrist's Run
 
@@ -79,15 +77,13 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   bar's ends are clamped; Velcro dots; a luggage scale and string; a known mass for the load cell.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
   feed, contacts rated for at least 50 V DC.
-- Revive `memory-pi` per README; broker at `10.0.10.3`, `recorder/greptime` saying `ok`.
+- Revive `memory-pi` per README; broker at `10.0.10.3`, Memory's journal saying GreptimeDB
+  `ok`, Wrist's and Memory's OSC in the `rig` database and on the broker.
 - Settle the OSCQuery files, `wrist.oscquery.json` and `face.oscquery.json`. Open:
   - `health/…` specified for every client, `sys/…` for every client but Wrist, and a file
     for the brain;
   - booleans as `T`/`F` throughout;
   - whether Wrist serves its file over HTTP and mDNS.
-- The OSC bridge on `memory-pi` (DESIGN §3.9): Wrist's bundles and events decoded from
-  `wrist.oscquery.json` and ingested alongside MQTT; its unit and deploy in
-  `pi/memory-pi/`; the schema into README.
 - Provision the PoC dashboard from `pi/memory-pi/grafana/headless-hug-poc.json` with
   `allowUiUpdates: true`, so panels can be edited in the UI and exported back to the file;
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
@@ -171,7 +167,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 ## Commissioning the whole
 
-- Power the cabinet up cold with nobody touching anything: both Pis, broker, OSC bridge,
+- Power the cabinet up cold with nobody touching anything: both Pis, broker, Memory,
   brain, Wrist on the AP in Blackout, dashboard live.
 - Press the e-stop in every state: Wrist releases at once; release: Wrist takes up whatever
   the frame asks.

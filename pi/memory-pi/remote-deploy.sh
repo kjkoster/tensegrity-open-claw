@@ -73,21 +73,6 @@ sudo systemctl enable mosquitto
 sudo systemctl restart mosquitto
 echo "broker restarted"
 
-# --- Health daemon -----------------------------------------------------------
-# rig_mqtt.py and rig_board.py are Stem's, shipped here by deploy-memory-pi.sh. They install
-# beside their importer, as on chaos-pi: the daemon is run by absolute path, which puts
-# /usr/local/bin first on its import path.
-step "install and restart the health daemon"
-sudo install -m 0755 "$REPO/pi/memory-pi/memory.py" /usr/local/bin/memory.py
-sudo install -m 0644 "$REPO/stem/rig_mqtt.py" /usr/local/bin/rig_mqtt.py
-sudo install -m 0644 "$REPO/stem/rig_board.py" /usr/local/bin/rig_board.py
-sudo install -m 0644 "$REPO/pi/memory-pi/memory.service" /etc/systemd/system/memory.service
-python_daemon /opt/memory/venv "$REPO/pi/memory-pi/requirements.txt"
-sudo systemctl daemon-reload
-sudo systemctl enable memory
-sudo systemctl restart memory
-echo "memory daemon restarted"
-
 # --- GreptimeDB ----------------------------------------------------------------
 # From a pinned release rather than apt, which carries no GreptimeDB. Downloaded only when the
 # installed version differs from greptime.version — the tarball is close to 200 MB over chaos-pi's
@@ -128,17 +113,16 @@ sudo systemctl enable greptimedb
 sudo systemctl restart greptimedb
 echo "GreptimeDB restarted"
 
-# --- Recorder ----------------------------------------------------------------
-# After Greptime, which it writes to. rig_mqtt.py is already in /usr/local/bin from the health
-# daemon's step.
-step "install and restart the recorder"
-sudo install -m 0755 "$REPO/pi/memory-pi/recorder.py" /usr/local/bin/recorder.py
-sudo install -m 0644 "$REPO/pi/memory-pi/recorder.service" /etc/systemd/system/recorder.service
-python_daemon /opt/recorder/venv "$REPO/pi/memory-pi/recorder-requirements.txt"
+# --- Memory --------------------------------------------------------------------
+# After the broker and GreptimeDB, which it relays and writes to. Built on the Mac and shipped
+# by deploy-memory-pi.sh.
+step "install and restart Memory"
+sudo install -m 0755 "$REPO/memory/memory" /usr/local/bin/memory
+sudo install -m 0644 "$REPO/pi/memory-pi/memory.service" /etc/systemd/system/memory.service
 sudo systemctl daemon-reload
-sudo systemctl enable recorder
-sudo systemctl restart recorder
-echo "recorder restarted"
+sudo systemctl enable memory
+sudo systemctl restart memory
+echo "Memory restarted"
 
 # --- Grafana -------------------------------------------------------------------
 # From Grafana's apt repository. Its signing key is fetched once, and the package installed only

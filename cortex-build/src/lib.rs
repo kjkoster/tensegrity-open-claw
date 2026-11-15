@@ -253,6 +253,85 @@ pub fn ingest(workspace: &Path, network: &Network) {
     fs::write(out_dir.join("rig.rs"), render_rig(&sacn, &patch, &dot, source, network)).unwrap();
 }
 
+/// Generates `network.rs` in `OUT_DIR` from the dot alone, for a service that is no rig and has
+/// no workspace: `pub mod network`, holding `MQTT`, the broker its `mqtt` edge goes to, and
+/// `OSC_BIND`, where its `osc` port binds. Read through `facts.py`, as [`ingest`] reads the
+/// brain's.
+pub fn network(network: &Network) {
+    let clockwork = network
+        .dot
+        .parent()
+        .unwrap_or_else(|| panic!("{} has no directory", network.dot.display()))
+        .join("clockwork");
+    for watched in [
+        network.dot.to_path_buf(),
+        clockwork.join("dot.py"),
+        clockwork.join("pi_network.py"),
+        clockwork.join("facts.py"),
+    ] {
+        println!("cargo:rerun-if-changed={}", watched.display());
+    }
+    let service = network.service.to_uppercase().replace('-', "_");
+    let stdout = read_with(
+        &clockwork.join("facts.py"),
+        network.dot,
+        &[
+            network.device,
+            &format!("{service}_MQTT_ADDRESS"),
+            &format!("{service}_MQTT_PORT"),
+            &format!("{service}_OSC_BIND_ADDRESS"),
+            &format!("{service}_OSC_BIND_PORT"),
+        ],
+    );
+    let values: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split_once(' ').map(|(_, value)| value))
+        .collect();
+    let [mqtt_address, mqtt_port, osc_address, osc_port] = values[..] else {
+        panic!("facts.py printed {stdout:?} for {}", network.dot.display());
+    };
+    let dot_name = network
+        .dot
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| panic!("{} has no file name", network.dot.display()));
+    let constant = |name: &str, what: &str, address: &str, port: &str| -> String {
+        let address: Ipv4Addr = address
+            .parse()
+            .unwrap_or_else(|e| panic!("{name}'s address in {dot_name}: {e}"));
+        let port: u16 = port
+            .parse()
+            .unwrap_or_else(|e| panic!("{name}'s port in {dot_name}: {e}"));
+        let [a, b, c, d] = address.octets();
+        format!(
+            "/// {what}, as {dot_name} has it.\n\
+             pub const {name}: core::net::SocketAddrV4 = \
+             core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {port});\n"
+        )
+    };
+    let body = [
+        constant(
+            "MQTT",
+            &format!("The broker the {}'s MQTT client connects to", network.service),
+            mqtt_address,
+            mqtt_port,
+        ),
+        constant(
+            "OSC_BIND",
+            &format!("Where the {}'s OSC receiver binds, its `osc` port", network.service),
+            osc_address,
+            osc_port,
+        ),
+    ]
+    .join("\n");
+    let mut out = String::new();
+    writeln!(out, "// Generated from {dot_name}. Do not edit.").unwrap();
+    writeln!(out).unwrap();
+    write_module(&mut out, "network", &body);
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    fs::write(out_dir.join("network.rs"), out).unwrap();
+}
+
 /// Where the rig's brain sits in `clockwork.dot`, the rig's IP space: the file, the device it
 /// runs on and its service's node on that device, as the dot names them.
 pub struct Network<'a> {

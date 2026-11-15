@@ -180,7 +180,7 @@ matter. The three placements tried in E0 are the top node, a mid-height node, an
 `pi/memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
 transitions, pluck results and protections as annotations, and `brain/show` and `brain/run` as
 annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
-lamps and to `memory-pi`, whose OSC bridge ingests it alongside MQTT, so the trace runs on
+lamps and to `memory-pi`, where Memory records it and relays it onto the broker, so the trace runs on
 while the brain is down. The Mac is on the access point for the sessions
 and reaches Grafana over the SSH jump as today; QLC+'s output unicasts to the brain over
 WireGuard, as `clockwork.dot` has it.

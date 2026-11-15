@@ -1,0 +1,15 @@
+[package]
+edition      = "2024"
+name         = "memory"
+rust-version = "1.99"
+version      = "0.1.0"
+
+[build-dependencies]
+cortex-build = { path = "../cortex-build" }
+
+# cortex for the MQTT client the brain uses, so the health contract is held one way on the rig.
+# libc for statvfs, which std has no call for.
+[dependencies]
+cortex      = { path = "../cortex" }
+libc        = "0.2.191"
+signal-hook = "0.4.6"

@@ -1,9 +1,6 @@
-"""What any of the rig's Pis is, and how it is holding up: the readings every health daemon
-shares.
-
-Stem reads chaos-pi through this and memory's health daemon reads memory-pi, so a fix to how a
-reading is taken lands on both Pis. What only one Pi has — chaos-pi's modem and access point,
-memory-pi's SSD — stays in that Pi's daemon.
+"""What any of the rig's Pis is, and how it is holding up, as Stem reads it on chaos-pi. What
+only chaos-pi has, its modem and access point, stays in Stem. Memory reads memory-pi with
+readers of its own, in Rust, in `memory/src/board.rs`.
 
 Every file and tool read here is part of every Pi running Raspberry Pi OS, so a reader that
 cannot get its value raises: the install is broken, and the daemon stops and says so rather

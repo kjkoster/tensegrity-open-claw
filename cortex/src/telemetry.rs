@@ -58,6 +58,9 @@ enum Scope {
         root: &'static str,
         owner: Option<&'static str>,
     },
+    /// The topic as given, under no root of this client's: what Memory relays is another
+    /// device's, and already names it.
+    Relayed,
 }
 
 /// What the telemetry thread can be asked to do. Both arrive on one channel so the goodbye
@@ -106,6 +109,12 @@ impl Publisher {
     /// `dmx/<owner>/`.
     pub fn publish_dmx(&self, leaf: impl Into<String>, payload: impl Into<String>) {
         self.send_rooted(stem::DMX, leaf.into(), payload.into());
+    }
+
+    /// Queues one message at `topic` as given, not retained: a relay of what another device
+    /// sent, which already names that device.
+    pub fn relay(&self, topic: impl Into<String>, payload: impl Into<String>) {
+        self.send(Scope::Relayed, topic.into(), payload.into(), false);
     }
 
     fn send_rooted(&self, root: &'static str, leaf: String, payload: String) {
@@ -282,6 +291,7 @@ fn session(
                     Scope::Rooted { root, owner } => {
                         format!("{root}/{}/{}", owner.unwrap_or(service), message.topic)
                     }
+                    Scope::Relayed => message.topic,
                 };
                 let Ok(len) =
                     stem::publish(&mut buffer, &[&topic], &message.payload, message.retain)

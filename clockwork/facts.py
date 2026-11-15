@@ -24,7 +24,7 @@ from pi_network import facts  # noqa: E402
 
 def main(dot_path, device, *names):
     dot = Dot(dot_path)
-    if f"{device}_if" not in dot.nodes:
+    if device not in dot.devices:
         fail(f"{dot_path}: no device {device!r}")
     known = facts(dot, device)
     for name in names:

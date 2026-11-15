@@ -69,6 +69,7 @@ class Dot:
 
     def __init__(self, path):
         self.path = path
+        self.devices = {}  # device -> its addresses, a line of its cluster's label each
         self.nodes = {}  # name -> (device or None, label, is_html)
         self.edges = []  # (tail, tail_port, head, head_port, attrs)
         with open(path, encoding="utf-8") as f:
@@ -122,7 +123,9 @@ class Dot:
             port = self.take("id")[1]
         return name, port
 
-    def statements(self, device):
+    def statements(self, device, cluster=False):
+        if cluster:
+            self.devices[device] = []
         while True:
             kind, value, _ = self.peek()
             if kind == "}":
@@ -132,12 +135,17 @@ class Dot:
                 self.take("id")
                 name = self.take("id")[1]
                 self.expect("{")
-                inner = name[len("cluster_"):] if name.startswith("cluster_") else device
-                self.statements(inner)
+                if name.startswith("cluster_"):
+                    self.statements(name[len("cluster_"):], cluster=True)
+                else:
+                    self.statements(device)
             elif kind == "id" and value in ("graph", "node", "edge") and self.peek(1)[0] == "[":
                 self.take("id")
                 self.attrs()
             elif kind == "id" and self.peek(1)[0] == "=":
+                _, label, html = self.peek(2)
+                if cluster and value == "label" and html:
+                    self.devices[device] = self.lines(label)[1:]
                 self.at += 3
             elif kind == "id":
                 tail, tail_port = self.endpoint()
@@ -152,6 +160,18 @@ class Dot:
                 fail(f"{self.path}: unexpected {value!r}")
             if self.peek()[0] == ";":
                 self.take(";")
+
+    @staticmethod
+    def lines(label):
+        """An HTML-like label's lines, broken at its `<br/>`s, without their markup."""
+        lines = (re.sub(r"<[^>]*>", "", line).strip() for line in re.split(r"<br\b[^>]*>", label))
+        return [line for line in lines if line]
+
+    def addresses_of(self, device):
+        """A device's addresses, a line of its cluster's label each, after its host name."""
+        if device not in self.devices:
+            fail(f"{self.path}: no device {device!r}")
+        return self.devices[device]
 
     def record(self, name):
         """A record label's fields after the first, each without its `<port>`."""
@@ -240,7 +260,7 @@ CHIPS = {"esp8266", "esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3", "esp32c
 
 
 def interface_field(dot, device, field):
-    """One field of a device's `<dev>_if`: its interface, its address, the words after them
+    """One of a device's addresses: its interface, its address, the words after them
     without `ap`, `mac <mac>` and `chip <chip>`, and the MAC and the chip, each None where it
     names none. A MAC comes with its chip, and a chip with its MAC: they say together which
     board this is and how it is flashed."""
@@ -272,11 +292,8 @@ def macs(dot):
     """Every MAC the dot names, each to the (device, interface, chip) it belongs to. A MAC two
     interfaces share is an error: it is what tells one board from another."""
     found = {}
-    for node in dot.nodes:
-        if not node.endswith("_if"):
-            continue
-        device = node[: -len("_if")]
-        for field in dot.record(node):
+    for device in dot.devices:
+        for field in dot.addresses_of(device):
             name, _, _, mac, chip = interface_field(dot, device, field)
             if mac is None:
                 continue
@@ -291,7 +308,7 @@ def addresses(dot, device, nets):
     address must lie in its network's CIDR and outside its DHCP range, which a lease could
     otherwise hand to another device."""
     found = {}
-    for field in dot.record(f"{device}_if"):
+    for field in dot.addresses_of(device):
         interface, address, rest, _, _ = interface_field(dot, device, field)
         if address == "dhcp":
             if not rest:

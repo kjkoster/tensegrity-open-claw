@@ -20,7 +20,7 @@ struct Leaf {
 /// Generates `osc_<device>.rs` in `OUT_DIR` from `<device>.oscquery.json`, holding
 /// `pub mod <device>`: for every string address that lists its values, an enum of them, with
 /// its address, its type tag and the words for each; for every other address, a unit struct
-/// with its address and type tag.
+/// with its address and type tag; and `PATHS`, every address.
 ///
 /// The reader is found in `clockwork/`, beside the `fixtures/` the file is in.
 pub fn osc(file: &Path) {
@@ -116,6 +116,13 @@ fn render(device: &str, source: &str, leaves: &[Leaf]) -> String {
         writeln!(out, "        }}").unwrap();
         writeln!(out, "    }}").unwrap();
     }
+    writeln!(out).unwrap();
+    writeln!(out, "    /// Every address in the file, in its order.").unwrap();
+    writeln!(out, "    pub const PATHS: &[&str] = &[").unwrap();
+    for leaf in leaves {
+        writeln!(out, "        {:?},", leaf.path).unwrap();
+    }
+    writeln!(out, "    ];").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }

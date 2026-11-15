@@ -12,7 +12,7 @@ The system is four parts:
   sensors, runs the show, and sends one DMX universe two ways: out of the RS-485 HAT
   as wired DMX-512, and over the network as E1.31 sACN.
 - **`memory-pi`** — a second Pi in the cabinet, on the first one's WiFi, running the telemetry
-  broker and recording everything published on it.
+  broker and Memory, which records the OSC every device sends and relays it onto the broker.
 - **Wired fixtures** — on the HAT's DMX line.
 - **Wireless fixtures** — on `chaos-pi`'s WiFi, following the sACN universe.
 
@@ -289,8 +289,8 @@ rig: shutdown — releasing the sACN source (3 terminate frames)
 
 # The memory Pi (`memory-pi`)
 
-Stem's broker, GreptimeDB recording everything published on it onto an external SSD, and
-Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0`, at the address
+Stem's broker; Memory, recording the OSC every device sends into GreptimeDB on an external SSD
+and relaying it onto the broker; and Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0`, at the address
 `clockwork.dot` gives it, set on the Pi itself by `pi/memory-pi/claw.nmconnection`.
 
 ## Setting up a fresh `memory-pi`
@@ -314,9 +314,8 @@ Headless, in the cabinet; the card only has to get it onto the access point once
 | Unit | What | Installed from |
 |---|---|---|
 | `mosquitto.service` | Stem's broker, on every interface | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
-| `memory.service` | the health daemon: `health/memory`, `sys/memory/…`, `memory/…` | `pi/memory-pi/memory.py`, venv in `/opt/memory/venv` |
 | `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only | the release pinned in `pi/memory-pi/greptime.version`, in `/opt/greptimedb`, set up by `greptimedb.toml` |
-| `recorder.service` | every live message into Greptime's `rig` database | `pi/memory-pi/recorder.py`, venv in `/opt/recorder/venv` |
+| `memory.service` | Memory: the OSC every device sends, its own included, into Greptime's `rig` database and relayed onto the broker; `health/memory` | `memory/`, built on the Mac, in `/usr/local/bin/memory` |
 | `grafana-server.service` | Grafana, loopback only | Grafana's apt repository, settings and data source from `pi/memory-pi/grafana/` |
 
 To watch the broker from the Mac:
@@ -330,11 +329,11 @@ mosquitto_sub -h localhost -v -t '#'
 
 From the Mac at the repo root: `./deploy-memory-pi.sh`
 
-It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, rsyncs
-`pi/memory-pi/`, the rendered profile, `pi/deploy-lib.sh` and Stem's `rig_mqtt.py`,
-`rig_board.py` and `stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. It assumes a
-fresh Pi and removes nothing but what an older deploy shipped, and it never touches `chaos-pi`,
-as `deploy-chaos-pi.sh` never touches `memory-pi`.
+It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, builds Memory for
+the Pi, rsyncs `pi/memory-pi/`, the binary, the rendered profile, `pi/deploy-lib.sh` and
+`stem/stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. It assumes a fresh Pi and
+removes nothing but what an older deploy shipped, and it never touches `chaos-pi`, as
+`deploy-chaos-pi.sh` never touches `memory-pi`.
 
 - **The first deploy is long**: Greptime's release (about 170 MB) and Grafana come over 4G,
   filling it so SSH to `chaos-pi` times out meanwhile. Greptime downloads again only when its
@@ -353,17 +352,17 @@ waits for a reboot.
 
 ## The recordings
 
-One database, `rig`, kept forever. One table per first topic level — `brain`, `face`, `dmx`,
-`stem`, `memory`, `health`, `sys`, `recorder` and so on — with the rest of the topic in the
-`topic` tag, numbers in `value` (`true`/`false` as 1/0), words in `text`, and the time
-received in `greptime_timestamp`. A table appears once its topics first change live.
+One database, `rig`, kept forever. One table per first level of the OSC address — `wrist`,
+`dmx`, `sys`, `memory` and so on — with the rest of the address in the `topic` tag, numbers in
+`value` (flags as 1/0), words and NaN in `text`, and the time received in
+`greptime_timestamp`. A table appears once its addresses first arrive.
 
 ```
-ssh memory-pi journalctl -u recorder -n 20
+ssh memory-pi journalctl -u memory -n 20
 ssh memory-pi "curl -s 'localhost:4000/v1/sql?db=rig' --data-urlencode 'sql=SHOW TABLES'"
 ```
 
-`recorder/greptime` says `ok` or why it cannot write; `recorder/written` counts what it stored.
+Memory logs when GreptimeDB's answer changes: `ok`, or why it cannot write.
 
 ## Grafana
 
@@ -373,13 +372,9 @@ login; editing takes `admin` / `admin` until Grafana asks for a new password. It
 `pi/memory-pi/grafana/datasources.yaml` has it; a panel is SQL with Grafana's time filter:
 
 ```sql
-SELECT greptime_timestamp AS time, 'chaos-pi' AS metric, value
-FROM stem
-WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
-UNION ALL
 SELECT greptime_timestamp AS time, 'memory-pi' AS metric, value
-FROM memory
-WHERE topic = 'temperature_c' AND $__timeFilter(greptime_timestamp)
+FROM sys
+WHERE topic = 'memory/temperature' AND $__timeFilter(greptime_timestamp)
 ORDER BY time
 ```
 

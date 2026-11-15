@@ -105,7 +105,7 @@ def render(text, known, template, device, dot):
 
 def main(dot_path, device, out_dir, *templates):
     dot = Dot(dot_path)
-    if f"{device}_if" not in dot.nodes:
+    if device not in dot.devices:
         fail(f"{dot_path}: no device {device!r}")
     known = facts(dot, device)
     out = pathlib.Path(out_dir)
