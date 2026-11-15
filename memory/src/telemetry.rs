@@ -1,28 +1,21 @@
-//! The brain's connections to the broker: the health contract, and a place to publish from.
+//! Memory's connection to the broker: the relay of every device's OSC onto MQTT, the bridge for
+//! troubleshooting from the Mac, and the health contract that comes with a client.
 //!
-//! Every daemon on the rig holds its own client and announces itself on `health/<service>`,
-//! so that a dead process says so without anything else having to notice. This is the brain's
-//! end of that, and the reason it cannot be delegated to Stem: only the process itself can
-//! hand the broker a will, and only a will distinguishes "stopped" from "died".
+//! The client announces itself on `health/<service>`, and hands the broker a will, so a dead
+//! Memory says so without anything else having to notice.
 //!
-//! One process holds one client. A part that lives inside the brain, like the face, lives and
-//! dies with it, so a will of its own would only repeat `health/brain`. It publishes
-//! its own subtree, `face/…`, through the brain's connection, with a [`Publisher::part`], so
-//! the tree still reads the way the rig is built rather than the way it is compiled.
+//! The packets and the health words are the `stem` crate's, shared with any firmware. The
+//! client publishes, never subscribes, always at QoS 0, and every relayed value retained, so a
+//! subscriber arriving later sees the last of each. The broker keeps nothing across a restart,
+//! so the client replays every retained value on each connect.
 //!
-//! The packets and the health words are the `stem` crate's, shared with any firmware. The brain
-//! publishes, never subscribes, always at QoS 0.
-//!
-//! Nothing here may touch frame timing. The publish queue is bounded and drops on overflow, a
-//! broker that has gone away is a reconnect on a background thread, and the frame loop's only
-//! interaction with any of it is a non-blocking send into a channel.
+//! Nothing here may hold up its caller. The publish queue is bounded and drops on overflow, and
+//! a broker that has gone away is a reconnect on a background thread.
 //!
 //! One field per topic, never a JSON document. A payload that has to be parsed before it can
 //! be read is one no browser, `mosquitto_sub` or dashboard can chart, and the structure a
-//! document would carry is structure MQTT already has in the topic path. This end therefore
-//! takes a topic and a scalar and does no encoding at all — callers name the leaf.
+//! document would carry is structure MQTT already has in the topic path.
 
-use crate::config as cfg;
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddrV4, TcpStream};
@@ -32,35 +25,55 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The broker's settings: Stem owns the broker, and every daemon holds its own client and
+/// announces itself under `health/`. Its address and port are generated from `clockwork.dot`;
+/// the keepalive is in the `stem` crate.
+mod cfg {
+    /// How long a connection attempt may take before it counts as failed and backs off. The
+    /// broker is across the WiFi, and a broker that is off would otherwise leave the attempt
+    /// to the kernel's own SYN retries, the better part of two minutes.
+    pub const MQTT_CONNECT_TIMEOUT_S: u64 = 5;
+
+    /// How long to wait for the CONNACK before treating the broker as unusable. Generous: the
+    /// only things that make it slow are a broker still starting up and a WiFi link catching
+    /// up.
+    pub const MQTT_CONNACK_TIMEOUT_S: u64 = 5;
+
+    /// How long a write may block before the broker counts as gone. Writes land in the socket
+    /// buffer and return at once while the broker keeps up; one that blocks this long is
+    /// writing to a peer that is no longer reading.
+    pub const MQTT_WRITE_TIMEOUT_S: u64 = 5;
+
+    /// Messages that may sit queued for the telemetry thread: enough for every device's
+    /// bundles arriving together, as the 1 Hz ones do; past it, the newest reading is worth
+    /// more than the backlog behind it.
+    pub const MQTT_QUEUE_DEPTH: usize = 1024;
+
+    /// The largest packet the client encodes. Every topic is a short path and every payload
+    /// one scalar, so a message that does not fit is a sender's mistake, logged and dropped.
+    pub const MQTT_PACKET_MAX: usize = 512;
+
+    /// Reconnect backoff, matching the other receivers': a broker that comes back is picked up
+    /// without anything being restarted.
+    pub const MQTT_RETRY_MAX_S: u64 = 30;
+
+    /// How long a shutdown waits for the goodbye to actually leave. The alternative to waiting
+    /// is the will firing and an orderly stop being recorded as a crash, so it is worth a
+    /// moment — but only a moment, because a wedged broker must never be able to hold up a
+    /// shutdown.
+    pub const MQTT_FAREWELL_MS: u64 = 500;
+}
+
 /// How long a drain waits for the broker. The client never subscribes and has nothing to wait
 /// for, so this bounds how long the loop sits in a drain rather than how long it waits for an
 /// answer.
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(50);
 
-/// One retained-or-not message on its way to the broker.
+/// One retained message on its way to the broker, at its topic as given: what Memory relays is
+/// a device's, and already names it.
 struct Message {
-    scope: Scope,
     topic: String,
     payload: String,
-    retain: bool,
-}
-
-/// Which root a message's topic hangs under.
-enum Scope {
-    /// The client's own subtree: `brain/rig`.
-    Service,
-    /// A part's subtree, on the client's connection: `face/estop`.
-    Part(&'static str),
-    /// A rig-wide root with the owner beneath it — the part, or the client when there is none:
-    /// `sys/brain/board`, `dmx/face/address`. One subscription to the root then covers every
-    /// owner on the rig.
-    Rooted {
-        root: &'static str,
-        owner: Option<&'static str>,
-    },
-    /// The topic as given, under no root of this client's: what Memory relays is another
-    /// device's, and already names it.
-    Relayed,
 }
 
 /// What the telemetry thread can be asked to do. Both arrive on one channel so the goodbye
@@ -78,59 +91,16 @@ enum Command {
 #[derive(Clone)]
 pub struct Publisher {
     outgoing: SyncSender<Command>,
-    /// The part this publisher speaks for, whose name prefixes its topics in place of the
-    /// client's; `None` for the client itself.
-    part: Option<&'static str>,
 }
 
 impl Publisher {
-    /// A publisher for a part inside this process, on this client's connection: its topics go
-    /// under `<part>/` instead of the client's name.
-    pub fn part(&self, part: &'static str) -> Publisher {
-        Publisher {
-            outgoing: self.outgoing.clone(),
-            part: Some(part),
-        }
-    }
-
-    /// Queues one message under this publisher's prefix — the client's name, or its part's.
-    /// Never blocks, never fails loudly.
-    pub fn publish(&self, topic: impl Into<String>, payload: impl Into<String>, retain: bool) {
-        let scope = self.part.map_or(Scope::Service, Scope::Part);
-        self.send(scope, topic.into(), payload.into(), retain);
-    }
-
-    /// Queues one fact about what this client runs on, retained, under `sys/<owner>/`.
-    pub fn publish_sys(&self, leaf: impl Into<String>, payload: impl Into<String>) {
-        self.send_rooted(stem::SYS, leaf.into(), payload.into());
-    }
-
-    /// Queues one fact about where this client or part sits on the universe, retained, under
-    /// `dmx/<owner>/`.
-    pub fn publish_dmx(&self, leaf: impl Into<String>, payload: impl Into<String>) {
-        self.send_rooted(stem::DMX, leaf.into(), payload.into());
-    }
-
-    /// Queues one message at `topic` as given, not retained: a relay of what another device
-    /// sent, which already names that device.
+    /// Queues one message at `topic` as given, retained: a relay of what a device sent, which
+    /// already names that device, kept so a subscriber arriving later sees the last. Never
+    /// blocks, never fails loudly.
     pub fn relay(&self, topic: impl Into<String>, payload: impl Into<String>) {
-        self.send(Scope::Relayed, topic.into(), payload.into(), false);
-    }
-
-    fn send_rooted(&self, root: &'static str, leaf: String, payload: String) {
-        let scope = Scope::Rooted {
-            root,
-            owner: self.part,
-        };
-        self.send(scope, leaf, payload, true);
-    }
-
-    fn send(&self, scope: Scope, topic: String, payload: String, retain: bool) {
         let message = Command::Publish(Message {
-            scope,
-            topic,
-            payload,
-            retain,
+            topic: topic.into(),
+            payload: payload.into(),
         });
         // A dropped reading is logged nowhere on purpose: the condition that fills this queue
         // is a broker that stopped reading, which the health tree already reports, and a log
@@ -186,9 +156,8 @@ impl Farewell {
 
 /// Spawns a client and returns the handles the rest of the process speaks through.
 ///
-/// `service` names the health topic, is the client ID, and prefixes every other topic this
-/// client publishes, so the tree says which part of the rig asserted a thing. `broker` is the
-/// rig's, generated from its `clockwork.dot`.
+/// `service` names the health topic and is the client ID. `broker` is the rig's, generated
+/// from its `clockwork.dot`.
 pub fn spawn(service: &'static str, broker: SocketAddrV4) -> (Publisher, Farewell) {
     let (outgoing, incoming) = sync_channel(cfg::MQTT_QUEUE_DEPTH);
     let said = Arc::new(AtomicBool::new(false));
@@ -197,7 +166,7 @@ pub fn spawn(service: &'static str, broker: SocketAddrV4) -> (Publisher, Farewel
     thread::Builder::new()
         .name(format!("telemetry-{service}"))
         .spawn(move || {
-            crate::sched::background();
+            cortex::sched::background();
             // Every retained topic this client has published, replayed on each connect.
             //
             // Retained state is a promise that a late subscriber sees the live picture, and a
@@ -228,7 +197,6 @@ pub fn spawn(service: &'static str, broker: SocketAddrV4) -> (Publisher, Farewel
     (
         Publisher {
             outgoing: outgoing.clone(),
-            part: None,
         },
         Farewell { outgoing, said },
     )
@@ -284,18 +252,8 @@ fn session(
     let mut unanswered = 0;
     loop {
         match incoming.recv_timeout(tick) {
-            Ok(Command::Publish(message)) => {
-                let topic = match message.scope {
-                    Scope::Service => format!("{service}/{}", message.topic),
-                    Scope::Part(part) => format!("{part}/{}", message.topic),
-                    Scope::Rooted { root, owner } => {
-                        format!("{root}/{}/{}", owner.unwrap_or(service), message.topic)
-                    }
-                    Scope::Relayed => message.topic,
-                };
-                let Ok(len) =
-                    stem::publish(&mut buffer, &[&topic], &message.payload, message.retain)
-                else {
+            Ok(Command::Publish(Message { topic, payload })) => {
+                let Ok(len) = stem::publish(&mut buffer, &[&topic], &payload, true) else {
                     eprintln!(
                         "telemetry: {service}: {topic} does not fit {} bytes, dropped",
                         cfg::MQTT_PACKET_MAX
@@ -304,9 +262,7 @@ fn session(
                 };
                 // Recorded before the write, so a value whose write is what failed is the one
                 // the next connect replays.
-                if message.retain {
-                    retained.insert(topic, message.payload);
-                }
+                retained.insert(topic, payload);
                 stream.write_all(&buffer[..len])?;
             }
             Ok(Command::Farewell) => {

@@ -4,20 +4,21 @@
 //! Wrist sends its state bundle ten times a second, as `fixtures/wrist.oscquery.json` has it.
 //! Three of its addresses are read: `/wrist/pluck`, whether a pluck can be started;
 //! `/wrist/mode`; and `/wrist/run/phase`, Run's φ. Their addresses, type tags and values are
-//! the file's, generated into `osc::wrist`; only OSC's own framing, bundles, padded strings and
-//! floats, is decoded here. What the brain asks of Wrist in return is the show's, in `show`.
+//! the file's, generated into `osc::wrist`; OSC's own framing is `cortex::osc`'s. What the
+//! brain asks of Wrist in return is the show's, in `show`.
 
-use cortex::latest::{LatestTx, LatestRx, latest};
+use cortex::latest::{LatestRx, LatestTx, latest};
+use cortex::osc::{self, Value};
 use std::io::ErrorKind;
 use std::net::{SocketAddrV4, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// `/wrist/mode`: the mode Wrist is in, whoever sent it there.
+pub use crate::osc::wrist::WristMode as Mode;
 /// `/wrist/pluck`: whether a pluck can be started. `Can` in Hold; `Busy` from Pluck's start
 /// until the shaft is back where it began; `Cannot` at every other time.
 pub use crate::osc::wrist::WristPluck as Pluck;
-/// `/wrist/mode`: the mode Wrist is in, whoever sent it there.
-pub use crate::osc::wrist::WristMode as Mode;
 use crate::osc::wrist::WristRunPhase as RunPhase;
 
 /// The longest wait between attempts to bind, while the access point's address is not up.
@@ -125,22 +126,15 @@ fn receive(socket: &UdpSocket, reports: &LatestTx<Heard>) {
 
 /// The state bundle's report, if `packet` is a bundle holding all three addresses, well formed.
 fn report_in(packet: &[u8]) -> Option<Report> {
-    // The time tag, which Wrist always sends as "immediately".
-    let mut elements = packet.strip_prefix(b"#bundle\0")?.get(8..)?;
+    if !packet.starts_with(b"#bundle\0") {
+        return None;
+    }
     let (mut pluck, mut mode, mut phase) = (None, None, None);
-    while elements.len() >= 4 {
-        let size = u32::from_be_bytes(elements[..4].try_into().unwrap()) as usize;
-        let element = elements.get(4..4 + size)?;
-        elements = &elements[4 + size..];
-        let mut at = 0;
-        let address = osc_string(element, &mut at)?;
-        let tag = osc_string(element, &mut at)?;
-        match (address, tag) {
-            (Pluck::PATH, Pluck::TAG) => pluck = Pluck::from_word(osc_string(element, &mut at)?),
-            (Mode::PATH, Mode::TAG) => mode = Mode::from_word(osc_string(element, &mut at)?),
-            (RunPhase::PATH, RunPhase::TAG) => {
-                phase = Some(f32::from_be_bytes(element.get(at..at + 4)?.try_into().unwrap()));
-            }
+    for (address, values) in osc::decode(packet).ok()? {
+        match (address.as_str(), values.as_slice()) {
+            (Pluck::PATH, [Value::Text(word)]) => pluck = Pluck::from_word(word),
+            (Mode::PATH, [Value::Text(word)]) => mode = Mode::from_word(word),
+            (RunPhase::PATH, [Value::Float(radians)]) => phase = Some(*radians),
             _ => {}
         }
     }
@@ -149,12 +143,4 @@ fn report_in(packet: &[u8]) -> Option<Report> {
         mode: mode?,
         phase: phase?,
     })
-}
-
-/// The OSC string at `at`, moving `at` past it and its padding to four bytes.
-fn osc_string<'a>(packet: &'a [u8], at: &mut usize) -> Option<&'a str> {
-    let rest = packet.get(*at..)?;
-    let len = rest.iter().position(|&b| b == 0)?;
-    *at += (len / 4 + 1) * 4;
-    std::str::from_utf8(&rest[..len]).ok()
 }

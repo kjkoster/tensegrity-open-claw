@@ -1,0 +1,49 @@
+{
+  "HOST_INFO": {
+    "NAME": "health",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "health": {
+      "FULL_PATH": "/health",
+      "DESCRIPTION": "Whether each device is alive. Not a device: a device whose file lists \"health\" in its HOST_INFO's CLOCKWORK_CHAOS_IMPLEMENTS sends uptime_s with {device} as its own name. Memory synthesises the rest from the arrivals of uptime_s.",
+      "CONTENTS": {
+        "{device}": {
+          "FULL_PATH": "/health/{device}",
+          "DESCRIPTION": "The device, by its name.",
+          "CONTENTS": {
+            "uptime_s": {
+              "FULL_PATH": "/health/{device}/uptime_s",
+              "DESCRIPTION": "Time since the device booted, where it can tell; else since its program started. Its heartbeat: a drop is a reboot, or on a device that cannot tell its boot, a restart.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["s"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "last_seen": {
+              "FULL_PATH": "/health/{device}/last_seen",
+              "DESCRIPTION": "When Memory last received uptime_s from the device, as RFC 3339 UTC. Sent by Memory, not the device.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_SENT_BY": "memory",
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            },
+            "state": {
+              "FULL_PATH": "/health/{device}/state",
+              "DESCRIPTION": "connected while uptime_s keeps arriving, lost once it has stopped for longer than Memory's timeout. Sent by Memory, not the device.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "RANGE": [
+                { "VALS": ["connected", "lost"] }
+              ],
+              "CLOCKWORK_CHAOS_SENT_BY": "memory",
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

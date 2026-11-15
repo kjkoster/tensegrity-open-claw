@@ -5,13 +5,19 @@ rust-version = "1.99"
 version      = "0.1.0"
 
 # What every rig shares under its show: the sACN transports, the frame loop, the show calendar,
-# the latest-value seam.
+# the latest-value seam, and the OSC every device built on it reports.
+[build-dependencies]
+cortex-build = { path = "../cortex-build" }
+
 [dependencies]
 arc-swap = "1.9.3"
+# Today's civil dusk, as the build's calendar computes the shows' dark: `sunrise`, and `chrono`
+# only to name the date type it takes.
+chrono   = { version = "0.4.45", default-features = false }
+sunrise  = "3.0.0"
 signal-hook = "0.4.6"
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.1",  features = ["std"] }
 # For whether the kernel holds the clock as synchronised, which std has no call for.
 libc = "0.2.191"
-stem = { path = "../stem" }
 zihatec-rs-485-dmx = "0.1.1"

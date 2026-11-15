@@ -1,6 +1,6 @@
 //! OSC's framing: messages, bundles nested to any depth, padded strings. Only the types the
 //! fixture files may name, `i f s T F`; a packet with any other is refused whole, rather than
-//! recorded in part.
+//! recorded in part. Memory decodes by it, and the brain encodes its own by it.
 
 use std::fmt;
 
@@ -84,4 +84,43 @@ fn word(packet: &[u8], at: &mut usize) -> Result<[u8; 4], String> {
     let bytes = packet.get(*at..*at + 4).ok_or("a value past the packet")?;
     *at += 4;
     Ok(bytes.try_into().unwrap())
+}
+
+/// One bundle of `messages`, each an address and its one value, time-tagged "immediately".
+pub fn bundle<A: AsRef<str>>(messages: &[(A, Value)]) -> Vec<u8> {
+    let mut out = b"#bundle\0".to_vec();
+    out.extend_from_slice(&1u64.to_be_bytes());
+    for (address, value) in messages {
+        let element = message(address.as_ref(), value);
+        out.extend_from_slice(&(element.len() as u32).to_be_bytes());
+        out.extend_from_slice(&element);
+    }
+    out
+}
+
+fn message(address: &str, value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    put_string(&mut out, address);
+    match value {
+        Value::Int(i) => {
+            put_string(&mut out, ",i");
+            out.extend_from_slice(&i.to_be_bytes());
+        }
+        Value::Float(x) => {
+            put_string(&mut out, ",f");
+            out.extend_from_slice(&x.to_be_bytes());
+        }
+        Value::Text(s) => {
+            put_string(&mut out, ",s");
+            put_string(&mut out, s);
+        }
+        Value::Bool(b) => put_string(&mut out, if *b { ",T" } else { ",F" }),
+    }
+    out
+}
+
+/// `text`, terminated and padded with zeros to four bytes.
+fn put_string(out: &mut Vec<u8>, text: &str) {
+    out.extend_from_slice(text.as_bytes());
+    out.resize(out.len() + 4 - text.len() % 4, 0);
 }

@@ -1,0 +1,62 @@
+{
+  "HOST_INFO": {
+    "NAME": "sys",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "sys": {
+      "FULL_PATH": "/sys",
+      "DESCRIPTION": "What each device runs on. Not a device: a device whose file lists \"sys\" in its HOST_INFO's CLOCKWORK_CHAOS_IMPLEMENTS sends this subtree with {device} as its own name, and may add leaves of its own under /sys/{device}.",
+      "CONTENTS": {
+        "{device}": {
+          "FULL_PATH": "/sys/{device}",
+          "DESCRIPTION": "The device, by its name.",
+          "CONTENTS": {
+            "board": {
+              "FULL_PATH": "/sys/{device}/board",
+              "DESCRIPTION": "The board, as its device tree names it where it has one.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "cores": {
+              "FULL_PATH": "/sys/{device}/cores",
+              "DESCRIPTION": "CPU cores.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1 }],
+              "UNIT": ["count"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "triplet": {
+              "FULL_PATH": "/sys/{device}/triplet",
+              "DESCRIPTION": "The target triplet the program was compiled for.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "cpu_freq_mhz": {
+              "FULL_PATH": "/sys/{device}/cpu_freq_mhz",
+              "DESCRIPTION": "The top clock the CPU is allowed, which is what it sustains under load.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["MHz"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "mem_avail_kb": {
+              "FULL_PATH": "/sys/{device}/mem_avail_kb",
+              "DESCRIPTION": "The memory available to the program: on Linux, MemAvailable, free and the page cache that can be given up; on a chip, its free heap.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0 }],
+              "UNIT": ["KB"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

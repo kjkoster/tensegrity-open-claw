@@ -1,25 +1,12 @@
 {
   "HOST_INFO": {
     "NAME": "memory",
-    "OSC_TRANSPORT": "UDP"
+    "OSC_TRANSPORT": "UDP",
+    "CLOCKWORK_CHAOS_IMPLEMENTS": ["health", "sys", "wifi"]
   },
   "FULL_PATH": "/",
+  "DESCRIPTION": "Memory, the daemon on memory-pi that records the OSC every device sends into GreptimeDB and relays it onto MQTT. It hands its own OSC to itself rather than sending it, so it is recorded while the WiFi is down. Sent on connect means once, as soon as the clock has synchronised, which is when it can be recorded.",
   "CONTENTS": {
-    "memory": {
-      "FULL_PATH": "/memory",
-      "DESCRIPTION": "Memory, the daemon on memory-pi that records the OSC every device sends into GreptimeDB and relays it onto MQTT. It hands its own OSC to itself rather than sending it, so it is recorded while the WiFi is down. Sent on connect means once, as soon as the clock has synchronised, which is when it can be recorded.",
-      "CONTENTS": {
-        "uptime": {
-          "FULL_PATH": "/memory/uptime",
-          "DESCRIPTION": "Time since the daemon started: its heartbeat. A gap in it is Memory down; a drop to 0 is a restart.",
-          "TYPE": "i",
-          "ACCESS": 1,
-          "RANGE": [{ "MIN": 0 }],
-          "UNIT": ["s"],
-          "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
-        }
-      }
-    },
     "sys": {
       "FULL_PATH": "/sys",
       "DESCRIPTION": "What each device runs on, under its own name.",
@@ -28,31 +15,6 @@
           "FULL_PATH": "/sys/memory",
           "DESCRIPTION": "memory-pi, and how it is holding up.",
           "CONTENTS": {
-            "board": {
-              "FULL_PATH": "/sys/memory/board",
-              "DESCRIPTION": "The board, as its device tree names it.",
-              "TYPE": "s",
-              "ACCESS": 1,
-              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            },
-            "cores": {
-              "FULL_PATH": "/sys/memory/cores",
-              "DESCRIPTION": "CPU cores.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 1 }],
-              "UNIT": ["count"],
-              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            },
-            "cpu_freq": {
-              "FULL_PATH": "/sys/memory/cpu_freq",
-              "DESCRIPTION": "The top clock the CPU is allowed, which is what it sustains under load.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 0 }],
-              "UNIT": ["MHz"],
-              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            },
             "ram": {
               "FULL_PATH": "/sys/memory/ram",
               "DESCRIPTION": "The RAM fitted, from the board's revision code; not what the kernel is left after the GPU's share.",
@@ -61,15 +23,6 @@
               "RANGE": [{ "MIN": 0 }],
               "UNIT": ["MB"],
               "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            },
-            "uptime": {
-              "FULL_PATH": "/sys/memory/uptime",
-              "DESCRIPTION": "Time since the Pi booted. Against /memory/uptime it tells a reboot from a restart of the daemon.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 0 }],
-              "UNIT": ["s"],
-              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
             },
             "temperature": {
               "FULL_PATH": "/sys/memory/temperature",
@@ -170,15 +123,6 @@
               "UNIT": ["MB"],
               "CLOCKWORK_CHAOS_ON_EVENT": "connect"
             },
-            "mem_available": {
-              "FULL_PATH": "/sys/memory/mem_available",
-              "DESCRIPTION": "The RAM available to start programs in, MemAvailable: free, and the page cache that can be given up.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 0 }],
-              "UNIT": ["MB"],
-              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
-            },
             "disk_free": {
               "FULL_PATH": "/sys/memory/disk_free",
               "DESCRIPTION": "Free space on the SD card, for an unprivileged user.",
@@ -196,35 +140,6 @@
               "RANGE": [{ "MIN": 0 }],
               "UNIT": ["MB"],
               "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
-            },
-            "wifi": {
-              "FULL_PATH": "/sys/memory/wifi",
-              "DESCRIPTION": "memory-pi's end of the WiFi link, its only network. Stem reports the other end, how strongly the access point hears memory-pi.",
-              "CONTENTS": {
-                "rssi": {
-                  "FULL_PATH": "/sys/memory/wifi/rssi",
-                  "DESCRIPTION": "How strongly memory-pi hears the access point. 0 while it is not associated, which no real reading is.",
-                  "TYPE": "i",
-                  "ACCESS": 1,
-                  "RANGE": [{ "MAX": 0 }],
-                  "UNIT": ["dBm"],
-                  "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
-                },
-                "ip": {
-                  "FULL_PATH": "/sys/memory/wifi/ip",
-                  "DESCRIPTION": "wlan0's IPv4 address, in dotted-quad form; empty while it has none. Any other address than the WiFi profile's means that profile did not take, as when Imager's is still in place.",
-                  "TYPE": "s",
-                  "ACCESS": 1,
-                  "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
-                },
-                "mac": {
-                  "FULL_PATH": "/sys/memory/wifi/mac",
-                  "DESCRIPTION": "wlan0's MAC address, as six colon-separated hex pairs.",
-                  "TYPE": "s",
-                  "ACCESS": 1,
-                  "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-                }
-              }
             }
           }
         }

@@ -1,0 +1,44 @@
+{
+  "HOST_INFO": {
+    "NAME": "wifi",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "wifi": {
+      "FULL_PATH": "/wifi",
+      "DESCRIPTION": "Each WiFi client's end of its link. Not a device: a device whose file lists \"wifi\" in its HOST_INFO's CLOCKWORK_CHAOS_IMPLEMENTS sends this subtree with {device} as its own name, and may add leaves of its own under /wifi/{device}. Stem reports the other end, how strongly the access point hears each client.",
+      "CONTENTS": {
+        "{device}": {
+          "FULL_PATH": "/wifi/{device}",
+          "DESCRIPTION": "The device, by its name.",
+          "CONTENTS": {
+            "mac": {
+              "FULL_PATH": "/wifi/{device}/mac",
+              "DESCRIPTION": "The WiFi station's MAC address, as six colon-separated hex pairs.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "ip": {
+              "FULL_PATH": "/wifi/{device}/ip",
+              "DESCRIPTION": "The WiFi station's IPv4 address, in dotted-quad form; empty while it has none.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "rssi": {
+              "FULL_PATH": "/wifi/{device}/rssi",
+              "DESCRIPTION": "How strongly the device hears the access point. 0 while it is not associated, which no real reading is.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MAX": 0 }],
+              "UNIT": ["dBm"],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

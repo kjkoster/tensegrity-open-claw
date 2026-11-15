@@ -1,11 +1,11 @@
 //! Stem as the Rust programs see it: the rig's MQTT conventions — the health contract, and the
 //! handful of MQTT 3.1.1 packets a publish-only client needs to keep it. The transport is each
-//! program's own: the brain's client is `cortex::telemetry`, a firmware's is its own task.
+//! program's own: Memory's client is `memory/src/telemetry.rs`, a firmware's is its own task.
 //!
 //! The Rust half of `stem/rig_mqtt.py`, and it exists for the same reason that file does: a
 //! liveness convention that two processes implement slightly differently is worse than none,
 //! because the disagreement only shows up in the telemetry you went looking at during a failure.
-//! The brain and a fixture's firmware hold their connections very differently — a std thread on
+//! Memory and a fixture's firmware hold their connections very differently — a std thread on
 //! one, an Embassy task on the other — so what is shared is everything that is not the
 //! transport, and it is `no_std` with no allocator so any firmware can build it: every packet is
 //! written into a buffer its caller owns.

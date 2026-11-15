@@ -1,0 +1,37 @@
+{
+  "HOST_INFO": {
+    "NAME": "dmx",
+    "OSC_TRANSPORT": "UDP"
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "dmx": {
+      "FULL_PATH": "/dmx",
+      "DESCRIPTION": "Where each fixture sits on the rig's universe, as the patch says. Not a device: a device whose file lists \"dmx\" in its HOST_INFO's CLOCKWORK_CHAOS_IMPLEMENTS sends this subtree with {device} as its own name, and may add leaves of its own under /dmx/{device}.",
+      "CONTENTS": {
+        "{device}": {
+          "FULL_PATH": "/dmx/{device}",
+          "DESCRIPTION": "The fixture, by its name.",
+          "CONTENTS": {
+            "universe": {
+              "FULL_PATH": "/dmx/{device}/universe",
+              "DESCRIPTION": "The sACN universe the fixture is on.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1, "MAX": 63999 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "address": {
+              "FULL_PATH": "/dmx/{device}/address",
+              "DESCRIPTION": "The fixture's DMX start address.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1, "MAX": 512 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            }
+          }
+        }
+      }
+    }
+  }
+}

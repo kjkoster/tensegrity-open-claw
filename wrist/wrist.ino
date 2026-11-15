@@ -71,9 +71,6 @@ WiFiUDP sacnUdp;
 int32_t loadRaw = 0;
 bool loadRead = false;
 
-// The longest gap between two passes of loop() since the last state bundle, in µs.
-uint32_t longestTick = 0;
-
 // ── The step generator ───────────────────────────────────────────────────────────────────────
 //
 // Timer1 as an NMI at 25 kHz, so neither the WiFi nor the HX711's masked readout can delay a
@@ -520,16 +517,20 @@ void sendOnConnect() {
   v.wrist_load_scale = LOAD_SCALE;
   v.dmx_wrist_universe = patch::SACN_UNIVERSE;
   v.dmx_wrist_address = patch::DMX_ADDRESS;
-  v.dmx_wrist_port = net::SACN_PORT;
-  v.sys_wrist_mac = mac.c_str();
-  v.sys_wrist_ip = ip.c_str();
+  // No device tree: the board as the core names it, from the FQBN the sketch is built for. The
+  // triplet is the core's compiler's, which is what the firmware is compiled for.
+  v.sys_wrist_board = ARDUINO_BOARD;
+  v.sys_wrist_cores = 1;
+  v.sys_wrist_triplet = "xtensa-lx106-elf";
+  v.sys_wrist_cpu_freq_mhz = ESP.getCpuFreqMHz();
   v.sys_wrist_reset_reason = resetReason();
   v.sys_wrist_flash_size = static_cast<int32_t>(ESP.getFlashChipRealSize());
-  v.sys_wrist_cpu_freq = ESP.getCpuFreqMHz();
-  v.sys_wrist_wifi_channel = WiFi.channel();
-  v.sys_wrist_wifi_bssid = bssid.c_str();
-  v.sys_wrist_wifi_disconnects = static_cast<int32_t>(disconnects);
-  v.sys_wrist_wifi_disconnect_reason = lastDisconnect;
+  v.wifi_wrist_mac = mac.c_str();
+  v.wifi_wrist_ip = ip.c_str();
+  v.wifi_wrist_channel = WiFi.channel();
+  v.wifi_wrist_bssid = bssid.c_str();
+  v.wifi_wrist_disconnects = static_cast<int32_t>(disconnects);
+  v.wifi_wrist_disconnect_reason = lastDisconnect;
   sendToRecipients(osc::encodeOnConnect(v, packet, sizeof packet));
   say("connected as %s, %s, %d dBm", ip.c_str(), mac.c_str(), WiFi.RSSI());
 }
@@ -541,17 +542,17 @@ void sendState() {
   v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
   v.wrist_load_force = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
-  v.wrist_health_tick_dt = static_cast<int32_t>(longestTick);
-  // No frame yet is as old as a frame can be.
-  v.dmx_wrist_sacn_age = frameAt == 0 ? INT32_MAX : static_cast<int32_t>(millis() - frameAt);
-  v.dmx_wrist_sacn_packets = static_cast<int32_t>(sacnPackets);
-  v.dmx_wrist_sacn_frames = static_cast<int32_t>(sacnFrames);
-  v.dmx_wrist_sacn_skipped = static_cast<int32_t>(sacnSkipped);
-  v.sys_wrist_uptime = static_cast<int32_t>(millis() / 1000);
-  v.sys_wrist_heap_free = static_cast<int32_t>(ESP.getFreeHeap());
-  v.sys_wrist_wifi_rssi = WiFi.RSSI();
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
-  longestTick = 0;
+}
+
+// The heartbeat, which starts again from 0 every 49.7 days, when the chip's millisecond clock
+// wraps; and the heap and the link.
+void sendHealth() {
+  osc::At1hz v;
+  v.health_wrist_uptime_s = static_cast<int32_t>(millis() / 1000);
+  v.sys_wrist_mem_avail_kb = static_cast<int32_t>(ESP.getFreeHeap() / 1024);
+  v.wifi_wrist_rssi = WiFi.RSSI();
+  sendToRecipients(osc::encodeAt1hz(v, packet, sizeof packet));
 }
 
 // ── The load cell ────────────────────────────────────────────────────────────────────────────
@@ -626,14 +627,12 @@ void loop() {
   static uint32_t lastTick = micros();
   static bool connected = false;
   static uint32_t stateDue = 0;
+  static uint32_t healthDue = 0;
   static uint32_t statusDue = STATUS_PERIOD_MS;
 
   const uint32_t now = micros();
   const uint32_t tick = now - lastTick;
   lastTick = now;
-  if (tick > longestTick) {
-    longestTick = tick;
-  }
   if (tick > longestTickLogged) {
     longestTickLogged = tick;
   }
@@ -668,6 +667,7 @@ void loop() {
   if (up && !connected) {
     sendOnConnect();
     stateDue = now;
+    healthDue = now;
   }
   if (!up && connected) {
     say("WiFi lost");
@@ -687,6 +687,13 @@ void loop() {
     // After a long stall, start again from now rather than send the missed bundles in a burst.
     if (static_cast<int32_t>(now - stateDue) >= 0) {
       stateDue = now + osc::AT_10HZ_PERIOD_US;
+    }
+  }
+  if (static_cast<int32_t>(now - healthDue) >= 0) {
+    sendHealth();
+    healthDue += osc::AT_1HZ_PERIOD_US;
+    if (static_cast<int32_t>(now - healthDue) >= 0) {
+      healthDue = now + osc::AT_1HZ_PERIOD_US;
     }
   }
 }

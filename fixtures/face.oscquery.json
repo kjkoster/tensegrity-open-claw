@@ -1,7 +1,8 @@
 {
   "HOST_INFO": {
     "NAME": "face",
-    "OSC_TRANSPORT": "UDP"
+    "OSC_TRANSPORT": "UDP",
+    "CLOCKWORK_CHAOS_IMPLEMENTS": ["dmx", "health", "sys", "wifi"]
   },
   "FULL_PATH": "/",
   "CONTENTS": {
@@ -32,33 +33,6 @@
             { "VALS": ["false", "true", "cable_fault", "contact_fault"] }
           ],
           "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
-        }
-      }
-    },
-    "dmx": {
-      "FULL_PATH": "/dmx",
-      "CONTENTS": {
-        "face": {
-          "FULL_PATH": "/dmx/face",
-          "DESCRIPTION": "Where the face sits on the rig's universe, as the patch says.",
-          "CONTENTS": {
-            "universe": {
-              "FULL_PATH": "/dmx/face/universe",
-              "DESCRIPTION": "The universe the face's lamps are on.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 1, "MAX": 63999 }],
-              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            },
-            "address": {
-              "FULL_PATH": "/dmx/face/address",
-              "DESCRIPTION": "The face's DMX start address.",
-              "TYPE": "i",
-              "ACCESS": 1,
-              "RANGE": [{ "MIN": 1, "MAX": 512 }],
-              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
-            }
-          }
         }
       }
     }

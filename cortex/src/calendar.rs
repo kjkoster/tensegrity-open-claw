@@ -11,6 +11,7 @@
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Ticker};
 use std::time::{SystemTime, UNIX_EPOCH};
+use sunrise::{Coordinates, DawnType, SolarDay, SolarEvent};
 
 /// How often the clock's synchronisation is checked. A change only reprints the table, so
 /// this needs to be prompt for a person reading the log and nothing more.
@@ -75,6 +76,32 @@ impl Calendar {
             Kind::TestDay => true,
             Kind::DuskShowDay => show.dark_stretch(now).is_some(),
         })
+    }
+
+    /// When the show next begins to play after `now`: the start of a test day, or of a dusk
+    /// show day's dark stretch. None once the calendar has none to come.
+    pub fn next_play(&self, now: f64) -> Option<f64> {
+        self.shows
+            .iter()
+            .flat_map(|show| match show.kind {
+                Kind::TestDay => std::slice::from_ref(&show.span),
+                Kind::DuskShowDay => show.dark,
+            })
+            .map(|span| span.start.unix as f64)
+            .filter(|&start| start > now)
+            .reduce(f64::min)
+    }
+
+    /// Civil dusk at the site on the solar date `now` falls on: the date in local mean solar
+    /// time, as the build dates the shows' dark. None where the sun does not reach civil
+    /// twilight that day.
+    pub fn dusk(&self, now: f64) -> Option<f64> {
+        let coordinates = Coordinates::new(self.site.latitude, self.site.longitude)?;
+        let solar = now as i64 + (self.site.longitude * 240.0).round() as i64;
+        let date = chrono::DateTime::from_timestamp(solar, 0)?.date_naive();
+        SolarDay::new(coordinates, date)
+            .event_time(SolarEvent::Dusk(DawnType::Civil))
+            .map(|at| at.timestamp() as f64)
     }
 
     /// Prints the site and every show that has not yet ended by the clock as it stands.

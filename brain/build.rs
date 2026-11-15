@@ -18,8 +18,11 @@ fn main() {
         },
     );
 
-    // What Wrist sends, which the brain decodes by.
-    cortex_build::osc(&root.join("fixtures").join("wrist.oscquery.json"));
+    // What Wrist sends, which the brain decodes by, and what the brain sends for itself and the
+    // face.
+    for device in ["wrist", "brain", "face"] {
+        cortex_build::osc(&root.join("fixtures").join(format!("{device}.oscquery.json")));
+    }
 
     println!("cargo:rerun-if-changed=shows.rs");
     cortex_build::calendar(CITY, SHOWS);

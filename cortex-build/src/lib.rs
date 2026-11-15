@@ -38,7 +38,7 @@ mod calendar;
 mod osc;
 
 pub use calendar::{Day, calendar};
-pub use osc::osc;
+pub use osc::{is_shared, osc, shared};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -346,12 +346,12 @@ pub struct Network<'a> {
 struct Dot {
     /// The address and port the brain's sACN receiver binds, its `sacn` port.
     sacn_bind: SocketAddrV4,
-    /// The broker the brain's MQTT client connects to, the port its `mqtt` edge goes to.
-    mqtt: SocketAddrV4,
     /// The address and port the brain's OSC receiver binds, its `osc` port.
     osc_bind: SocketAddrV4,
     /// Every fixture the brain sends its universe to, one per `sacn` edge from it.
     sacn_recipients: Vec<SocketAddrV4>,
+    /// Everything the brain sends its own OSC to, one per `osc` edge from it.
+    osc_recipients: Vec<SocketAddrV4>,
 }
 
 /// The dot's reader, `clockwork/dot.py`, beside the dot; `facts.py` prints what it works out.
@@ -378,8 +378,6 @@ fn read_dot(network: &Network) -> Dot {
     let names = [
         format!("{service}_SACN_BIND_ADDRESS"),
         format!("{service}_SACN_BIND_PORT"),
-        format!("{service}_MQTT_ADDRESS"),
-        format!("{service}_MQTT_PORT"),
         format!("{service}_OSC_BIND_ADDRESS"),
         format!("{service}_OSC_BIND_PORT"),
     ];
@@ -406,22 +404,24 @@ fn read_dot(network: &Network) -> Dot {
     };
     // The service's node is its device's name and its own, as the dot names nodes.
     let node = format!("{}_{}", network.device, network.service);
-    let sacn_recipients = run("recipients.py", &[&node, "sacn"])
-        .lines()
-        .map(|line| {
-            line.parse().unwrap_or_else(|e| {
-                panic!(
-                    "recipients.py printed {line:?} for {}: {e}",
-                    network.dot.display()
-                )
+    let recipients = |port: &str| -> Vec<SocketAddrV4> {
+        run("recipients.py", &[&node, port])
+            .lines()
+            .map(|line| {
+                line.parse().unwrap_or_else(|e| {
+                    panic!(
+                        "recipients.py printed {line:?} for {}: {e}",
+                        network.dot.display()
+                    )
+                })
             })
-        })
-        .collect();
+            .collect()
+    };
     Dot {
         sacn_bind: socket(&names[0], &names[1]),
-        mqtt: socket(&names[2], &names[3]),
-        osc_bind: socket(&names[4], &names[5]),
-        sacn_recipients,
+        osc_bind: socket(&names[2], &names[3]),
+        sacn_recipients: recipients("sacn"),
+        osc_recipients: recipients("osc"),
     }
 }
 
@@ -717,21 +717,6 @@ fn render_rig(
 /// The addresses the brain needs that are not the console's, from the dot.
 fn render_network(dot: &Dot, dot_name: &str, network: &Network) -> String {
     let mut out = String::new();
-    let [a, b, c, d] = dot.mqtt.ip().octets();
-    writeln!(
-        out,
-        "/// The broker the {}'s MQTT client connects to, as {dot_name} has it.",
-        network.service
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "pub const MQTT: core::net::SocketAddrV4 = \
-         core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {});",
-        dot.mqtt.port()
-    )
-    .unwrap();
-    writeln!(out).unwrap();
     let [a, b, c, d] = dot.osc_bind.ip().octets();
     writeln!(
         out,
@@ -753,18 +738,30 @@ fn render_network(dot: &Dot, dot_name: &str, network: &Network) -> String {
         network.service
     )
     .unwrap();
-    writeln!(out, "pub const SACN_RECIPIENTS: &[core::net::SocketAddrV4] = &[").unwrap();
-    for recipient in &dot.sacn_recipients {
-        let [a, b, c, d] = recipient.ip().octets();
+    write_sockets(&mut out, "SACN_RECIPIENTS", &dot.sacn_recipients);
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "/// Everything the {} sends its own OSC to, as {dot_name} has it.",
+        network.service
+    )
+    .unwrap();
+    write_sockets(&mut out, "OSC_RECIPIENTS", &dot.osc_recipients);
+    out
+}
+
+fn write_sockets(out: &mut String, name: &str, sockets: &[SocketAddrV4]) {
+    writeln!(out, "pub const {name}: &[core::net::SocketAddrV4] = &[").unwrap();
+    for socket in sockets {
+        let [a, b, c, d] = socket.ip().octets();
         writeln!(
             out,
             "    core::net::SocketAddrV4::new(core::net::Ipv4Addr::new({a}, {b}, {c}, {d}), {}),",
-            recipient.port()
+            socket.port()
         )
         .unwrap();
     }
     writeln!(out, "];").unwrap();
-    out
 }
 
 /// Wraps a rendered body in `pub mod <name> { … }`, indenting it so the generated file still

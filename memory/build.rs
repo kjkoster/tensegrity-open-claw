@@ -15,13 +15,19 @@ fn main() {
     });
 
     // Every device's OSC, Memory's own among them: its own to send by, all of them to know an
-    // address no file has. Watched as a directory too, so a file added is picked up.
+    // address no file has. Watched as a directory too, so a file added is picked up. A shared
+    // file is no device's: it is in every file that implements it.
     let fixtures = root.join("fixtures");
     println!("cargo:rerun-if-changed={}", fixtures.display());
     let mut devices: Vec<String> = fs::read_dir(&fixtures)
         .unwrap_or_else(|e| panic!("{}: {e}", fixtures.display()))
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .filter_map(|name| name.strip_suffix(".oscquery.json").map(str::to_owned))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.to_string_lossy().ends_with(".oscquery.json"))
+        .filter(|path| !cortex_build::is_shared(path))
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?;
+            name.strip_suffix(".oscquery.json").map(str::to_owned)
+        })
         .collect();
     devices.sort();
 

@@ -270,8 +270,8 @@ reporting a healthy signal, which reads as a wiring fault and is not one. The pa
 
 | | |
 |---|---|
-| `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam |
-| `cortex-build/` | the QLC+ ingest and the calendar's resolution, a build-dependency of the rig crate |
+| `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam; and the OSC every Rust device on the rig reports, Memory's included |
+| `cortex-build/` | the QLC+ ingest, the calendar's resolution, and the OSC addresses generated from `fixtures/`, a build-dependency of the rig crate, Memory and `cortex` |
 | `brain/` | the rig crate: the rig's patch, its show times, and its show |
 | `memory/` | Memory (§3.9), on `memory-pi` |
 | `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
@@ -280,7 +280,7 @@ reporting a healthy signal, which reads as a wiring fault and is not one. The pa
 what `chaos-pi` runs that belongs to no crate; `pi/memory-pi/` is what `memory-pi` runs that
 belongs to no crate. A daemon's systemd unit lives in its own directory. `clockwork/`
 holds what reads `clockwork.dot` at build time: the dot's reader, and the renderer that fills
-the Pis' configuration from it.
+the Pis' configuration from it; and `oscquery.py`, the reader of the OSCQuery files.
 
 The rig crate's `build.rs` names its workspace and reads `shows.rs`; its `main.rs` includes the
 generated patch and calendar, wires in the components it uses, and writes the show.
@@ -358,8 +358,18 @@ that is not its parent's path and its own key.
 | root | holds |
 |---|---|
 | `/<device>/…` | the device's own loop variables and raw inputs |
-| `/dmx/<device>/…` | where it sits on the universe, as the patch says, and how fresh its frames are |
+| `/dmx/<device>/…` | where it sits on the universe, as the patch says |
 | `/sys/<device>/…` | what it runs on |
+| `/wifi/<device>/…` | its end of the WiFi link |
+| `/health/<device>/…` | its heartbeat, and what Memory makes of it |
+
+**What every device reports alike is a shared file**, `dmx`, `sys`, `wifi` and `health` in
+`fixtures/`, its device a `{device}` key. A device's file lists the shared files it implements
+in its `HOST_INFO`'s `CLOCKWORK_CHAOS_IMPLEMENTS`, and the reader merges them in under its
+name; a device's own leaves may sit on top of them, and one in both is a build error. A leaf
+another program sends for the device, as Memory sends `last_seen` and `state` from the
+heartbeat, says so with `CLOCKWORK_CHAOS_SENT_BY`. A program that is several devices, as the
+brain is the face as well, reports for each, so either can move.
 
 **One value per message.** A value's name comes from its leaf's name and path, so nothing
 names arguments, and a message that carries several values has no names for them. Values that belong together are
@@ -369,7 +379,7 @@ sent together by sharing a rate, not by sharing a message.
 
 | attribute | sent | for |
 |---|---|---|
-| `"CLOCKWORK_CHAOS_ON_EVENT": "connect"` | each time the device joins the WiFi | what does not change while it runs: the patch, the MAC, the reset reason |
+| `"CLOCKWORK_CHAOS_ON_EVENT": "connect"` | each time the device joins the WiFi; a Pi program at start, Memory once its clock has synchronised | what does not change while it runs: the patch, the MAC, the reset reason |
 | `"CLOCKWORK_CHAOS_ON_EVENT": "data"` | once, when a new reading arrives | a sensor with a rate of its own, so each sample is sent once and none is repeated |
 | `"CLOCKWORK_CHAOS_AT_RATE_HZ": <n>` | `n` times a second | a state, so a listener that starts late or loses a packet is one period behind |
 
@@ -403,7 +413,7 @@ workspace patches them.
 | the calendar, with each show's civil dusk and dawn (§1.5) | `cortex::calendar`, `cortex-build`, the rig crate's `shows.rs` |
 | the QLC+ ingest (§1.1) | `cortex-build`, `cortex::qlc_plus` |
 | the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
-| the brain's telemetry, over OSC (§2.7) | `cortex::telemetry` |
+| the brain's telemetry, over OSC (§2.7) | `cortex::report`, `cortex::system`, `cortex::osc`, the rig crate's `report.rs` |
 | Stem (§3.1) | `stem/` |
 | Memory (§3.9) | `memory/`, `pi/memory-pi/`, `fixtures/memory.oscquery.json` |
 | the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `pi/chaos-pi/` |
@@ -431,12 +441,11 @@ and being Python, it has no place inside the brain anyway.
 sends it, nothing else, so its death costs telemetry and never uptime.
 
 **Liveness is a heartbeat.** Every device sends one over OSC, so a device that has gone is one
-whose heartbeat has stopped, and nothing watches anything else. A part inside the brain, like
-the face, lives and dies with it, so a heartbeat of its own would only repeat the brain's; its
-telemetry goes out with the brain's.
+whose heartbeat has stopped, and nothing watches anything else. The face, inside the brain
+today, sends a heartbeat of its own all the same, so it can move.
 
-`stem/rig_board.py` holds Stem's board readers. Memory reads memory-pi with its own, in Rust,
-so a fix to a reading on one Pi does not reach the other.
+`stem/rig_board.py` holds Stem's board readers. The brain and Memory read their Pis with
+`cortex::system`, in Rust, so a fix to a reading on one Pi does not reach Stem.
 
 ### 3.2 The 4G watchdog
 
@@ -730,11 +739,15 @@ nothing, because a dead `chaos-pi` leaves little to do remotely anyway.
   every device sends to `memory-pi` directly and writes it into Greptime in batches, so a
   device is recorded without the brain in the path; Greptime has no OSC listener. An address
   no device's OSCQuery file (§1.4) has is recorded all the same and logged once. It relays
-  every value onto the broker as it arrives, not retained, so a subscriber on the Mac watches
-  the rig live and nothing crosses the 4G link while none is connected. It is also Stem's
-  counterpart for `memory-pi`: its heartbeat and the Pi's health are its own OSC,
-  `fixtures/memory.oscquery.json`, handed to itself rather than sent, so they are recorded
-  while the WiFi is down.
+  every value onto the broker as it arrives, retained, so a subscriber on the Mac watches
+  the rig live, sees the last of every value when it connects, and nothing crosses the 4G
+  link while none is connected. The broker is a bridge for troubleshooting from the Mac; it
+  keeps nothing across a restart, and Memory replays every retained value when it reconnects.
+  It is also Stem's counterpart for `memory-pi`: its heartbeat and the Pi's health are its
+  own OSC, `fixtures/memory.oscquery.json`, handed to itself rather than sent, so they are
+  recorded while the WiFi is down. From every device's heartbeat it makes that device's
+  `last_seen` and `state`, `lost` once the heartbeat has stopped for longer than Memory's
+  timeout.
 - **GreptimeDB**, standalone, on loopback alone.
 - **Grafana**, reading Greptime as a MySQL server, on loopback.
 

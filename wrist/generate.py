@@ -234,7 +234,8 @@ def bundle(struct, fn, group, out):
 
 
 def encoders(path):
-    found = oscquery.leaves(path)
+    # Only what Wrist sends: Memory sends the rest of its health.
+    found = [leaf for leaf in oscquery.leaves(path) if not leaf["sent_by"]]
     for leaf in found:
         for v in leaf["values"] or []:
             if v in KEYWORDS:

@@ -53,7 +53,10 @@ pub fn fill(slots: &mut [u8], ask: Ask, tug: &Tug, sine: &Sine) {
     WRIST.direction.set(slots, middle(direction));
     let speed = Wrist::SPEED_SLOW_TO_THE_MAXIMUM;
     let span = f64::from(speed.max - speed.min);
-    WRIST.speed.set(slots, speed.min + (span * tug.speed.clamp(0.0, 1.0)).round() as u8);
+    WRIST.speed.set(
+        slots,
+        speed.min + (span * tug.speed.clamp(0.0, 1.0)).round() as u8,
+    );
     // Frequency is 16 bits over two channels, coarse then fine.
     let frequency = (f64::from(u16::MAX) * sine.frequency.clamp(0.0, 1.0)).round() as u16;
     let [coarse, fine] = frequency.to_be_bytes();

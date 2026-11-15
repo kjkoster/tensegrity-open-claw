@@ -52,43 +52,6 @@ pub const SACN_BIND_RETRY_MAX_S: u64 = 30;
 // are not here: they are generated from the rig's QLC+ workspace into the rig's own `patch`
 // module, the single source of truth for what is patched where.
 
-// ── Telemetry (the broker) ───────────────────────────────────────────────────
-// Stem owns the broker; every daemon holds its own client and announces itself under
-// `health/`. The broker runs on memory-pi, beside the recordings, so the Pi that drives the
-// show carries none of the telemetry. Its address and port are the rig's, generated from
-// `clockwork.dot` into the rig crate; the keepalive is in the `stem` crate.
-
-// How long a connection attempt may take before it counts as failed and backs off. The broker
-// is across the WiFi, and a memory-pi that is off would otherwise leave the attempt to the
-// kernel's own SYN retries, the better part of two minutes.
-pub const MQTT_CONNECT_TIMEOUT_S: u64 = 5;
-
-// How long to wait for the CONNACK before treating the broker as unusable. Generous: the only
-// things that make it slow are a broker still starting up and a WiFi link catching up.
-pub const MQTT_CONNACK_TIMEOUT_S: u64 = 5;
-
-// How long a write may block before the broker counts as gone. Writes land in the socket
-// buffer and return at once while the broker keeps up; one that blocks this long is writing to
-// a peer that is no longer reading.
-pub const MQTT_WRITE_TIMEOUT_S: u64 = 5;
-
-// Messages that may sit queued for the telemetry thread. Deliberately shallow — the queue
-// exists so the frame loop never waits on a socket, not so telemetry survives an outage, and
-// past this depth the newest reading is worth more than the backlog behind it.
-pub const MQTT_QUEUE_DEPTH: usize = 64;
-
-// The largest packet the client encodes. Every topic is a short path and every payload one
-// scalar, so a message that does not fit is a caller's mistake, logged and dropped.
-pub const MQTT_PACKET_MAX: usize = 512;
-
-// Reconnect backoff, matching the other receivers': a broker that comes back is picked up
-// without anything being restarted.
-pub const MQTT_RETRY_MAX_S: u64 = 30;
-
-// How long a shutdown waits for the goodbye to actually leave. The alternative to waiting is
-// the will firing and an orderly stop being recorded as a crash, so it is worth a moment — but
-// only a moment, because a wedged broker must never be able to hold up a shutdown.
-pub const MQTT_FAREWELL_MS: u64 = 500;
 
 // ── Wired DMX-512 output (Zihatec RS-485 HAT) ─────────────────────────────────
 // The HAT is clocked with the same slot buffer as the sACN stream, so the wired universe

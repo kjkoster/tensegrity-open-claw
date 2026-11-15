@@ -6,17 +6,17 @@
 //! and the face's right lamp shows the motor's phase, (1 + sin φ)/2, from Wrist's state
 //! bundles. The left lamp is dark.
 //!
-//! The chord enters test mode, in `test.pluck`, whatever the calendar says, and leaves it, back
-//! to what the calendar says. In test mode the left button moves between `test.pluck` and
-//! `test.blackout`. Test mode ends itself after `TEST_MODE_TIMEOUT` without a chord, because a
+//! The chord enters test mode, in `test_pluck`, whatever the calendar says, and leaves it, back
+//! to what the calendar says. In test mode the left button moves between `test_pluck` and
+//! `test_blackout`. Test mode ends itself after `TEST_MODE_TIMEOUT` without a chord, because a
 //! rig left in it would ignore the calendar unattended.
 //!
 //! In test mode the left lamp flashes, `TEST_FLASH_FRAMES` lit of every `TEST_FLASH_PERIOD`,
 //! in either test state.
 //!
-//! In `test.blackout`, as in `blackout`, Wrist is sent Blackout and the right lamp is dark.
+//! In `test_blackout`, as in `blackout`, Wrist is sent Blackout and the right lamp is dark.
 //!
-//! In `test.pluck` Wrist is plucked from the right button: Wrist is
+//! In `test_pluck` Wrist is plucked from the right button: Wrist is
 //! sent Hold, and the right lamp is lit while Wrist says a pluck can start. A press while it is
 //! lit sends Pluck until Wrist no longer says it can, and Pluck goes on being sent while Wrist
 //! says the pluck is busy; then Hold again, until the next press, whatever Wrist says after. A
@@ -24,7 +24,7 @@
 //! second of is let go of: the Pluck never reached it. The firmware decides nothing: the brain
 //! holds Pluck exactly as long as the pluck runs.
 //!
-//! The show state is the brain's own: `brain/show` and `brain/testmode`, retained, published
+//! The show state, test mode included, is the brain's own: handed to its OSC as `/brain/show`
 //! on every change, and logged with what caused it.
 
 use crate::face::FaceState;
@@ -33,7 +33,7 @@ use crate::wrist::{Heard, Mode, Pluck};
 use crate::wrist_show::{self, Ask, Sine, Tug};
 use cortex::calendar::{self, Calendar};
 use cortex::config::FRAME_RATE_HZ;
-use cortex::telemetry::Publisher;
+use cortex::latest::{LatestRx, LatestTx, latest};
 use std::time::{Duration, Instant};
 
 /// The left lamp's flash in test mode: lit for this many frames...
@@ -51,7 +51,8 @@ const WRIST_STALE_AFTER: Duration = Duration::from_secs(1);
 /// bundle, a tenth of a second later. Still saying it after this, it has not been sent the
 /// press's Pluck — a desk holding the universe, frames lost on the way — and a press that waited
 /// on would pluck whenever a frame next got through, unattended.
-const PLUCK_PRESS_FRAMES: u32 = (WRIST_STALE_AFTER.as_millis() as u64 * FRAME_RATE_HZ / 1000) as u32;
+const PLUCK_PRESS_FRAMES: u32 =
+    (WRIST_STALE_AFTER.as_millis() as u64 * FRAME_RATE_HZ / 1000) as u32;
 /// Pluck's tug: Wrist's largest, four revolutions, at its top speed from the first step to the
 /// last; clockwise, facing the shaft, which reels the wire in, by test.
 const PLUCK_TUG: Tug = Tug {
@@ -66,33 +67,18 @@ const RUN_SINE: Sine = Sine {
     clockwise: true,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum State {
-    Blackout,
-    Run,
-    TestPluck,
-    TestBlackout,
-}
-
-impl State {
-    /// The state as it is logged and published on `brain/show`.
-    fn word(self) -> &'static str {
-        match self {
-            State::Blackout => "blackout",
-            State::Run => "run",
-            State::TestPluck => "test.pluck",
-            State::TestBlackout => "test.blackout",
-        }
-    }
-}
+/// The show state is `/brain/show`'s, generated from `fixtures/brain.oscquery.json`, so the
+/// states and the words they are logged and reported by are the file's.
+pub use crate::osc::brain::BrainShow as State;
 
 pub struct Show {
-    telemetry: Publisher,
+    /// The state, for the brain's OSC.
+    states: LatestTx<State>,
     calendar: &'static Calendar,
     /// The face's chord count as last read; the face counts from zero, and so does this.
     seen_chords: u32,
-    /// When test mode was last turned on, while it is on.
-    testing_since: Option<Instant>,
+    /// When test mode last began. Whether it is on is the state's to say.
+    test_since: Instant,
     state: State,
     /// Frames already played in the current state.
     frames: u32,
@@ -107,24 +93,24 @@ pub struct Show {
 }
 
 impl Show {
-    pub fn new(telemetry: Publisher, calendar: &'static Calendar) -> Self {
+    /// The show, and the reader of its state.
+    pub fn new(calendar: &'static Calendar) -> (Self, LatestRx<State>) {
         let state = State::Blackout;
         eprintln!("show: {}", state.word());
-        telemetry.publish("show", state.word(), true);
-        eprintln!("show: test mode off");
-        telemetry.publish("testmode", stem::boolean(false), true);
-        Self {
-            telemetry,
+        let (states, state_reader) = latest(state);
+        let show = Self {
+            states,
             calendar,
             seen_chords: 0,
-            testing_since: None,
+            test_since: Instant::now(),
             state,
             frames: 0,
             seen_left_presses: 0,
             seen_right_presses: 0,
             pluck_pressed: None,
             plucking: false,
-        }
+        };
+        (show, state_reader)
     }
 
     /// Fills this frame's slots, given what the door and Wrist say.
@@ -133,25 +119,13 @@ impl Show {
         let chorded = face.chords != self.seen_chords;
         self.seen_chords = face.chords;
 
-        if chorded {
-            self.set_testing(self.testing_since.is_none());
-        } else if self
-            .testing_since
-            .is_some_and(|since| since.elapsed() >= TEST_MODE_TIMEOUT)
-        {
-            eprintln!(
-                "show: test mode timed out after {} minutes without a chord",
-                TEST_MODE_TIMEOUT.as_secs() / 60
-            );
-            self.set_testing(false);
-        }
-        let testing = self.testing_since.is_some();
+        let timed_out = is_test(self.state) && self.test_since.elapsed() >= TEST_MODE_TIMEOUT;
 
         // A press takes tens of milliseconds, so one frame never sees two.
         let left_pressed = face.left_presses != self.seen_left_presses;
         self.seen_left_presses = face.left_presses;
 
-        if let Some((next, why)) = self.next(testing, left_pressed) {
+        if let Some((next, why)) = self.next(chorded, timed_out, left_pressed) {
             self.enter(next, why);
         }
         let left = self.left_lamp();
@@ -160,7 +134,7 @@ impl Show {
         let wrist = wrist
             .filter(|(_, at)| at.elapsed() < WRIST_STALE_AFTER)
             .map(|(report, _)| report);
-        // The right button counts only in `test.pluck`; a press anywhere else is let go of.
+        // The right button counts only in `test_pluck`; a press anywhere else is let go of.
         let (pluck, can_pluck) = self.pluck(face, wrist.map(|report| report.pluck));
         let (ask, right) = match self.state {
             State::Run => {
@@ -214,7 +188,7 @@ impl Show {
             let why = if pressing {
                 "right button"
             } else if !here {
-                "left test.pluck"
+                "left test_pluck"
             } else if expired {
                 "Wrist never saw the press"
             } else if wrist.is_none() {
@@ -222,22 +196,34 @@ impl Show {
             } else {
                 "pluck done"
             };
-            eprintln!("show: Wrist {} — {why}", if pluck { "Pluck" } else { "Hold" });
+            eprintln!(
+                "show: Wrist {} — {why}",
+                if pluck { "Pluck" } else { "Hold" }
+            );
             self.plucking = pluck;
         }
         (pluck, can && !pressing)
     }
 
-    /// The state this frame moves to, if it moves, and why.
-    fn next(&self, testing: bool, left_pressed: bool) -> Option<(State, &'static str)> {
+    /// The state this frame moves to, if it moves, and why: the chord into and out of test
+    /// mode, its timeout, the left button between the test states, and the calendar.
+    fn next(
+        &self,
+        chorded: bool,
+        timed_out: bool,
+        left_pressed: bool,
+    ) -> Option<(State, &'static str)> {
         let on = self.calendar.plays(calendar::now());
         match self.state {
-            State::Blackout | State::Run if testing => Some((State::TestPluck, "test mode")),
-            State::TestPluck | State::TestBlackout if !testing => Some(if on {
-                (State::Run, "test mode off, in a show")
-            } else {
-                (State::Blackout, "test mode off, outside a show")
-            }),
+            State::Blackout | State::Run if chorded => Some((State::TestPluck, "chord, test mode")),
+            State::TestPluck | State::TestBlackout if chorded || timed_out => {
+                Some(match (timed_out, on) {
+                    (false, true) => (State::Run, "chord, test mode off, in a show"),
+                    (false, false) => (State::Blackout, "chord, test mode off, outside a show"),
+                    (true, true) => (State::Run, "test mode timed out, in a show"),
+                    (true, false) => (State::Blackout, "test mode timed out, outside a show"),
+                })
+            }
             State::Run if !on => Some((State::Blackout, "outside a show")),
             State::Blackout if on => Some((State::Run, "a show has begun")),
             State::TestPluck if left_pressed => Some((State::TestBlackout, "left button")),
@@ -248,7 +234,10 @@ impl Show {
 
     fn enter(&mut self, next: State, why: &str) {
         eprintln!("show: {} → {} — {why}", self.state.word(), next.word());
-        self.telemetry.publish("show", next.word(), true);
+        if is_test(next) && !is_test(self.state) {
+            self.test_since = Instant::now();
+        }
+        self.states.publish(next);
         self.state = next;
         self.frames = 0;
     }
@@ -256,21 +245,15 @@ impl Show {
     /// The left lamp's level this frame, 0..1. The test flash counts from the state's first
     /// frame, so each test state starts lit.
     fn left_lamp(&self) -> f64 {
-        match self.state {
-            State::Blackout | State::Run => 0.0,
-            State::TestPluck | State::TestBlackout => {
-                if self.frames % TEST_FLASH_PERIOD < TEST_FLASH_FRAMES {
-                    TEST_FLASH_LEVEL
-                } else {
-                    0.0
-                }
-            }
+        if is_test(self.state) && self.frames % TEST_FLASH_PERIOD < TEST_FLASH_FRAMES {
+            TEST_FLASH_LEVEL
+        } else {
+            0.0
         }
     }
+}
 
-    fn set_testing(&mut self, on: bool) {
-        self.testing_since = on.then(Instant::now);
-        eprintln!("show: test mode {}", if on { "on" } else { "off" });
-        self.telemetry.publish("testmode", stem::boolean(on), true);
-    }
+/// Whether `state` is one of test mode's.
+fn is_test(state: State) -> bool {
+    matches!(state, State::TestPluck | State::TestBlackout)
 }

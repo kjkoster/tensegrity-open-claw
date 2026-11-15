@@ -235,20 +235,17 @@ show's instants and dark stretches offline, and fails on:
 The startup log lists the site, whether the clock is synchronised, and every show yet to end
 with its kind, and for a dusk show day its dark stretches; check it after a change.
 
-### Topics
+### What the brain reports
 
-The brain publishes its state retained, and logs a `rig: …` or `show: …` line on each change:
+The brain sends its OSC, and the face's, to Memory, as `fixtures/brain.oscquery.json` and
+`fixtures/face.oscquery.json` have them; Memory records it and relays it onto the broker,
+retained, at the address without its leading slash. It logs a `rig: …` or `show: …` line on
+each change. `/brain/rig` is the rig state and `/brain/show` the show state, test mode
+included.
 
-| topic | values |
-|---|---|
-| `brain/rig` | `boot_hold`, `running`, `estop` or `shutdown` |
-| `brain/show` | the show state, as `brain/src/show.rs` names it |
-| `brain/testmode` | whether test mode is on |
-
-Rig-wide facts go under a root with their owner beneath it, retained: `sys/<owner>/…` (what
-each process runs on) and `dmx/<owner>/…` (where each sits on the universe). `sys/#`, `dmx/#`
-and `health/#` each read the whole rig. A part inside the brain, such as the face, publishes
-its own subtree (`face/…`) on the brain's connection.
+Every device reports the shared blocks it implements under its own name: `sys/<device>/…`
+(what it runs on), `wifi/<device>/…`, `dmx/<device>/…` (where it sits on the universe) and
+`health/<device>/…`, so `sys/#`, `wifi/#`, `dmx/#` and `health/#` each read the whole rig.
 
 ### E-stop
 
@@ -270,8 +267,8 @@ last frame it sent with these overrides (why: DESIGN §1.2):
 - The held frame goes out continuously at the normal rate.
 - Twisting the button out releases it; the live frame goes out at once.
 - Booted with it pressed, the rig sends nothing until it is released.
-- The show runs on underneath: `brain/show` keeps reporting; `brain/rig` is the rig state and
-  `face/estop` the button.
+- The show runs on underneath: `/brain/show` keeps reporting; `/brain/rig` is the rig state
+  and `/face/estop` the button.
 - A shutter, Effect or Maintenance channel whose `.qxf` marks no band for the stop fails the
   build. Mark it in the definition; never guess a value.
 
@@ -331,7 +328,9 @@ From the Mac at the repo root: `./deploy-memory-pi.sh`
 
 It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, builds Memory for
 the Pi, rsyncs `pi/memory-pi/`, the binary, the rendered profile, `pi/deploy-lib.sh` and
-`stem/stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. It assumes a fresh Pi and
+`stem/stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. That restarts a service only
+when one of its files changed or it was installed just now, saying which were left alone; a
+restart that fails stops the deploy. It assumes a fresh Pi and
 removes nothing but what an older deploy shipped, and it never touches `chaos-pi`, as
 `deploy-chaos-pi.sh` never touches `memory-pi`.
 

@@ -27,9 +27,10 @@
 //! fixtures are doing, and silence leaves them where they were, by their own signal-loss
 //! behaviour. Neither boot hold nor shutdown can be returned to.
 //!
-//! The rig state is published on `brain/rig`, retained, on every change.
+//! The rig state is handed to the rig with the takeover as a [`Decision`], on every change, for
+//! it to report.
 
-use crate::Rig;
+use crate::{Decision, Rig};
 use crate::clock;
 use crate::config as cfg;
 use crate::dmx::{self, Frame};
@@ -53,13 +54,21 @@ enum RigState {
     /// The held frame goes out, unchanged, every frame; or nothing, when the e-stop was
     /// pressed before anything had gone out.
     Estop(Option<Frame>),
-    /// The sACN source is released, the telemetry says goodbye, and the process exits.
+    /// The sACN source is released, and the process exits.
     Shutdown,
 }
 
+impl Decision {
+    /// Before the first frame: in boot hold, nobody having taken the universe over.
+    pub const BOOT: Decision = Decision {
+        rig: RigState::BootHold.word(),
+        takeover: None,
+    };
+}
+
 impl RigState {
-    /// The rig state as it is published on `brain/rig`.
-    fn word(&self) -> &'static str {
+    /// The rig state as it is reported in a [`Decision`].
+    const fn word(&self) -> &'static str {
         match self {
             RigState::BootHold => "boot_hold",
             RigState::Running(_) => "running",
@@ -116,7 +125,7 @@ pub async fn frame_task(
     // Which recipients' last send failed, one bit each, so each failure is logged once.
     let mut failing = 0u32;
     let mut state = RigState::BootHold;
-    rig.telemetry.publish("rig", state.word(), true);
+    let mut decided = Decision::BOOT;
 
     loop {
         ticker.next().await;
@@ -169,8 +178,16 @@ pub async fn frame_task(
                     cfg::SACN_RELEASE_FRAMES
                 ),
             }
-            rig.telemetry.publish("rig", next.word(), true);
             state = next;
+        }
+
+        let now_decided = Decision {
+            rig: state.word(),
+            takeover: external_driving.then_some((external.source, external.priority)),
+        };
+        if now_decided != decided {
+            decided = now_decided;
+            rig.decisions.publish(decided);
         }
 
         match &mut state {
@@ -196,11 +213,6 @@ pub async fn frame_task(
                     );
                     sequence = sequence.wrapping_add(1);
                 }
-                // After the fixtures are handed back, because they are what the delay would
-                // cost. Without this every ordinary restart would look like a crash: the will
-                // fires whenever the connection dies without a goodbye, and `systemctl
-                // restart` is the most common way for that to happen.
-                rig.farewell.say();
                 std::process::exit(0);
             }
         }

@@ -70,10 +70,10 @@ right│      │ done/abort    right│      │ done/abort
   e-stop's mask or a lost universe puts it there (§2.4).
 - **Running** an experiment returns to the same experiment armed when it finishes or is
   aborted, so the right button repeats it. The left button is ignored while one runs.
-- Every state is published as `brain/show`, retained, as the code already does
-  (`armed-pluck`, `pluck`, `armed-run`, `run`). Each start increments `brain/run`,
-  retained — a run counter, not a second state topic — so a Grafana annotation and the
-  numbers recorded for a run name the same run.
+- Every state is reported as `/brain/show`, as the code already does (`armed_pluck`,
+  `pluck`, `armed_run`, `run`). Each start increments `/brain/run` — a run counter, not a
+  second state — so a Grafana annotation and the numbers recorded for a run name the same
+  run.
 
 The experiments, each with what it is for. Their amplitudes and durations are named constants
 in `brain/src/show.rs`, with units.
@@ -178,8 +178,8 @@ matter. The three placements tried in E0 are the top node, a mid-height node, an
 
 `memory-pi` as the README has it, with one provisioned dashboard for this show,
 `pi/memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
-transitions, pluck results and protections as annotations, and `brain/show` and `brain/run` as
-annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
+transitions, pluck results and protections as annotations, and `/brain/show` and `/brain/run`
+as annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
 lamps and to `memory-pi`, where Memory records it and relays it onto the broker, so the trace runs on
 while the brain is down. The Mac is on the access point for the sessions
 and reaches Grafana over the SSH jump as today; QLC+'s output unicasts to the brain over

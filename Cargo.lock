@@ -41,7 +41,6 @@ dependencies = [
  "embassy-executor",
  "embassy-time",
  "rppal",
- "stem",
 ]
 
 [[package]]
@@ -96,11 +95,13 @@ name = "cortex"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "chrono",
+ "cortex-build",
  "embassy-executor",
  "embassy-time",
  "libc",
  "signal-hook",
- "stem",
+ "sunrise",
  "zihatec-rs-485-dmx",
 ]
 
@@ -476,10 +477,12 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "memory"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "cortex",
  "cortex-build",
  "libc",
  "signal-hook",
+ "stem",
 ]
 
 [[package]]

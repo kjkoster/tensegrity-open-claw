@@ -160,11 +160,11 @@ digraph clockwork {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
         wrist_firmware:title -> memory_pi_memory:osc     [xlabel="OSC"];
+        chaos_pi_brain:title -> memory_pi_memory:osc     [xlabel="OSC"];
     }
 
     subgraph mqtt {
         edge [color="#ff7f0e", fontcolor="#ff7f0e", penwidth=1.5];
-        chaos_pi_brain:title     -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
         chaos_pi_stem:title      -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
         memory_pi_memory:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, the OSC it receives"];
         mac_mqttanalyzer:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, subscribed, tunnelled over SSH", dir=back];

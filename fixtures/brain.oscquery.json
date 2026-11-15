@@ -1,0 +1,97 @@
+{
+  "HOST_INFO": {
+    "NAME": "brain",
+    "OSC_TRANSPORT": "UDP",
+    "CLOCKWORK_CHAOS_IMPLEMENTS": ["dmx", "health", "sys", "wifi"]
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "brain": {
+      "FULL_PATH": "/brain",
+      "DESCRIPTION": "The brain: the show, the rig state under it, and the calendar the show follows.",
+      "CONTENTS": {
+        "show": {
+          "FULL_PATH": "/brain/show",
+          "DESCRIPTION": "The show state, test mode included: blackout and run from the calendar, test_pluck and test_blackout in test mode.",
+          "TYPE": "s",
+          "ACCESS": 1,
+          "RANGE": [
+            { "VALS": ["blackout", "run", "test_pluck", "test_blackout"] }
+          ],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "rig": {
+          "FULL_PATH": "/brain/rig",
+          "DESCRIPTION": "The rig state, which says whether, and what, goes out, whatever the show asks.",
+          "TYPE": "s",
+          "ACCESS": 1,
+          "RANGE": [
+            { "VALS": ["boot_hold", "running", "estop", "shutdown"] }
+          ],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "next_show_s": {
+          "FULL_PATH": "/brain/next_show_s",
+          "DESCRIPTION": "Time until the next show in the calendar begins to play, by the brain's clock as it stands; 0 while one plays, -1 when the calendar has none to come.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -1 }],
+          "UNIT": ["s"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+        },
+        "dusk_s": {
+          "FULL_PATH": "/brain/dusk_s",
+          "DESCRIPTION": "Time until today's civil dusk at the site, by the brain's clock as it stands; 0 once it has passed.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": 0 }],
+          "UNIT": ["s"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 1
+        }
+      }
+    },
+    "dmx": {
+      "FULL_PATH": "/dmx",
+      "CONTENTS": {
+        "brain": {
+          "FULL_PATH": "/dmx/brain",
+          "DESCRIPTION": "How the brain sends the universe, on top of dmx.oscquery.json, and who has taken it over.",
+          "CONTENTS": {
+            "frame_rate_hz": {
+              "FULL_PATH": "/dmx/brain/frame_rate_hz",
+              "DESCRIPTION": "How many frames a second the brain sends.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 1 }],
+              "UNIT": ["Hz"],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "priority": {
+              "FULL_PATH": "/dmx/brain/priority",
+              "DESCRIPTION": "The sACN priority the brain sends at, which a console must send strictly above to take the universe over.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0, "MAX": 200 }],
+              "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+            },
+            "takeover_ip": {
+              "FULL_PATH": "/dmx/brain/takeover_ip",
+              "DESCRIPTION": "The address of the console that has taken the universe over; 0.0.0.0 while the brain drives it.",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+            },
+            "takeover_priority": {
+              "FULL_PATH": "/dmx/brain/takeover_priority",
+              "DESCRIPTION": "The sACN priority of the console that has taken the universe over; 0 while the brain drives it.",
+              "TYPE": "i",
+              "ACCESS": 1,
+              "RANGE": [{ "MIN": 0, "MAX": 200 }],
+              "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+            }
+          }
+        }
+      }
+    }
+  }
+}

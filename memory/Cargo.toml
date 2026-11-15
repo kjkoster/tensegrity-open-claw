@@ -7,9 +7,12 @@ version      = "0.1.0"
 [build-dependencies]
 cortex-build = { path = "../cortex-build" }
 
-# cortex for the MQTT client the brain uses, so the health contract is held one way on the rig.
-# libc for statvfs, which std has no call for.
+# cortex for the OSC and the shared reports every Rust device on the rig uses. stem for the MQTT
+# packets and the health words, shared with any firmware. chrono to write `last_seen`. libc for
+# statvfs, which std has no call for.
 [dependencies]
+chrono      = { version = "0.4.45", default-features = false, features = ["alloc"] }
 cortex      = { path = "../cortex" }
 libc        = "0.2.191"
 signal-hook = "0.4.6"
+stem        = { path = "../stem" }

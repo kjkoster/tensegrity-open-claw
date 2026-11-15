@@ -70,10 +70,10 @@ void noteOscSend(size_t recipient, bool taken) {
   }
 }
 
-using DisconnectReason = osc::SysWristWifiDisconnectReason;
+using DisconnectReason = osc::WifiWristDisconnectReason;
 
 // The WiFi stack's reasons for a disconnect, the ones a station sees, from the SDK's numbers to
-// /sys/wrist/wifi/disconnect_reason's values.
+// /wifi/wrist/disconnect_reason's values.
 DisconnectReason disconnectReason(uint8_t reason) {
   switch (reason) {
     case 1: return DisconnectReason::unspecified;
@@ -113,7 +113,7 @@ void watchWifi() {
     disconnects++;
     lastDisconnect = disconnectReason(e.reason);
     say("WiFi disconnected: %s (%u), %lu since boot",
-        osc::SysWristWifiDisconnectReasonNames[static_cast<uint8_t>(lastDisconnect)], e.reason,
+        osc::WifiWristDisconnectReasonNames[static_cast<uint8_t>(lastDisconnect)], e.reason,
         static_cast<unsigned long>(disconnects));
   });
 }

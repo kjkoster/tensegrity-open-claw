@@ -12,9 +12,11 @@ pub mod config;
 pub mod dmx;
 pub mod estop;
 pub mod latest;
+pub mod osc;
 pub mod qlc_plus;
+pub mod report;
 pub mod sched;
-pub mod telemetry;
+pub mod system;
 
 mod orchestrator;
 mod sacn_in;
@@ -26,13 +28,9 @@ use qlc_plus::{PatchEntry, Sacn};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 use signal_hook::low_level::signal_name;
-use std::net::{SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-/// The name the brain wears on the broker: its health topic and the prefix on everything else
-/// it publishes. The rig spawns the client under it, so its show can publish there as well.
-pub const TELEMETRY_SERVICE: &str = "brain";
 
 /// One rig: what its QLC+ workspace turned into, plus the show that drives it.
 ///
@@ -70,13 +68,17 @@ pub struct Rig {
     /// the rig's fixtures that live inside the brain process and read their own channels
     /// out of it rather than off the wire.
     pub frames: latest::LatestTx<dmx::Frame>,
-    /// The brain's own client, spawned by the rig under [`TELEMETRY_SERVICE`] so that both the
-    /// rig's show and everything here can publish under `brain/`: the show is built before
-    /// the brain comes up, and one service cannot have two clients.
-    pub telemetry: telemetry::Publisher,
-    /// The goodbye of the brain's telemetry client, said by the frame loop on shutdown. The
-    /// rig spawns the client itself, but only the brain knows when it is stopping.
-    pub farewell: telemetry::Farewell,
+    /// Where the frame loop says what it has decided, on every change, for the rig to report.
+    pub decisions: latest::LatestTx<Decision>,
+}
+
+/// What the frame loop decided: the rig state, as the rig reports it on `/brain/rig`, and the
+/// console that has taken the universe over, by its address and priority, if one has. Before
+/// the first frame, [`Decision::BOOT`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Decision {
+    pub rig: &'static str,
+    pub takeover: Option<(Ipv4Addr, u8)>,
 }
 
 /// Slots the sACN frame spans: 1 through the last slot any patched fixture occupies.
@@ -92,47 +94,6 @@ pub(crate) fn frame_width(patch: &[PatchEntry]) -> usize {
         .map(|channel| channel.slot())
         .max()
         .map_or(0, |slot| slot + 1)
-}
-
-/// What the brain runs on, under `sys/brain/`, where every part of the rig publishes its own:
-/// the board as its device tree names it, the cores, the top CPU frequency in MHz, the
-/// installed RAM in KB, and the target triplet the brain was compiled for. The brain runs
-/// only on a Pi, where every one of these is there to read.
-fn publish_system(publisher: &telemetry::Publisher) {
-    let model = read("/proc/device-tree/model");
-    publisher.publish_sys("board", model.trim_end_matches('\0').trim());
-    publisher.publish_sys("ram_kb", installed_ram_kb().to_string());
-    let cores = std::thread::available_parallelism().expect("the number of cores");
-    publisher.publish_sys("cores", cores.to_string());
-    let max_khz: u64 = read("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-        .trim()
-        .parse()
-        .expect("cpuinfo_max_freq in kHz");
-    publisher.publish_sys("cpu_frequency_mhz", (max_khz / 1000).to_string());
-    publisher.publish_sys("triplet", env!("TRIPLET"));
-}
-
-fn read(path: &str) -> String {
-    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"))
-}
-
-/// The RAM fitted to a Raspberry Pi, decoded from the revision code in `/proc/cpuinfo`.
-///
-/// Not the kernel's `MemTotal`, which is what is left once the GPU and the kernel have taken
-/// their share. A new-style code (bit 23), which every Pi since the 2 B has, carries the size
-/// in bits 20–22, as 256 MB doubled that many times.
-fn installed_ram_kb() -> u64 {
-    let cpuinfo = read("/proc/cpuinfo");
-    let revision = cpuinfo
-        .lines()
-        .find_map(|line| line.strip_prefix("Revision")?.split(':').nth(1))
-        .expect("/proc/cpuinfo has a Revision");
-    let code = u32::from_str_radix(revision.trim(), 16).expect("the Revision in hex");
-    assert!(
-        code & (1 << 23) != 0,
-        "board revision {code:x} is old-style and does not give the RAM"
-    );
-    (256 * 1024) << ((code >> 20) & 0x7)
 }
 
 /// Brings the cabinet up, then runs `rig`'s frame loop forever.
@@ -190,16 +151,9 @@ pub fn run(mut rig: Rig) -> ! {
     }
     eprintln!("{name}: {} e-stop overrides", rig.stop.len());
 
-    // Where the brain sits on the universe, under `dmx/brain/`, and what it runs on, under
-    // `sys/brain/`, retained, so a subscriber arriving later still gets them.
-    let publisher = &rig.telemetry;
-    publisher.publish_dmx("universe", sacn.universe.to_string());
-    publisher.publish_dmx("frame_rate_hz", FRAME_RATE_HZ.to_string());
-    publish_system(publisher);
-
     // systemd stops the brain with SIGTERM, and a brain started by hand is stopped with
     // SIGINT. Catching both only asks the frame loop to shut down: it releases the sACN source
-    // on its own send path, so there is never a second sender, and says the goodbyes.
+    // on its own send path, so there is never a second sender.
     // signal_hook's iterator runs on its own thread, outside async-signal context, so the log
     // line here is safe.
     let shutdown = Arc::new(AtomicBool::new(false));

@@ -77,17 +77,14 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   bar's ends are clamped; Velcro dots; a luggage scale and string; a known mass for the load cell.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
   feed, contacts rated for at least 50 V DC.
-- Revive `memory-pi` per README; broker at `10.0.10.3`, Memory's journal saying GreptimeDB
-  `ok`, Wrist's and Memory's OSC in the `rig` database and on the broker.
-- Settle the OSCQuery files, `wrist.oscquery.json` and `face.oscquery.json`. Open:
-  - `health/…` specified for every client, `sys/…` for every client but Wrist, and a file
-    for the brain;
-  - booleans as `T`/`F` throughout;
-  - whether Wrist serves its file over HTTP and mDNS.
+- Wrist's, the brain's, the face's and Memory's OSC in the `rig` database and on the broker.
+- Decide whether Wrist serves its OSCQuery file over HTTP and mDNS.
+- An OSC event for telemetry sent on change, beside `connect`, `data` and a rate: states are
+  pushed at their rate today whether or not they changed, which is wasteful.
 - Provision the PoC dashboard from `pi/memory-pi/grafana/headless-hug-poc.json` with
   `allowUiUpdates: true`, so panels can be edited in the UI and exported back to the file;
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
-  results and protections, `brain/show` and `brain/run` as annotations. Grafana stays on
+  results and protections, `/brain/show` and `/brain/run` as annotations. Grafana stays on
   loopback; the Mac reaches it over the SSH jump, now across the access point.
 - `wrist/` firmware, sensing half: the ADXL345 over I²C, ±2 g full resolution, 200 Hz output
   read at 100 Hz in one 6-byte burst (not SPI: its pins are taken, and a fast four-wire bus
@@ -145,9 +142,11 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: test mode disabled, left in the code, as the calendar is.
+- Brain: an `await_estop` rig state after power-up, so nothing starts without a person there to
+  press and release the e-stop first.
 - Brain: the OSC receiver takes Wrist's waveform bundle as well.
-- The Director's states — `armed-pluck`, `pluck`, `armed-run`, `run` — with the button rules
-  of `SHOW.md` §2.2, `brain/run`, and the lamp patterns of §2.3, Run's two sines included;
+- The Director's states — `armed_pluck`, `pluck`, `armed_run`, `run` — with the button rules
+  of `SHOW.md` §2.2, `/brain/run`, and the lamp patterns of §2.3, Run's two sines included;
   the experiments' amplitudes and durations as constants in `brain/src/show.rs`, named, with
   units.
 - Dashboard panels for each experiment: Pluck's f, Q and axis by run; Run's lock, drive phase,
@@ -186,6 +185,4 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
   panels and the SQL behind them committed under `pi/memory-pi/grafana/`; the answers to the
   three questions, with the measurement behind each; and what the PoC did not settle.
 - `DESIGN.md`: correct §3.10 by what was measured.
-- Delete `CONTROL_LOOP.md`: its content is merged into `SHOW.md` and this file, and nothing
-  links to it.
 - Tag `<YYYY-MM-DD>-headless-hug-poc`; empty this file for the next show.

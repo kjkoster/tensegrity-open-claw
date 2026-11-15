@@ -6,7 +6,7 @@
 //! into `value`, flags as 1 and 0 so they draw as a line, words and the floats no number can
 //! hold, NaN among them, into `text`. Timed when Memory received them.
 
-use crate::osc::Value;
+use cortex::osc::Value;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

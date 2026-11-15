@@ -11,6 +11,5 @@ cortex-build = { path = "../cortex-build" }
 cortex   = { path = "../cortex" }
 embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
 embassy-time     = { version = "0.5.1",  features = ["std"] }
-stem             = { path = "../stem" }
 # The face, the cabinet door's buttons and lamps.
 rppal            = "0.22.1"
