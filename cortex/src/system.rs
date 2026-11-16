@@ -9,7 +9,7 @@
 /// The target triplet this was compiled for.
 pub const TRIPLET: &str = env!("TRIPLET");
 
-/// The WiFi interface on both Pis: chaos-pi's access point, memory-pi's only network.
+/// The WiFi interface on the Pi: chaos-pi's access point.
 pub const WIFI: &str = "wlan0";
 
 /// The Pi, as its device tree names it.

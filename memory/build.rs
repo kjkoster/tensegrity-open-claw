@@ -10,7 +10,7 @@ fn main() {
     // Where Memory listens for OSC and the broker it relays to.
     cortex_build::network(&cortex_build::Network {
         dot: &root.join("clockwork.dot"),
-        device: "memory_pi",
+        device: "chaos_pi",
         service: "memory",
     });
 

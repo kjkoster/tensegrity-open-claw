@@ -35,7 +35,9 @@
 //                           to show the flow. sACN carries the one universe clockwork.qxw
 //                           sets, so its edges do not name it. sACN is unicast only:
 //                           one edge per sender and recipient, sent to the recipient's
-//                           address on the network they share. Edges sit in one
+//                           address on the network they share. An edge between two services
+//                           on one device goes to the address its head binds, loopback for
+//                           `*`. Edges sit in one
 //                           subgraph per protocol, named after it, which also sets its colour
 //                           and line style. Services compiled into one program share memory
 //                           rather than a network: their edges run title to title, in
@@ -74,32 +76,19 @@ digraph clockwork {
         chaos_pi_watchdog [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>4g-watchdog</b></td></tr>
         </table>>];
-    }
-
-    subgraph cluster_memory_pi {
-        label=<<b>memory-pi</b><br align="left"/>wlan0 10.0.10.3<br align="left"/>>;
-        labelloc="b";
-        labeljust="l";
-
-        node [shape=plain];
-
-        memory_pi_mosquitto [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+        chaos_pi_mosquitto [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>mosquitto</b></td></tr>
-            <tr><td port="mqtt">MQTT tcp *:1883</td></tr>
+            <tr><td port="mqtt">MQTT tcp lo:1883</td></tr>
         </table>>];
-        memory_pi_memory [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+        chaos_pi_memory [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>memory</b></td></tr>
-            <tr><td port="osc">OSC udp wlan0:9001</td></tr>
+            <tr><td port="osc">OSC udp wlan0:9002</td></tr>
         </table>>];
-        memory_pi_greptime [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+        chaos_pi_greptime [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>greptime</b></td></tr>
             <tr><td port="http">HTTP tcp lo:4000</td></tr>
             <tr><td port="grpc">gRPC tcp lo:4001</td></tr>
             <tr><td port="mysql">MySQL tcp lo:4002</td></tr>
-        </table>>];
-        memory_pi_grafana [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>grafana</b></td></tr>
-            <tr><td port="http">HTTP tcp lo:3000</td></tr>
         </table>>];
     }
 
@@ -128,9 +117,6 @@ digraph clockwork {
 
         mac_qlc [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>QLC+</b></td></tr>
-        </table>>];
-        mac_browser [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>browser</b></td></tr>
         </table>>];
         mac_mqttanalyzer [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
             <tr><td port="title"><b>MQTTAnalyzer</b></td></tr>
@@ -167,10 +153,10 @@ digraph clockwork {
     subgraph osc {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
-        wrist_firmware:title -> memory_pi_memory:osc     [xlabel="OSC"];
-        wrist_dendril:title  -> memory_pi_memory:osc     [xlabel="OSC"];
-        chaos_pi_brain:title -> memory_pi_memory:osc     [xlabel="OSC"];
-        chaos_pi_face:title  -> memory_pi_memory:osc     [xlabel="OSC"];
+        wrist_firmware:title -> chaos_pi_memory:osc      [xlabel="OSC"];
+        wrist_dendril:title  -> chaos_pi_memory:osc      [xlabel="OSC"];
+        chaos_pi_brain:title -> chaos_pi_memory:osc      [xlabel="OSC"];
+        chaos_pi_face:title  -> chaos_pi_memory:osc      [xlabel="OSC"];
     }
 
     subgraph in_process {
@@ -180,24 +166,14 @@ digraph clockwork {
 
     subgraph mqtt {
         edge [color="#ff7f0e", fontcolor="#ff7f0e", penwidth=1.5];
-        chaos_pi_stem:title      -> memory_pi_mosquitto:mqtt [xlabel="MQTT"];
-        memory_pi_memory:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, the OSC it receives"];
-        mac_mqttanalyzer:title   -> memory_pi_mosquitto:mqtt [xlabel="MQTT, subscribed, tunnelled over SSH", dir=back];
+        chaos_pi_stem:title      -> chaos_pi_mosquitto:mqtt [xlabel="MQTT"];
+        chaos_pi_memory:title    -> chaos_pi_mosquitto:mqtt [xlabel="MQTT, the OSC it receives"];
+        mac_mqttanalyzer:title   -> chaos_pi_mosquitto:mqtt [xlabel="MQTT, subscribed, tunnelled over SSH", dir=back];
     }
 
     subgraph influx {
         edge [color="#17becf", fontcolor="#17becf", penwidth=1.5];
-        memory_pi_memory:title -> memory_pi_greptime:http [xlabel="InfluxDB line protocol"];
-    }
-
-    subgraph mysql {
-        edge [color="#9467bd", fontcolor="#9467bd", penwidth=1.5];
-        memory_pi_grafana:title -> memory_pi_greptime:mysql [xlabel="MySQL"];
-    }
-
-    subgraph http {
-        edge [color="#d62728", fontcolor="#d62728", penwidth=1.5, style=dashed];
-        mac_browser:title -> memory_pi_grafana:http [xlabel="HTTP, tunnelled over SSH"];
+        chaos_pi_memory:title -> chaos_pi_greptime:http [xlabel="InfluxDB line protocol"];
     }
 
     subgraph wireguard {

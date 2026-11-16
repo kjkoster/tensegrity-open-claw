@@ -1,4 +1,4 @@
-//! What memory-pi is and how it is holding up, read as `fixtures/memory.oscquery.json` names
+//! What the Pi Memory runs on is and how it is holding up, as Stem also reports it, read as `fixtures/memory.oscquery.json` names
 //! it: the shared blocks, `cortex::report`'s, and Memory's own leaves on top of them.
 //!
 //! Every file and tool read here is part of every Pi running Raspberry Pi OS, so a reading that

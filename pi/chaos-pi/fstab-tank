@@ -1,4 +1,4 @@
-# The SSD's line in memory-pi's /etc/fstab. The deploy puts it there, replacing any line that
+# The SSD's line in chaos-pi's /etc/fstab. The deploy puts it there, replacing any line that
 # mounts /tank, and adds nothing else to the file.
 #
 # By label rather than by device, so it mounts whatever the SSD enumerates as. In fstab rather

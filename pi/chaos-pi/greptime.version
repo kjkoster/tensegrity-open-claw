@@ -1,4 +1,4 @@
-# The GreptimeDB release memory-pi runs, and the SHA-256 of its linux-arm64 tarball as published
+# The GreptimeDB release chaos-pi runs, and the SHA-256 of its linux-arm64 tarball as published
 # beside it in the release. No apt source carries GreptimeDB, so the deploy downloads this
 # release itself, only when the installed one differs, and refuses a download whose checksum
 # does not match. A new version is these two lines.

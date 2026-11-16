@@ -1,18 +1,18 @@
 [Unit]
 Description=Tensegrity Stem Health Daemon
-# Ordered after the network so that its goodbye leaves before the network goes. Nothing waits
-# for the broker: a broker that is down must leave Stem running and publishing nothing,
-# because a health daemon that exits when the transport fails is silent in precisely the
-# situation it exists for.
-After=network.target
+# Ordered after the broker and the network so that its goodbye leaves before either goes.
+# Ordered only: nothing waits for the broker, because a broker that is down must leave Stem
+# running and publishing nothing, and a health daemon that exits when the transport fails is
+# silent in precisely the situation it exists for.
+After=network.target mosquitto.service
 
 [Service]
 # Its own venv, not a shared one. Stem must not inherit another daemon's dependencies — it has to
 # keep reporting when that daemon is exactly what has gone wrong.
 ExecStart=/opt/stem/venv/bin/python3 /usr/local/bin/stem.py
-# The broker is Stem's, but runs on memory-pi, at the address it sets itself on the access
-# point. A template: deploy-chaos-pi.sh fills the @…@ placeholders from Stem's MQTT edge in
-# clockwork.dot (clockwork/pi_network.py), and the deploy installs the result.
+# The broker is Stem's, on this Pi, reached over loopback. A template: deploy-chaos-pi.sh fills
+# the @…@ placeholders from Stem's MQTT edge in clockwork.dot (clockwork/pi_network.py), and
+# the deploy installs the result.
 Environment=RIG_MQTT_HOST=@STEM_MQTT_ADDRESS@
 Environment=RIG_MQTT_PORT=@STEM_MQTT_PORT@
 Restart=always

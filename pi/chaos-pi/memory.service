@@ -10,6 +10,11 @@ After=mosquitto.service greptimedb.service
 ExecStart=/usr/local/bin/memory
 Restart=always
 RestartSec=5
+# The brain comes first, then Memory, then GreptimeDB. Behind the brain's frame loop in CPU, and
+# killed before the brain and after GreptimeDB when memory runs out: no memory cap is possible,
+# because the Pi's kernel ships with the memory cgroup controller off.
+Nice=5
+OOMScoreAdjust=200
 
 [Install]
 WantedBy=multi-user.target

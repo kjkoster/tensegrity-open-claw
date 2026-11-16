@@ -1,6 +1,6 @@
-//! Memory: the OSC every device sends to memory-pi, recorded into GreptimeDB and relayed onto
-//! the broker, so a show can be read back afterwards and watched live from anywhere a
-//! subscriber can reach Mosquitto. Its own heartbeat and memory-pi's health go the same way, as
+//! Memory: the OSC every device sends to it on chaos-pi, recorded into GreptimeDB and relayed
+//! onto the broker, so a show can be read back afterwards and watched live from anywhere a
+//! subscriber can reach Mosquitto. Its own heartbeat and the Pi's health go the same way, as
 //! `fixtures/memory.oscquery.json` has them, and so does every device's health, synthesised
 //! from its heartbeat as `fixtures/health.oscquery.json` has it.
 //!

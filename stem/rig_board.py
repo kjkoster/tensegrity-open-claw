@@ -1,5 +1,5 @@
 """What any of the rig's Pis is, and how it is holding up, as Stem reads it on chaos-pi. What
-only chaos-pi has, its modem and access point, stays in Stem. Memory reads memory-pi with
+only chaos-pi has, its modem and access point, stays in Stem. Memory reads the same Pi with
 readers of its own, in Rust, in `memory/src/board.rs`.
 
 Every file and tool read here is part of every Pi running Raspberry Pi OS, so a reader that

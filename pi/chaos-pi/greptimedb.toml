@@ -1,4 +1,4 @@
-# GreptimeDB on memory-pi, standalone. The deploy installs this over /etc/greptimedb/greptimedb.toml,
+# GreptimeDB on chaos-pi, standalone. The deploy installs this over /etc/greptimedb/greptimedb.toml,
 # so a setting changed on the Pi does not survive it. Only what differs from the release's
 # defaults is set here.
 

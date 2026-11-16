@@ -42,12 +42,13 @@ python3 -I clockwork/pi_network.py clockwork.dot chaos_pi "$RENDERED" \
 # The board table: which device each board on the Pi's USB is, by the MAC its chip reports.
 python3 -I clockwork/boards.py clockwork.dot >"$RENDERED/boards"
 
-# --- Build the brain -------------------------------------------------------
+# --- Build the brain and Memory --------------------------------------------
 # Here rather than on the Pi: the Mac builds in seconds what the Pi took minutes over, and the
 # Pi then needs no toolchain, no crate index and no sources. The build reads `clockwork.qxw` and
 # `fixtures/` and resolves the show table, so "save in QLC+, deploy" still gets an edited
-# patch onto the rig. First, so a build that fails leaves the Pi untouched.
-step "build brain for $TARGET"
+# patch onto the rig. The whole workspace, so Memory is built with it. First, so a build that
+# fails leaves the Pi untouched.
+step "build brain and memory for $TARGET"
 cargo build --release --target "$TARGET"
 
 # --- Build the boards' firmware --------------------------------------------
@@ -67,14 +68,17 @@ cp "${WRIST_BUILD_DIR:-target/arduino}/wrist.ino.bin" "$BINARIES/wrist.bin"
 # and the git history all stay on the Mac.
 #
 #   brain/          the binary and its systemd unit
-#   stem/           Stem's daemon, the Python modules every health daemon shares, and their
-#                    unit and requirements; not the `stem` crate, which is built in here
+#   memory/         Memory's binary; its unit is in pi/chaos-pi/
+#   stem/           Stem's daemon, the Python modules every health daemon shares, their
+#                    unit and requirements, and the broker's configuration; not the `stem`
+#                    crate, which is built in here
 #   binaries/       the boards' firmware, one image per device
-#   pi/chaos-pi/    what the deploy installs onto the Pi that belongs to no daemon: the
+#   pi/chaos-pi/    what the deploy installs onto the Pi besides the brain and Stem: the
 #                    uplink watchdog (its script, its unit and its timer), the boot
-#                    configuration, what finds, flashes and reads the boards on its USB, and
-#                    remote-deploy.sh, which does the installing
-#   pi/deploy-lib.sh what both Pis' remote deploys share
+#                    configuration, what finds, flashes and reads the boards on its USB,
+#                    Memory's unit, GreptimeDB's pin, settings and unit, the SSD's fstab line,
+#                    and remote-deploy.sh, which does the installing
+#   pi/deploy-lib.sh what the remote deploy sources
 #   rendered/       what was rendered from the dot above: the access point's and the wired
 #                    segment's profiles, Stem's unit, and the board table
 #
@@ -85,9 +89,10 @@ cp "${WRIST_BUILD_DIR:-target/arduino}/wrist.ino.bin" "$BINARIES/wrist.bin"
 # the owner's alone: the access point's profile holds the WiFi's passphrase.
 step "rsync to $PI:$PI_DIR"
 # rsync creates only the last directory of a destination, so a freshly set-up Pi needs these.
-ssh "$PI" "mkdir -p $PI_DIR/brain $PI_DIR/binaries $PI_DIR/stem $PI_DIR/pi/chaos-pi $PI_DIR/rendered"
+ssh "$PI" "mkdir -p $PI_DIR/brain $PI_DIR/memory $PI_DIR/binaries $PI_DIR/stem $PI_DIR/pi/chaos-pi $PI_DIR/rendered"
 rsync -az --checksum \
     "brain/brain.service" "target/$TARGET/release/brain" "$PI:$PI_DIR/brain/"
+rsync -az --checksum "target/$TARGET/release/memory" "$PI:$PI_DIR/memory/"
 rsync -az --checksum --delete "$BINARIES/" "$PI:$PI_DIR/binaries/"
 rsync -az --checksum --delete \
     --exclude=src --exclude=Cargo.toml --exclude=target --exclude=__pycache__ \

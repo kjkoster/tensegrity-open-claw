@@ -244,8 +244,8 @@ fn session(
     // Half the keepalive: the broker drops a client at 1.5× the interval it was given, so
     // pinging twice per interval means one lost ping is not a disconnection.
     let tick = Duration::from_secs(u64::from(stem::KEEPALIVE_S) / 2);
-    // The client's side of the same rule. A broker across the WiFi can vanish without a word —
-    // memory-pi losing power — and writes into its dead connection keep succeeding into the
+    // The client's side of the same rule. A broker can vanish without a word — one across a
+    // network losing power — and writes into its dead connection keep succeeding into the
     // socket buffer for many minutes. Each ping's answer is read at the next ping's drain, so a
     // slow link costs nothing; two pings in a row with nothing read back mean the broker has
     // gone, and the session ends so the reconnect can begin.

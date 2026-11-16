@@ -362,9 +362,15 @@ def bound(dot, nets, node, port):
 
 def reach(dot, nets, tail, tail_port, head, head_port):
     """The address and port an edge from `tail` to `head:head_port` sends to: the head's
-    listener, on the one network the two devices share."""
+    listener, on the one network the two devices share. Between two services on one device, it
+    is where the head binds, over loopback where that is the wildcard: no network is crossed."""
     if tail_port != "title":
         fail(f"{dot.path}: the edge from {tail} must run from its title")
+    if dot.device_of(tail) == dot.device_of(head):
+        address, number = bound(dot, nets, head, head_port)
+        if address == ipaddress.IPv4Address("0.0.0.0"):
+            address = ipaddress.IPv4Address("127.0.0.1")
+        return address, number
     ours = {net for _, net in addresses(dot, dot.device_of(tail), nets).values()}
     theirs = {net for _, net in addresses(dot, dot.device_of(head), nets).values()}
     shared = sorted(ours & theirs)

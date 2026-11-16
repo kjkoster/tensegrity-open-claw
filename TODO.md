@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: Dendril first, then Monday's test, then Wrist's Run, then soldering, then clean up, then Wrist's sensing
+it: Memory onto chaos-pi first, then Dendril, then Monday's test, then Wrist's Run, then soldering, then clean up, then Wrist's sensing
 and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -10,6 +10,23 @@ Wrist's open decisions are steps here, and so is the design of what its firmware
 yet.
 
 ---
+
+## Memory onto chaos-pi
+
+memory-pi died again; it is decommissioned and everything on it but Grafana moves to chaos-pi.
+
+- `clockwork.dot`: Mosquitto, Memory and Greptime in chaos-pi, Memory's OSC on 9002, the
+  brain keeping 9001; memory-pi gone.
+- On chaos-pi the brain comes first, then Memory, then Greptime; DESIGN.md §3.9 rewritten to
+  that, and its case for a Pi of its own dropped.
+- Memory's board reporting kept as it is, though Stem reports the same Pi.
+- memory-pi's deploy folded into chaos-pi's; `deploy-memory-pi.sh` and `pi/memory-pi/` gone,
+  except its Grafana files, which stay.
+- The brain and Stem ordered after the local broker, so their goodbyes still leave.
+- The SSD moved to chaos-pi's hub; room for Greptime on chaos-pi's root partition checked.
+- Deployed; Wrist reflashed; the recordings so far read back.
+- README, SHOW.md, OWNED-DEVICES.md (memory-pi to the spares) and Memory's fixture description
+  brought in line.
 
 ## Dendril, the sensing
 
@@ -96,11 +113,12 @@ The dashboard comes first because it is how everything after it is read.
 - Decide whether Wrist serves its OSCQuery file over HTTP and mDNS.
 - An OSC event for telemetry sent on change, beside `connect`, `data` and a rate: states are
   pushed at their rate today whether or not they changed, which is wasteful.
+- Grafana has no host since memory-pi went: decide where it runs, against Greptime on
+  chaos-pi, and deploy it from `pi/memory-pi/grafana/` there.
 - Provision the PoC dashboard from `pi/memory-pi/grafana/headless-hug-poc.json` with
   `allowUiUpdates: true`, so panels can be edited in the UI and exported back to the file;
-  `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
-  results and protections, `/brain/show` and `/brain/run` as annotations. Grafana stays on
-  loopback; the Mac reaches it over the SSH jump, now across the access point.
+  Grafana's deploy installs the provider and the file. Wrist's transitions, pluck
+  results and protections, `/brain/show` and `/brain/run` as annotations.
 - `wrist/` firmware: the lock-in running; the events; LittleFS.
 - Once the HX711 reads right at 10 samples a second, and not before, in case the board does
   not survive it: lift the chip's RATE leg (pin 15) off its ground pad and tie it to DVDD
@@ -163,7 +181,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 ## The cabinet, alongside Wrist and the brain
 
-- Reorganise: the two Pis, the hub, the modem, the SSD, the supply and its terminals each in
+- Reorganise: the Pi, the hub, the modem, the SSD, the supply and its terminals each in
   their place; 5 V, 12 V and 38 V runs apart; signal leads away from mains. Photograph it for
   README's *Attached hardware*.
 
@@ -174,7 +192,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 
 ## Commissioning the whole
 
-- Power the cabinet up cold with nobody touching anything: both Pis, broker, Memory, Wrist on
+- Power the cabinet up cold with nobody touching anything: chaos-pi, broker, Memory, Wrist on
   the AP in Blackout, dashboard live, the brain in `await_estop` with the rig dark. Then a press
   shorter than the hold, released: still dark; a press held past it, released: the show starts.
 - Press the e-stop in every state: Wrist releases at once; release: Wrist takes up whatever

@@ -5,7 +5,7 @@
     "CLOCKWORK_CHAOS_IMPLEMENTS": ["health", "sys", "wifi"]
   },
   "FULL_PATH": "/",
-  "DESCRIPTION": "Memory, the daemon on memory-pi that records the OSC every device sends into GreptimeDB and relays it onto MQTT. It hands its own OSC to itself rather than sending it, so it is recorded while the WiFi is down. Sent on connect means once, as soon as the clock has synchronised, which is when it can be recorded.",
+  "DESCRIPTION": "Memory, the daemon on chaos-pi that records the OSC every device sends into GreptimeDB and relays it onto MQTT. It hands its own OSC to itself rather than sending it, so it is recorded while the WiFi is down. Sent on connect means once, as soon as the clock has synchronised, which is when it can be recorded.",
   "CONTENTS": {
     "sys": {
       "FULL_PATH": "/sys",
@@ -13,7 +13,7 @@
       "CONTENTS": {
         "memory": {
           "FULL_PATH": "/sys/memory",
-          "DESCRIPTION": "memory-pi, and how it is holding up.",
+          "DESCRIPTION": "The Pi Memory runs on, and how it is holding up, as Memory reads it.",
           "CONTENTS": {
             "ram": {
               "FULL_PATH": "/sys/memory/ram",
