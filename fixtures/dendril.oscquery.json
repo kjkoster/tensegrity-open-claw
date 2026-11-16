@@ -1,0 +1,110 @@
+{
+  "HOST_INFO": {
+    "NAME": "dendril",
+    "OSC_TRANSPORT": "UDP",
+    "CLOCKWORK_CHAOS_IMPLEMENTS": ["health", "sys", "wifi"]
+  },
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "dendril": {
+      "FULL_PATH": "/dendril",
+      "DESCRIPTION": "Dendril, the sensing: the ADXL345 accelerometer on the structure, on a cable to Wrist's board, and the load cell under Wrist's motor with its HX711, reading the wire's tension. Compiled into Wrist's firmware today, it reports as a device of its own, so it can move. It takes no DMX, so it has no fixture definition and no place in the QLC+ workspace. Out only: nothing is received over OSC. Each reading is one bundle of its data leaves; the two chips sample on clocks of their own, so each has its readings.",
+      "CONTENTS": {
+        "accel_x": {
+          "FULL_PATH": "/dendril/accel_x",
+          "DESCRIPTION": "The acceleration along the chip's x axis, as read: ±2 g at full resolution.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -512, "MAX": 511 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "accel"
+        },
+        "accel_y": {
+          "FULL_PATH": "/dendril/accel_y",
+          "DESCRIPTION": "The acceleration along the chip's y axis, as read: ±2 g at full resolution.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -512, "MAX": 511 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "accel"
+        },
+        "accel_z": {
+          "FULL_PATH": "/dendril/accel_z",
+          "DESCRIPTION": "The acceleration along the chip's z axis, as read: ±2 g at full resolution.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -512, "MAX": 511 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "accel"
+        },
+        "accel_sample_n": {
+          "FULL_PATH": "/dendril/accel_sample_n",
+          "DESCRIPTION": "The sample's number, counted from the accelerometer's first sample since boot: the chip's own clock, so a gap is a sample lost.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "accel"
+        },
+        "accel_sampled_ms": {
+          "FULL_PATH": "/dendril/accel_sampled_ms",
+          "DESCRIPTION": "When the accelerometer took the sample, on the board's clock since boot: worked out from the sample's number and a running fit of the chip's clock against the board's, because the samples arrive in batches from the chip's FIFO and their time of arrival says nothing of when they were taken. Memory records the sample at this time.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "UNIT": ["ms"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "accel",
+          "CLOCKWORK_CHAOS_TIME": true
+        },
+        "tension_raw": {
+          "FULL_PATH": "/dendril/tension_raw",
+          "DESCRIPTION": "Each HX711 reading as read.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "tension"
+        },
+        "tension_sampled_ms": {
+          "FULL_PATH": "/dendril/tension_sampled_ms",
+          "DESCRIPTION": "When the HX711 reading was read, on the board's clock since boot. Memory records the reading at this time.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "UNIT": ["ms"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "data",
+          "CLOCKWORK_CHAOS_READING": "tension",
+          "CLOCKWORK_CHAOS_TIME": true
+        },
+        "tension_newtons": {
+          "FULL_PATH": "/dendril/tension_newtons",
+          "DESCRIPTION": "The wire's tension, from the raw reading through the coded-in tare and scale.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["N"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "tension_tare": {
+          "FULL_PATH": "/dendril/tension_tare",
+          "DESCRIPTION": "The coded-in tare: the raw reading with no tension on the wire.",
+          "TYPE": "i",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": -8388608, "MAX": 8388607 }],
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+        },
+        "tension_scale": {
+          "FULL_PATH": "/dendril/tension_scale",
+          "DESCRIPTION": "The coded-in scale: the tension one count above the tare stands for, so the tension is (raw − tare) · scale. NaN until it is measured.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["N/count"],
+          "CLOCKWORK_CHAOS_ON_EVENT": "connect"
+        }
+      }
+    }
+  }
+}

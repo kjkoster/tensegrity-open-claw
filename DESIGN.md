@@ -404,7 +404,7 @@ sent together by sharing a rate, not by sharing a message.
 | attribute | sent | for |
 |---|---|---|
 | `"CLOCKWORK_CHAOS_ON_EVENT": "connect"` | each time the device joins the WiFi; a Pi program at start, Memory once its clock has synchronised | what does not change while it runs: the patch, the MAC, the reset reason |
-| `"CLOCKWORK_CHAOS_ON_EVENT": "data"` | once, when a new reading arrives | a sensor with a rate of its own, so each sample is sent once and none is repeated |
+| `"CLOCKWORK_CHAOS_ON_EVENT": "data"` | once, when a new reading arrives, the reading's leaves together | a sensor with a rate of its own, so each sample is sent once and none is repeated |
 | `"CLOCKWORK_CHAOS_AT_RATE_HZ": <n>` | `n` times a second | a state, so a listener that starts late or loses a packet is one period behind |
 
 On connect, not at boot: a device boots and joins in seconds, before the Pi that listens has
@@ -412,7 +412,15 @@ started, and a message sent to nobody is gone. OSC has no retention, so a listen
 while the device stays connected hears the connect messages only at its next connect.
 
 Leaves at the same rate go out in one bundle, so a bundle is never declared: it follows from
-the rate.
+the rate. A `data` leaf names its reading with `"CLOCKWORK_CHAOS_READING": "<name>"`, since a
+device may have sensors on clocks of their own; a reading's leaves go out as one bundle, one
+bundle per reading, and Memory records the bundle as one row, so a sample's values stay
+together. Readings that arrive together may be nested in one packet, each still its own bundle.
+
+**A reading's time, where its arrival will not do.** A sensor whose samples arrive in batches
+says when each was taken: one of its `data` leaves, in milliseconds on the device's clock since
+boot, carries `"CLOCKWORK_CHAOS_TIME": true`, and Memory records the row at that time, not at
+its arrival. It is the one value a device works out for telemetry (§3.10).
 
 ---
 
@@ -451,7 +459,7 @@ workspace patches them.
 | the ponytail (§3.7) | no: `last-version-with-ponytails` |
 | the mouth (§3.8) | no: `last-version-with-mouth` |
 | moving heads: their aiming and the QLC+ pointing presets (§1.1) | no: `last-version-with-mouth` |
-| Wrist (§3.10), and Sole in its firmware | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json`, `fixtures/sole.oscquery.json` |
+| Wrist (§3.10), and Dendril in its firmware | `wrist/`, `fixtures/wrist.qxf`, `fixtures/wrist.oscquery.json`, `fixtures/dendril.oscquery.json` |
 | Wrist's OSC in the brain, and the pluck it is sent | `brain/src/wrist.rs`, `brain/src/wrist_show.rs`, `show.rs`; decoders by `cortex-build` through `clockwork/oscquery.py` |
 
 ### 3.1 Stem
@@ -801,11 +809,18 @@ closed-loop stepper reeling the wire through a series spring, and a load cell un
 on one board that follows the universe. Its firmware is C++ on the Arduino core for the
 ESP8266, which the chip forces (§2.4).
 
-**Sole is the load cell, a device of its own.** It is compiled into Wrist's firmware, as the
-face is into the brain, and reports as a device of its own, `fixtures/sole.oscquery.json`, with
-its own `sys`, `wifi` and `health`, so it can move to a board of its own. It takes no DMX, so it
-has no fixture definition and no place in the workspace. The firmware's encoders cover both
-devices' files, in one set of bundles.
+**Dendril is the sensing, a device of its own.** The accelerometer on the structure, on a cable
+to Wrist's board, and the load cell under the motor, reading the wire's tension: one component
+sensing the sway two ways, so each signal checks the other. It is compiled into Wrist's
+firmware, as the face is into the brain, and reports as a device of its own,
+`fixtures/dendril.oscquery.json`, with its own `sys`, `wifi` and `health`, so it can move to a
+board of its own. It takes no DMX, so it has no fixture definition and no place in the
+workspace. The firmware's encoders cover every device's file, in one set of bundles.
+
+**The accelerometer's samples are timed by its own clock.** The chip samples into its FIFO and is
+read in batches, so a sample's time of reading says little of when it was taken. Each is
+numbered as it comes out, and the chip's clock is fitted against the board's, so each sample's
+time follows from its number (`wrist/dendril.h`).
 
 **A fixture, not a motor on the Pi.** The universe is the one way anything on the rig is told to
 move, which lets the e-stop, a takeover and signal loss cover the drive with no rule of their
@@ -818,8 +833,8 @@ motor position into force, so the motor drives the structure's own mode and the 
 is the control; a stiff line would fight the structure instead. Run drives the wire in a sine
 at the frequency and amplitude the frame sets, open loop: the desk finds the resonance by eye.
 
-**Closing the loop in the fixture is the aim, not built.** An accelerometer on the structure,
-wired to the board, and an oscillator phase-locked to the sway would time the drive on the
+**Closing the loop in the fixture is the aim, not built.** Dendril on the structure, wired to
+the board, and an oscillator phase-locked to the sway would time the drive on the
 board itself, so nothing in the phase loop crosses the network, with the drive's phase learned
 while it runs. The ESP8266 has no Bluetooth, which is why the accelerometer is to be wired
 rather than send from a radio of its own.
@@ -846,7 +861,7 @@ No mode needs a home: each counts from where the shaft is as it begins.
 
 **The alarm is the motor's only word.** An integrated closed-loop stepper reports nothing but a
 latching alarm, which clears when the pulses stop or the power is cycled: no encoder output, no
-in-position signal. The other evidence is Sole's, the wire's tension. Both are reported, not
+in-position signal. The other evidence is Dendril's, the wire's tension. Both are reported, not
 acted on: the desk decides.
 
 **Step pulses from a timer NMI.** The ESP8266 has one core, shared with WiFi; pulses timed in
@@ -855,6 +870,7 @@ makes them from a velocity the control tick sets.
 
 **Telemetry is OSC, out only.** Wrist sends its state and raw inputs as OSC, whether a pluck
 can start and Run's phase among them. Nothing is computed for telemetry; what can be derived is
-derived from the recording. The address space is `fixtures/wrist.oscquery.json` and Sole's
-`fixtures/sole.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
+derived from the recording, save the time of Dendril's samples, which the recording cannot
+recover (§2.7). The address space is `fixtures/wrist.oscquery.json` and Dendril's
+`fixtures/dendril.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
 coded in, worked out from raw readings in the telemetry.

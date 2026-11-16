@@ -12,5 +12,5 @@ WRIST_BUILD_DIR="${WRIST_BUILD_DIR:-$(cd "$(dirname "$0")/.." && pwd)/target/ard
 cd "$(dirname "$0")"
 
 python3 -I generate.py ../clockwork.dot ../clockwork.qxw ../fixtures/wrist.qxf \
-    ../fixtures/wrist.oscquery.json ../fixtures/sole.oscquery.json generated.h
+    ../fixtures/wrist.oscquery.json ../fixtures/dendril.oscquery.json generated.h
 arduino-cli compile --profile nodemcu --warnings all --output-dir "$WRIST_BUILD_DIR" .

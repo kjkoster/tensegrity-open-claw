@@ -1,7 +1,7 @@
 # TODO — the Headless Hug proof of concept
 
 The work between the code as it is and the show in [`SHOW.md`](SHOW.md), in the order to do
-it: Monday's test first, then Wrist's Run, then soldering, then clean up, then Wrist's sensing
+it: Dendril first, then Monday's test, then Wrist's Run, then soldering, then clean up, then Wrist's sensing
 and telemetry, then its motor under a console, then the brain's programme;
 commissioning second to last, results and clean-up last. The full-scale rig is not here: it
 gets a list of its own. Steps only; a step that is done is deleted. Where a step changes a design, the change goes in
@@ -10,6 +10,28 @@ Wrist's open decisions are steps here, and so is the design of what its firmware
 yet.
 
 ---
+
+## Dendril, the sensing
+
+The target: E0, Dendril's trace on the dashboard from Wrist's board, the motor in Blackout.
+
+- Wrist's firmware, with Dendril in it, flashed; Dendril's readings seen arriving.
+- Redesign Memory to write each OSC bundle as one GreptimeDB row, not a row per message; a
+  `data` bundle at its `CLOCKWORK_CHAOS_TIME` leaf's time, turned into wall time by one offset
+  per boot of the board.
+- Review the OSCQuery files for their bundles: which leaves go out together, and whether that
+  is the row each should be recorded in.
+- Design how OSC maps onto GreptimeDB's tags: today the only tag is `topic`, the address after
+  its first level.
+- Timestamps aligned with wall-clock time: a board with no clock of its own synchronised still
+  has its data written at a time as close as possible to when it was taken.
+- Buy: Velcro dots; a luggage scale and string.
+- A Dendril panel on the PoC dashboard: the three axes and the tension.
+- E0 from `SHOW.md` §4, its numbers recorded by run; the placement decided; the static pull
+  test done.
+- Design Dendril's sway detection: the same calculation on the accelerometer and on the
+  tension, each checking the other; its phase, frequency and amplitude, read by Wrist in memory
+  and sent over OSC for the face's left lamp.
 
 ## Test and dinner on Monday
 
@@ -48,7 +70,7 @@ QLC+ faders under takeover, its frequency found by hand.
   moved to 5 V with a 1N4148 in series with each cathode, so the step
   pulses' current is not on the radio's rail; or, short of that, 10 µF and 100 nF at the common
   anode where the cable leaves. Read the refused count in the `status:` lines before and after.
-- Wire the home switch and the ADXL345 on the pins in `SHOW.md` §3.1.
+- Wire the home switch on the pin in `SHOW.md` §3.1.
 - If the e-stop button takes a third contact block: fit it, and a relay on the motor's 38 V
   feed from it, its contacts rated for at least 50 V DC, so "limp when pressed" is hardware as well as DMX.
 
@@ -63,12 +85,11 @@ QLC+ faders under takeover, its frequency found by hand.
 - `ngrep` installed on `chaos-pi` by its deploy, for watching Wrist's OSC arrive:
   `sudo ngrep -d wlan0 -W byline '' 'udp and src host 10.0.10.4'`.
 
-## Wrist's board: sensing and telemetry
+## Wrist's board: telemetry
 
-The target: E0, the accelerometer's trace on the dashboard from Wrist's board, the motor in
-Blackout. The dashboard comes first because it is how everything after it is read.
+The dashboard comes first because it is how everything after it is read.
 
-- Buy: a microswitch for home; Velcro dots; a luggage scale and string.
+- Buy: a microswitch for home.
   Optional: a spare NC contact block for the e-stop button and a relay module for the motor
   feed, contacts rated for at least 50 V DC.
 - Wrist's, the brain's, the face's and Memory's OSC in the `rig` database and on the broker.
@@ -80,15 +101,10 @@ Blackout. The dashboard comes first because it is how everything after it is rea
   `deploy-memory-pi.sh` installs the provider and the file. Wrist's transitions, pluck
   results and protections, `/brain/show` and `/brain/run` as annotations. Grafana stays on
   loopback; the Mac reaches it over the SSH jump, now across the access point.
-- `wrist/` firmware, sensing half: the ADXL345 over I²C, ±2 g full resolution, 200 Hz output
-  read at 100 Hz in one 6-byte burst (not SPI: its pins are taken, and a fast four-wire bus
-  down a cable to a moving structure is the fragile choice); the lock-in running; the waveform
-  bundle and the events; LittleFS.
+- `wrist/` firmware: the lock-in running; the events; LittleFS.
 - Once the HX711 reads right at 10 samples a second, and not before, in case the board does
   not survive it: lift the chip's RATE leg (pin 15) off its ground pad and tie it to DVDD
   (pin 16), for 80 a second; confirm the readings again.
-- E0 from `SHOW.md` §4, its numbers recorded by run; the placement decided; the static pull
-  test done.
 
 ## Wrist's motor, driven from QLC+
 
@@ -104,7 +120,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
   - *Position.* Positive reels in; 0 at the home switch, at the pay-out end with the bands
     still stretched; the drive centred on a rest position between it and the travel's end,
     so the wire is never slack.
-  - *Sway signal.* One ADXL345 axis, the one with the largest ring-down, picked at a pluck,
+  - *Sway signal.* One of Dendril's axes, the one with the largest ring-down, picked at a pluck,
     through a slow DC high-pass and nothing else: the lock-in is the band-pass.
   - *Lock-in.* `I = LPF(s·cos φ)`, `Q = LPF(s·sin φ)` over 3–5 cycles; `θ = atan2(Q, I)` the
     sway's phase against the oscillator, `a = 2√(I² + Q²)` its amplitude; worked out at
@@ -126,8 +142,8 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
     defaults only for a board with nothing kept; all reported over OSC, so the defaults are
     updated by hand.
   - *Reported.* Homed and locked; the oscillator's ω and φ, the PLL's error, the sway's
-    amplitude, the drive's amplitude and phase offset, the regime, the shaft's position; the
-    accelerometer's axes and the sway on each reading; the transitions and ring-down results
+    amplitude, the drive's amplitude and phase offset, the regime, the shaft's position; the sway
+    on each of Dendril's readings; the transitions and ring-down results
     as they happen.
 - Measure the rest position, the travel and the tension limits for the band set; into the
   firmware's constants.
@@ -136,7 +152,7 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: test mode disabled, left in the code, as the calendar is.
-- Brain: the OSC receiver takes Wrist's waveform bundle as well.
+- Brain: the OSC receiver takes Dendril's as well.
 - The Director's states — `armed_pluck`, `pluck`, `armed_run`, `run` — with the button rules
   of `SHOW.md` §2.2, `/brain/run`, and the lamp patterns of §2.3, Run's two sines included;
   the experiments' amplitudes and durations as constants in `brain/src/show.rs`, named, with

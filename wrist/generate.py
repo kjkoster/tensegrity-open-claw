@@ -11,7 +11,7 @@ Each fact is read from the one file that records it, and only what the firmware 
                          patched in.
   wrist.qxf              that mode's channels, in order, and each channel's bands.
   device.oscquery.json   every OSC address the firmware sends, and how: the encoders. One file
-                         per device the firmware is, Wrist's and Sole's, their leaves in one
+                         per device the firmware is, Wrist's and Dendril's, their leaves in one
                          set of bundles: every address names its device.
 
 Fails, naming the file and what is wrong, rather than writing a header from a guess. The header
@@ -235,12 +235,40 @@ def bundle(struct, fn, group, out):
     out.append("")
 
 
+def reading_bundle(struct, group, out):
+    """A reading's struct, `write<struct>`, which writes it into a writer as one bundle, so
+    several readings can be nested in one packet, and `encode<struct>`, one reading a packet."""
+    out.append(f"struct {struct} {{")
+    for leaf in group:
+        out.append(f"  {declare(cpp_type(leaf), leaf['name'])};")
+    out.append("};")
+    out.append("")
+    out.append(f"inline void write{struct}(Writer &w, const {struct} &v) {{")
+    out.append("  w.beginBundle();")
+    for leaf in group:
+        out.append("  {")
+        out.append("    const size_t at = w.beginElement();")
+        out += ["    " + line for line in write_leaf(leaf, f"v.{leaf['name']}")]
+        out.append("    w.endElement(at);")
+        out.append("  }")
+    out.append("}")
+    out.append("")
+    out.append(f"inline size_t encode{struct}(const {struct} &v, uint8_t *buf, size_t cap) {{")
+    out.append("  Writer w(buf, cap);")
+    out.append(f"  write{struct}(w, v);")
+    out.append("  return w.length();")
+    out.append("}")
+    out.append("")
+
+
 def encoders(paths):
     found = []
     for path in paths:
+        device = oscquery.load(path).get("HOST_INFO", {}).get("NAME")
         # Only what the firmware sends: Memory sends the rest of each device's health.
         leaves = [leaf for leaf in oscquery.leaves(path) if not leaf["sent_by"]]
         for leaf in leaves:
+            leaf["device"] = device
             for v in leaf["values"] or []:
                 if v in KEYWORDS:
                     fail(f"{path}: {leaf['path']}: the value {v!r} cannot name a C++ enumerator")
@@ -268,14 +296,15 @@ def encoders(paths):
         out.append(f"constexpr uint32_t AT_{name.upper()}_PERIOD_US = {round(1e6 / hz)};")
         bundle(f"At{name.capitalize()}", f"encodeAt{name.capitalize()}", group, out)
 
+    readings = []
     for leaf in (l for l in found if l["how"] == "data"):
-        out.append(f"// {leaf['path']}: one message, sent once when a new reading arrives.")
-        out.append(f"inline size_t encode{camel(leaf['name'])}({declare(cpp_type(leaf), 'value')}, uint8_t *buf, size_t cap) {{")
-        out.append("  Writer w(buf, cap);")
-        out += ["  " + line for line in write_leaf(leaf, "value")]
-        out.append("  return w.length();")
-        out.append("}")
-        out.append("")
+        key = (leaf["device"], leaf["reading"])
+        if key not in readings:
+            readings.append(key)
+    for device, reading in readings:
+        group = [l for l in found if l["how"] == "data" and (l["device"], l["reading"]) == (device, reading)]
+        out.append(f"// {device}'s {reading} reading: sent once, as one bundle, when it is taken.")
+        reading_bundle(camel(f"{device}_{reading}"), group, out)
     out.append("}  // namespace osc")
     return out
 

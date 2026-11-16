@@ -50,8 +50,9 @@ def is_shared(path):
 
 
 def leaves(path):
-    """Every leaf of the file at `path`, as dicts of `path`, `name`, `type`, `how`, `values` and
-    `sent_by`: the device that sends it, where that is not the file's own.
+    """Every leaf of the file at `path`, as dicts of `path`, `name`, `type`, `how`, `values`,
+    `sent_by`: the device that sends it, where that is not the file's own; and for a `data`
+    leaf, `reading`, the reading it is sent with, and `time`, whether it is the reading's time.
 
     Each shared file the device's HOST_INFO lists under CLOCKWORK_CHAOS_IMPLEMENTS is read from
     beside it, `{device}` replaced by the device's name, and merged into its tree."""
@@ -104,6 +105,21 @@ def walk(file, node, path, key, found):
             fail(f"{file}: {full} is sent on {how!r}; the events are connect and data")
     elif not isinstance(how, (int, float)) or isinstance(how, bool) or how <= 0:
         fail(f"{file}: {full} has a rate of {how!r}")
+    # A `data` leaf names the reading it belongs to: the leaves of one reading go out as one
+    # bundle. One of them may be the reading's time, in milliseconds on the device's clock.
+    reading = node.get("CLOCKWORK_CHAOS_READING")
+    time = node.get("CLOCKWORK_CHAOS_TIME", False)
+    if how == "data":
+        if not isinstance(reading, str) or not VALUE.fullmatch(reading):
+            fail(f"{file}: {full} is sent on data, so it names its reading, as a lower-case word")
+    elif reading is not None or "CLOCKWORK_CHAOS_TIME" in node:
+        fail(f"{file}: {full} is not sent on data, so it has no reading and no time")
+    if time is not True and "CLOCKWORK_CHAOS_TIME" in node:
+        fail(f"{file}: {full} has CLOCKWORK_CHAOS_TIME {time!r}; it is true or absent")
+    if time and kind != "i":
+        fail(f"{file}: {full} is a reading's time, so its TYPE is i, in milliseconds")
+    if time and any(f["time"] and f["reading"] == reading for f in found):
+        fail(f"{file}: {full} is a second time for the reading {reading!r}")
     values = None
     for r in node.get("RANGE", []):
         if kind == "s" and "VALS" in r:
@@ -114,7 +130,7 @@ def walk(file, node, path, key, found):
             if len(set(values)) != len(values):
                 fail(f"{file}: {full} lists a value twice")
     found.append({"path": full, "name": full.strip("/").replace("/", "_"), "type": kind, "how": how, "values": values,
-                  "sent_by": node.get("CLOCKWORK_CHAOS_SENT_BY")})
+                  "sent_by": node.get("CLOCKWORK_CHAOS_SENT_BY"), "reading": reading, "time": time})
 
 
 def main(path):

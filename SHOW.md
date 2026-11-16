@@ -100,7 +100,7 @@ it is driven at any amplitude, and in Manual, which the programme never sends.
 **In Run, the two lamps plot the two waveforms side by side.** The right lamp shows the
 motor's phase, (1 + sin φ)/2, from `/wrist/run/phase` in each state bundle as it arrives,
 whenever `/wrist/mode` is `run`. The left, once the accelerometer is in, the measured sway,
-(1 + sway/a)/2, from the waveform bundle as it arrives. While Wrist's OSC is stale, both lamps
+(1 + sway/a)/2, from Dendril's readings as they arrive. While Wrist's OSC is stale, both lamps
 are at steady 100%.
 
 ### 2.4 The e-stop, signal loss, and what the drive does
@@ -147,7 +147,8 @@ gets the relay regardless.
 
 **Board.** Wrist's board, as `OWNED-DEVICES.md` has it, on the pins `wrist/wrist.ino` names.
 The home switch goes on GPIO13 (D7), normally open to ground with the internal pull-up, and
-the ADXL345 on GPIO5 and GPIO4 (D1 and D2, SCL and SDA), I²C at 400 kHz; the boot-strapping
+Dendril's ADXL345 on GPIO5 and GPIO4 (D1 and D2, SCL and SDA), I²C at 100 kHz, which a cable
+of a metre or two carries where 400 kHz's edges are too fast for it; the boot-strapping
 pins, GPIO0, GPIO2 and GPIO15, take neither. The sensors run on the board's 3.3 V; the motor
 has its own supply, with no ground tie: the optos are the only link. The ADXL345's cable runs
 apart from the motor's.
@@ -165,14 +166,20 @@ shaft along the cell's axis so the cell reads its tension; nothing is fixed to t
 but the wire and the accelerometer.
 
 **Load cell.** Calibrated once per rig, in Blackout: unhook the wire and average
-`/sole/raw` from the recording, the tare; hang a known mass `m` and average again, so
+`/dendril/tension_raw` from the recording, the tare; hang a known mass `m` and average again, so
 the scale is `m·g/(raw − tare)` newtons per count. Both are coded into the firmware.
 
-### 3.2 The accelerometer
+### 3.2 Dendril, the sensing
 
-The accelerometer (`OWNED-DEVICES.md`) Velcroed to the model, on a cable to Wrist's board run
-apart from the motor's. Wrist picks the sway axis at each Pluck, so its orientation does not
+Dendril is the accelerometer (`OWNED-DEVICES.md`) and the load cell of §3.1, compiled into
+Wrist's firmware and reporting as a device of its own. The accelerometer is Velcroed to the
+model, on a cable to Wrist's board run apart from the motor's. Wrist picks the sway axis at each Pluck, so its orientation does not
 matter. The three placements tried in E0 are the top node, a mid-height node, and a strut.
+
+**Wiring.** Four cores: 3V3 to VCC, GND, SCL and SDA, to the board's pins in §3.1. At the
+breakout, CS tied to VCC, which selects I²C, and SDO to GND, which sets its address; both
+there rather than down the cable. INT1 and INT2 are left off: the board has no pin free for
+them, and the chip's FIFO holds the samples until they are read.
 
 ### 3.3 Memory and the dashboard
 

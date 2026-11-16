@@ -37,7 +37,9 @@
 //                           one edge per sender and recipient, sent to the recipient's
 //                           address on the network they share. Edges sit in one
 //                           subgraph per protocol, named after it, which also sets its colour
-//                           and line style.
+//                           and line style. Services compiled into one program share memory
+//                           rather than a network: their edges run title to title, in
+//                           `in_process`, and no generator reads them.
 
 digraph clockwork {
     graph [rankdir=LR, forcelabels=true, fontname="Helvetica", nodesep=0.3, ranksep=1.2];
@@ -112,8 +114,8 @@ digraph clockwork {
             <tr><td port="title"><b>firmware</b></td></tr>
             <tr><td port="sacn">sACN udp wifi:5568</td></tr>
         </table>>];
-        wrist_sole [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
-            <tr><td port="title"><b>sole</b></td></tr>
+        wrist_dendril [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4">
+            <tr><td port="title"><b>dendril</b></td></tr>
         </table>>];
     }
 
@@ -166,9 +168,14 @@ digraph clockwork {
         edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5];
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
         wrist_firmware:title -> memory_pi_memory:osc     [xlabel="OSC"];
-        wrist_sole:title     -> memory_pi_memory:osc     [xlabel="OSC"];
+        wrist_dendril:title  -> memory_pi_memory:osc     [xlabel="OSC"];
         chaos_pi_brain:title -> memory_pi_memory:osc     [xlabel="OSC"];
         chaos_pi_face:title  -> memory_pi_memory:osc     [xlabel="OSC"];
+    }
+
+    subgraph in_process {
+        edge [color="#1f77b4", fontcolor="#1f77b4", penwidth=2.5, style=dashed];
+        wrist_dendril:title -> wrist_firmware:title [xlabel="the sway's phase, in memory"];
     }
 
     subgraph mqtt {
@@ -189,7 +196,7 @@ digraph clockwork {
     }
 
     subgraph http {
-        edge [color="#2ca02c", fontcolor="#2ca02c", penwidth=1.5, style=dashed];
+        edge [color="#d62728", fontcolor="#d62728", penwidth=1.5, style=dashed];
         mac_browser:title -> memory_pi_grafana:http [xlabel="HTTP, tunnelled over SSH"];
     }
 

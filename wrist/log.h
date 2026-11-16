@@ -3,9 +3,12 @@
 // prototypes for the sketch's functions before the sketch's first function, and these, first
 // there, would put them before the types they name.
 //
-// The serial port has no transmit buffer past the UART's 128-byte FIFO: a line that does not fit
-// what is left of it holds loop() up until it does, about 0.13 ms a byte at 74880 baud. So the
-// log is events and the status line, never anything once a pass.
+// The serial port has no transmit buffer past the UART's 128-byte FIFO, and a write that does
+// not fit what is left of it holds loop() up until it does, about 0.13 ms a byte at 74880 baud.
+// So say() only queues a line, and drainLog() hands the UART, once a pass, as much as its FIFO
+// has room for: no line holds loop() up. The log is still events and the status lines, never
+// anything once a pass, so the queue keeps up. A crash loses what was queued and not yet out;
+// the boot ROM's crash dump goes to the UART directly, and is not lost.
 
 #pragma once
 
@@ -16,18 +19,57 @@ const uint32_t STATUS_PERIOD_MS = 10000;
 // A pass of loop() longer than this is logged as it happens, besides the status line's longest.
 const uint32_t STALL_LOG_US = 20000;
 
+// Lines waiting for the UART: a ring, room for the status lines and a burst of events. A line
+// that does not fit what is left is dropped whole, and the drops are logged once there is room.
+char logQueue[2048];
+size_t logHead = 0;     // where the next line goes
+size_t logUsed = 0;
+uint32_t logDropped = 0;
+
+void queueLine(const char *text, size_t length) {
+  if (length > sizeof logQueue - logUsed) {
+    logDropped++;
+    return;
+  }
+  for (size_t i = 0; i < length; i++) {
+    logQueue[(logHead + i) % sizeof logQueue] = text[i];
+  }
+  logHead = (logHead + length) % sizeof logQueue;
+  logUsed += length;
+}
+
 // Every line starts with the time since boot, in seconds, so the lines can be lined up with each
-// other and with the recording.
+// other and with the recording. The time is when it was said, not when it went out.
 void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void say(const char *format, ...) {
-  char line[160];
+  char text[160];
   va_list args;
   va_start(args, format);
-  vsnprintf(line, sizeof line, format, args);
+  vsnprintf(text, sizeof text, format, args);
   va_end(args);
+  char line[180];
   const uint32_t ms = millis();
-  Serial.printf("wrist %lu.%03lu: %s\n", static_cast<unsigned long>(ms / 1000),
-                static_cast<unsigned long>(ms % 1000), line);
+  const int length = snprintf(line, sizeof line, "wrist %lu.%03lu: %s\n",
+                              static_cast<unsigned long>(ms / 1000),
+                              static_cast<unsigned long>(ms % 1000), text);
+  queueLine(line, min(static_cast<size_t>(length), sizeof line - 1));
+}
+
+// Once a pass of loop(): as much of the queue as the UART's FIFO takes without waiting.
+void drainLog() {
+  size_t room = Serial.availableForWrite();
+  while (room > 0 && logUsed > 0) {
+    const size_t tail = (logHead + sizeof logQueue - logUsed) % sizeof logQueue;
+    const size_t run = min(min(logUsed, sizeof logQueue - tail), room);
+    Serial.write(reinterpret_cast<const uint8_t *>(logQueue + tail), run);
+    logUsed -= run;
+    room -= run;
+  }
+  if (logDropped > 0 && logUsed == 0) {
+    const uint32_t dropped = logDropped;
+    logDropped = 0;
+    say("%lu log lines dropped, the queue full", static_cast<unsigned long>(dropped));
+  }
 }
 
 // The longest gap between two passes of loop() since the last status line, in µs.

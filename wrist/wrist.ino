@@ -3,7 +3,8 @@
 // decides nothing but Blackout on a lost universe.
 //
 // The network, the patch and the OSC encoders are in generated.h, which build.sh writes from
-// clockwork.dot, clockwork.qxw, wrist.qxf and wrist.oscquery.json before every build.
+// clockwork.dot, clockwork.qxw, wrist.qxf, wrist.oscquery.json and dendril.oscquery.json before
+// every build. Dendril, the sensing, is in dendril.h.
 
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
@@ -11,6 +12,7 @@
 
 #include "generated.h"
 #include "log.h"
+#include "dendril.h"
 
 // The optos share a common anode on 3.3 V, so a pin driven low lights its opto.
 const uint8_t PIN_PUL = 14;     // D5
@@ -20,18 +22,8 @@ const uint8_t PIN_DIR = 12;     // D6
 const uint8_t PIN_ENA = 0;      // D3
 // The driver's alarm output rests open; an alarm pulls RX low.
 const uint8_t PIN_ALM = 3;      // RX
-const uint8_t PIN_HX_DT = 16;   // D0
-// SCK must idle low: GPIO15 low is a boot condition, and held high it powers the HX711 down.
-const uint8_t PIN_HX_SCK = 15;  // D8
 const uint8_t PIN_LED = 2;      // D4, lit when low
-
-// The load cell's calibration: force = (raw − tare) · scale. Measured 2026-11-15, mounted with
-// the motor and no wire, against 737, 1070 and 1370 g weighed on a kitchen scale and set on
-// the motor, g = 9.81; the three agree to 0.1%. Weight on the motor lowers the counts; the
-// wire pulls the other way, up, so the scale is positive and tension reads positive. Taken to
-// be symmetric: the pull up itself was not calibrated.
-const int32_t LOAD_TARE = -553801;      // raw counts
-const float LOAD_SCALE = 2.3109e-5f;    // N per count
+// Dendril's pins, the HX711's and I²C's, are in dendril.h.
 
 // The motion. The driver is set to 400 steps a revolution, SW1–SW4; every
 // figure here is in its steps. The top speed is the step generator's ceiling, half its 25 kHz
@@ -64,16 +56,16 @@ const float US_PER_S = 1e6f;
 const uint32_t BLINK_HALF_PERIOD_MS = 500;
 
 // Room for the largest bundle; an encoder that would overrun it sends nothing. The largest is the
-// connect bundle, Wrist's and Sole's leaves together, about 1100 bytes with its longest strings.
-// 1472 is the most one UDP datagram carries in a 1500-byte WiFi frame unfragmented.
+// connect bundle, Wrist's and Dendril's leaves together, about 1100 bytes with its longest
+// strings. 1472 is the most one UDP datagram carries in a 1500-byte WiFi frame unfragmented.
 uint8_t packet[1472];
+
+// Dendril's accelerometer samples nested in one packet, each its own bundle of about 190 bytes:
+// seven fit, six leave room.
+const uint8_t ACCEL_PER_PACKET = 6;
 
 WiFiUDP udp;
 WiFiUDP sacnUdp;
-
-// The latest load cell reading, and whether there has been one.
-int32_t loadRaw = 0;
-bool loadRead = false;
 
 // ── The step generator ───────────────────────────────────────────────────────────────────────
 //
@@ -518,7 +510,7 @@ void sendOnConnect() {
   const String bssid = WiFi.BSSIDstr();
   // No device tree: the board as the core names it, from the FQBN the sketch is built for. The
   // triplet is the core's compiler's, which is what the firmware is compiled for. Wrist and
-  // Sole share the board today, and each reports it for itself, so either can move.
+  // Dendril share the board today, and each reports it for itself, so either can move.
   const char *board = ARDUINO_BOARD;
   const char *triplet = "xtensa-lx106-elf";
   const int32_t cpuFreqMhz = ESP.getCpuFreqMHz();
@@ -533,14 +525,14 @@ void sendOnConnect() {
   v.sys_wrist_flash_size = static_cast<int32_t>(ESP.getFlashChipRealSize());
   v.wifi_wrist_mac = mac.c_str();
   v.wifi_wrist_ip = ip.c_str();
-  v.sole_tare = LOAD_TARE;
-  v.sole_scale = LOAD_SCALE;
-  v.sys_sole_board = board;
-  v.sys_sole_cores = 1;
-  v.sys_sole_triplet = triplet;
-  v.sys_sole_cpu_freq_mhz = cpuFreqMhz;
-  v.wifi_sole_mac = mac.c_str();
-  v.wifi_sole_ip = ip.c_str();
+  v.dendril_tension_tare = dendril::LOAD_TARE;
+  v.dendril_tension_scale = dendril::LOAD_SCALE;
+  v.sys_dendril_board = board;
+  v.sys_dendril_cores = 1;
+  v.sys_dendril_triplet = triplet;
+  v.sys_dendril_cpu_freq_mhz = cpuFreqMhz;
+  v.wifi_dendril_mac = mac.c_str();
+  v.wifi_dendril_ip = ip.c_str();
   v.wifi_wrist_channel = WiFi.channel();
   v.wifi_wrist_bssid = bssid.c_str();
   v.wifi_wrist_disconnects = static_cast<int32_t>(disconnects);
@@ -555,12 +547,26 @@ void sendState() {
   v.wrist_pluck = pluckState();
   v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
-  v.sole_force_n = loadRead ? (loadRaw - LOAD_TARE) * LOAD_SCALE : NAN;
+  v.dendril_tension_newtons = dendril::tension();
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
 }
 
+// Accelerometer samples, each its own bundle, nested in as few packets as they fit in.
+void sendAccel(const osc::DendrilAccel *samples, uint8_t count) {
+  for (uint8_t from = 0; from < count; from += ACCEL_PER_PACKET) {
+    osc::Writer w(packet, sizeof packet);
+    w.beginBundle();
+    for (uint8_t i = from; i < count && i < from + ACCEL_PER_PACKET; i++) {
+      const size_t at = w.beginElement();
+      osc::writeDendrilAccel(w, samples[i]);
+      w.endElement(at);
+    }
+    sendToRecipients(w.length());
+  }
+}
+
 // The heartbeat, which starts again from 0 every 49.7 days, when the chip's millisecond clock
-// wraps; and the heap and the link. Wrist's and Sole's alike: they share the board.
+// wraps; and the heap and the link. Wrist's and Dendril's alike: they share the board.
 void sendHealth() {
   const int32_t uptime = static_cast<int32_t>(millis() / 1000);
   const int32_t memAvailKb = static_cast<int32_t>(ESP.getFreeHeap() / 1024);
@@ -569,38 +575,10 @@ void sendHealth() {
   v.health_wrist_uptime_s = uptime;
   v.sys_wrist_mem_avail_kb = memAvailKb;
   v.wifi_wrist_rssi = rssi;
-  v.health_sole_uptime_s = uptime;
-  v.sys_sole_mem_avail_kb = memAvailKb;
-  v.wifi_sole_rssi = rssi;
+  v.health_dendril_uptime_s = uptime;
+  v.sys_dendril_mem_avail_kb = memAvailKb;
+  v.wifi_dendril_rssi = rssi;
   sendToRecipients(osc::encodeAt1hz(v, packet, sizeof packet));
-}
-
-// ── The load cell ────────────────────────────────────────────────────────────────────────────
-
-// Returns false while the HX711 has no new reading.
-bool readLoadCell(int32_t &value) {
-  if (digitalRead(PIN_HX_DT) == HIGH) {
-    return false;
-  }
-  uint32_t raw = 0;
-  // SCK held high for more than 60 µs powers the chip down, so no interrupt may stretch a clock.
-  // The step generator is an NMI, which this does not mask.
-  noInterrupts();
-  for (int i = 0; i < 24; i++) {
-    digitalWrite(PIN_HX_SCK, HIGH);
-    delayMicroseconds(1);
-    raw = (raw << 1) | digitalRead(PIN_HX_DT);
-    digitalWrite(PIN_HX_SCK, LOW);
-    delayMicroseconds(1);
-  }
-  // A 25th clock selects channel A at gain 128 for the next reading.
-  digitalWrite(PIN_HX_SCK, HIGH);
-  delayMicroseconds(1);
-  digitalWrite(PIN_HX_SCK, LOW);
-  interrupts();
-  // The reading is 24-bit two's complement.
-  value = static_cast<int32_t>(raw << 8) >> 8;
-  return true;
 }
 
 // ── Setup and the loop ───────────────────────────────────────────────────────────────────────
@@ -619,9 +597,7 @@ void setup() {
   digitalWrite(PIN_LED, HIGH);
   pinMode(PIN_LED, OUTPUT);
   pinMode(PIN_ALM, INPUT_PULLUP);
-  pinMode(PIN_HX_DT, INPUT);
-  digitalWrite(PIN_HX_SCK, LOW);
-  pinMode(PIN_HX_SCK, OUTPUT);
+  dendril::beginLoadCell();
 
   stepper::start();
 
@@ -641,6 +617,7 @@ void setup() {
       ESP.getResetReason().c_str(), net::WIFI_SSID, net::ADDRESS[0], net::ADDRESS[1],
       net::ADDRESS[2], net::ADDRESS[3], patch::SACN_UNIVERSE, net::SACN_PORT,
       patch::DMX_ADDRESS, patch::DMX_ADDRESS + patch::CHANNELS - 1);
+  dendril::begin();
 }
 
 void loop() {
@@ -661,8 +638,10 @@ void loop() {
   }
   if (static_cast<int32_t>(millis() - statusDue) >= 0) {
     logStatus();
+    dendril::logStatus();
     statusDue = millis() + STATUS_PERIOD_MS;
   }
+  drainLog();
 
   // Lit while the motor is enabled, blinking at 1 Hz while it is released.
   digitalWrite(PIN_LED, mode != Mode::blackout || (millis() / BLINK_HALF_PERIOD_MS) % 2 == 0
@@ -675,13 +654,13 @@ void loop() {
   receiveSacn();
   updateMotor(tick / US_PER_S);
 
-  // Read whether or not the WiFi is up, so the force is current the moment it is.
-  int32_t raw;
-  const bool fresh = readLoadCell(raw);
-  if (fresh) {
-    loadRaw = raw;
-    loadRead = true;
-  }
+  // Dendril is read whether or not the WiFi is up: the tension is current the moment it is, the
+  // FIFO is kept from overflowing and the chip's clock stays fitted. What is read while it is
+  // down is not sent, and shows as a gap in the sample numbers.
+  osc::DendrilTension tension;
+  const bool fresh = dendril::readLoadCell(tension);
+  static osc::DendrilAccel samples[dendril::FIFO_MAX];
+  const uint8_t sampled = dendril::pollAccel(samples);
 
   const bool up = WiFi.status() == WL_CONNECTED;
   if (up && !connected) {
@@ -698,7 +677,10 @@ void loop() {
   }
 
   if (fresh) {
-    sendToRecipients(osc::encodeSoleRaw(raw, packet, sizeof packet));
+    sendToRecipients(osc::encodeDendrilTension(tension, packet, sizeof packet));
+  }
+  if (sampled > 0) {
+    sendAccel(samples, sampled);
   }
   // Due times step by the period, so the rate does not drift with the time a pass takes.
   if (static_cast<int32_t>(now - stateDue) >= 0) {
