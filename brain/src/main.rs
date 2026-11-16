@@ -23,11 +23,12 @@ include!(concat!(env!("OUT_DIR"), "/rig.rs"));
 // `shows`, generated from `shows.rs`: every show as instants, with its dark stretches.
 include!(concat!(env!("OUT_DIR"), "/shows.rs"));
 
-// `osc::wrist`, generated from `fixtures/wrist.oscquery.json`: the addresses Wrist sends and
-// their values, which the brain decodes by; `osc::brain` and `osc::face`, the addresses the
-// brain sends.
+// `osc::wrist` and `osc::dendril`, generated from `fixtures/wrist.oscquery.json` and
+// `fixtures/dendril.oscquery.json`: the addresses Wrist's board sends and their values, which
+// the brain decodes by; `osc::brain` and `osc::face`, the addresses the brain sends.
 mod osc {
     include!(concat!(env!("OUT_DIR"), "/osc_wrist.rs"));
+    include!(concat!(env!("OUT_DIR"), "/osc_dendril.rs"));
     include!(concat!(env!("OUT_DIR"), "/osc_brain.rs"));
     include!(concat!(env!("OUT_DIR"), "/osc_face.rs"));
 }
@@ -39,7 +40,7 @@ fn main() {
     let (frames, sent_frames) = latest(cortex::dmx::BLACKOUT);
     let (face, face_state) = face::claim(sent_frames);
     let estop_state = face_state.clone();
-    // Wrist's OSC, which the show plucks it by and shows its phase from.
+    // Wrist's OSC, which the show plucks it by and shows its phase and the sway's from.
     let wrist_reports = wrist::spawn(network::OSC_BIND);
     let (mut show, show_states) = Show::new(&shows::CALENDAR);
     // What the frame loop decides, which the brain's OSC reports with the show and the face.

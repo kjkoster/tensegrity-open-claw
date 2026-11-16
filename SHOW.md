@@ -3,7 +3,7 @@
 **What this file is for.** The show file for the proof of concept: what the rig does, why, the
 fixtures it uses and how each is set up. The audience is us. The show is a set of experiments
 the rig runs on a one-metre model of the *Headless Hug* sculpture, stepped through from the
-cabinet door and watched live in Grafana on `memory-pi`. Its results are recorded by run, as
+cabinet door and watched live in Grafana. Its results are recorded by run, as
 §4 says. How to get from here to a running PoC is in
 [`TODO.md`](TODO.md). The component it introduces, Wrist, is described in
 [`DESIGN.md`](DESIGN.md), and its firmware is `wrist/`; this file says how this show builds and
@@ -99,8 +99,9 @@ it is driven at any amplitude, and in Manual, which the programme never sends.
 
 **In Run, the two lamps plot the two waveforms side by side.** The right lamp shows the
 motor's phase, (1 + sin φ)/2, from `/wrist/run/phase` in each state bundle as it arrives,
-whenever `/wrist/mode` is `run`. The left, once the accelerometer is in, the measured sway,
-(1 + sway/a)/2, from Dendril's readings as they arrive. While Wrist's OSC is stale, both lamps
+whenever `/wrist/mode` is `run`. The left shows the measured sway's phase, (1 + sin 2πφ)/2, φ
+in turns from `/dendril/sway_phase` in the same bundles, carried on at `/dendril/sway_hz`
+between them. While Wrist's OSC is stale, both lamps
 are at steady 100%.
 
 ### 2.4 The e-stop, signal loss, and what the drive does
@@ -183,13 +184,13 @@ them, and the chip's FIFO holds the samples until they are read.
 
 ### 3.3 Memory and the dashboard
 
-`memory-pi` as the README has it, with one provisioned dashboard for this show,
+Memory as the README has it, and Grafana, once it has a host again, with one provisioned
+dashboard for this show,
 `pi/memory-pi/grafana/headless-hug-poc.json`: Wrist's state and waveform bundles, its
 transitions, pluck results and protections as annotations, and `/brain/show` and `/brain/run`
 as annotations. Wrist speaks OSC only, no MQTT: it sends every bundle twice, to the brain for the
-lamps and to `memory-pi`, where Memory records it and relays it onto the broker, so the trace runs on
-while the brain is down. The Mac is on the access point for the sessions
-and reaches Grafana over the SSH jump as today; QLC+'s output unicasts to the brain over
+lamps and to Memory, which records it and relays it onto the broker, so the trace runs on
+while the brain is down. The Mac is on the access point for the sessions; QLC+'s output unicasts to the brain over
 WireGuard, as `clockwork.dot` has it.
 
 ## 4. The experiments, in order

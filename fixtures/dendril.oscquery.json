@@ -87,6 +87,31 @@
           "UNIT": ["N"],
           "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
         },
+        "sway_hz": {
+          "FULL_PATH": "/dendril/sway_hz",
+          "DESCRIPTION": "The sway's frequency, from the accelerometer along the direction the structure swings in: its three axes as one vector, gravity taken off by each axis's running mean, projected on the principal axis of what is left. The median of its last periods between upward zero crossings. NaN with no sway.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["Hz"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "sway_phase": {
+          "FULL_PATH": "/dendril/sway_phase",
+          "DESCRIPTION": "Where the sway is in its cycle as the bundle is sent, along the same direction: the time since its last upward zero crossing times sway_hz, wrapped. 0 is the crossing, 0.25 the peak. A receiver takes it as of the bundle's arrival and advances it by sway_hz for the time since, so no clock needs to agree with the board's. NaN with no sway.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "RANGE": [{ "MIN": 0, "MAX": 1 }],
+          "UNIT": ["turn"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
+        "sway_amplitude": {
+          "FULL_PATH": "/dendril/sway_amplitude",
+          "DESCRIPTION": "The sway's size along the same direction, as a sine's amplitude, in the accelerometer's counts. 0 with no sway.",
+          "TYPE": "f",
+          "ACCESS": 1,
+          "UNIT": ["count"],
+          "CLOCKWORK_CHAOS_AT_RATE_HZ": 10
+        },
         "tension_tare": {
           "FULL_PATH": "/dendril/tension_tare",
           "DESCRIPTION": "The coded-in tare: the raw reading with no tension on the wire.",

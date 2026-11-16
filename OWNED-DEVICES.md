@@ -18,7 +18,7 @@ grinder is the example — and the basic electronic components are on hand.
 |---|---|
 | `riverrain` | MacBook Air M2, local user `kjkoster`. The development machine. |
 | `eyeson` | MacBook Air 2015, dual-core Broadwell i5 at 1.6 GHz, no usable GPU, macOS Monterey (its last), no Ethernet port, local user `kjkoster`. Spare. |
-| Spare Raspberry Pis | Several, at least one a Pi 4, some with more than 1 GB of RAM. |
+| Spare Raspberry Pis | Several, at least one a Pi 4, some with more than 1 GB of RAM. Among them `memory-pi`, decommissioned after dying repeatedly: a Raspberry Pi 3 Model B, 1 GB RAM, on a DINner Plate holder, with a 64 GB SD card. |
 | ESP32 DIN-rail controllers | Two Waveshare ESP32-S3-RS485-CAN-U: an ESP32-S3 with an RS-485 and a CAN interface, in a DIN-rail case. Not in use yet. |
 
 ## The cabinet
@@ -29,10 +29,9 @@ A Rittal ABS fibre box, about 60 × 60 × 20 cm, with a DIN rail.
 |---|---|
 | Door (the face) | An emergency stop (twist-to-unlock smash button, two contacts) and two green momentary pushbuttons, left and right, each with a green LED lamp. |
 | Raspberry Pi (`claw-pi`) | Raspberry Pi 3 Model B Plus Rev 1.3, 1 GB RAM (905 MB usable), on a DINner Plate Pi DIN rail holder, local user `kjkoster`. 64-bit Debian 13 (Trixie), a 6.9 GB root partition. Named `claw-pi` for historical reasons. |
-| Raspberry Pi (`memory-pi`) | Raspberry Pi 3 Model B, 1 GB RAM, on a second DINner Plate holder, local user `kjkoster`. 64-bit Raspberry Pi OS Lite (Debian 13, Trixie) on a 64 GB SD card. |
 | DMX HAT | Zihatec RS422/485 HAT Rev D, on the Pi's 40-pin header and its PL011 UART. DIP switches, 1 to 4: **S1** OFF ON OFF ON, direction (DE/RE) on GPIO18 (S1.4), automatic direction (S1.3) off, GPIO18 high transmits; **S2** OFF OFF ON ON, half-duplex, Y→A and Z→B inside; **S3** ON OFF ON ON, termination on (the HAT is at the end of the bus), 4k7 bias, pull-down on B and pull-up on A. K2 terminal block to a female 3-pin XLR pigtail: A data+ to pin 3, B data− to pin 2, shield to pin 1. |
 | USB hub | 12 V powered, needed so as not to overload the Pi's USB ports; one charge port. |
-| External SSD | Samsung T7, 500 GB (465.8 GiB), USB-C, with a DIN rail clip. |
+| External SSD | Samsung T7, 500 GB (465.8 GiB), USB-C, with a DIN rail clip, on the Pi's USB hub. |
 | Multiport USB charger | Durata, 100–240 V 50–60 Hz 0.8 A in, 5 V 4.4 A out at most across four AUTO-ID ports: each offers the fastest standard charging current it detects, and a Pi simply takes 5 V. |
 | PoE injector | For the camera. |
 | Ethernet hub | On its own power supply. |

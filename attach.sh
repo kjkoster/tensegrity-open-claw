@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PI="chaos-pi"               # ssh alias (key-based)
+PI="chaos-pi-deploy"               # ssh alias (key-based)
 PI_DIR="tensegrity-open-claw"
 
 device="${1:-wrist}"

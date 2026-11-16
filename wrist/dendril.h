@@ -16,8 +16,9 @@ namespace dendril {
 
 // ── The sway ─────────────────────────────────────────────────────────────────────────────────
 //
-// The sway's frequency, by counting its cycles: the same on each of the accelerometer's axes and
-// on the tension, so the two sensors check each other. A slow running mean is taken off, which
+// The sway's frequency, by counting its cycles: the same on the accelerometer, along the
+// direction it swings in (Direction, below), and on the tension, so the two sensors check each
+// other. A slow running mean is taken off, which
 // takes gravity and the wire's standing tension with it; what is left crosses zero upwards once
 // a cycle. A crossing counts only after the signal has been below the hysteresis and before it
 // goes above it, so noise near zero adds none; its time is interpolated between the samples
@@ -128,11 +129,96 @@ struct Sway {
     const float median = count % 2 ? sorted[count / 2] : (sorted[count / 2 - 1] + sorted[count / 2]) / 2;
     return lastS - crossedS < 2 * median ? 1 / median : NAN;
   }
+
+  // Where the sway is in its cycle at `s`, on the same clock as the samples: the turns since its
+  // last upward crossing at its frequency, wrapped to [0, 1). NaN with no sway.
+  float phase(double s) const {
+    const float f = frequency();
+    if (isnan(f)) {
+      return NAN;
+    }
+    const double turns = fmod((s - crossedS) * f, 1.0);
+    return turns < 0 ? turns + 1 : turns;
+  }
 };
 
+// ── The sway's direction ─────────────────────────────────────────────────────────────────────
+//
+// The accelerometer's three axes taken as one vector, so the sway is measured along the
+// direction the structure swings in, however the chip is mounted, rather than on one axis picked
+// by size: two axes picked in turn can swing in opposite senses, and the phase would jump half a
+// cycle. Not the vector's length: gravity dominates it, and a swing across gravity changes the
+// length only at twice the sway's frequency, with no sign to take a phase from.
+//
+// Each axis's slow running mean is taken off, which takes gravity with it. The swing's direction
+// is the principal axis of what is left, its covariance's largest eigenvector, followed by one
+// step of power iteration a sample. Each step starts from the last direction, and a covariance
+// never turns a vector round, so the direction keeps its sense, and the phase with it.
+
+// How fast the direction follows: several of the slowest sway's periods.
+const float DIRECTION_S = 10;
+
+struct Direction {
+  bool primed = false;
+  double lastS = 0;
+  float mean[3] = {};
+  // The covariance's six distinct entries: xx, yy, zz, xy, xz, yz.
+  float cov[6] = {};
+  // The direction, a unit vector in the chip's axes.
+  float unit[3] = {1, 0, 0};
+
+  // A sample `v` taken at `s`, in seconds on the board's clock; returns what is left of it after
+  // the means, along the direction.
+  float take(double s, const float v[3]) {
+    if (!primed) {
+      for (int i = 0; i < 3; i++) {
+        mean[i] = v[i];
+      }
+      lastS = s;
+      primed = true;
+      return 0;
+    }
+    const float dt = s - lastS;
+    if (dt <= 0) {
+      return 0;
+    }
+    lastS = s;
+    float ac[3];
+    for (int i = 0; i < 3; i++) {
+      mean[i] += (v[i] - mean[i]) * min(1.0f, dt / MEAN_S);
+      ac[i] = v[i] - mean[i];
+    }
+    const float products[6] = {ac[0] * ac[0], ac[1] * ac[1], ac[2] * ac[2],
+                               ac[0] * ac[1], ac[0] * ac[2], ac[1] * ac[2]};
+    const float k = min(1.0f, dt / DIRECTION_S);
+    for (int j = 0; j < 6; j++) {
+      cov[j] += (products[j] - cov[j]) * k;
+    }
+    const float next[3] = {cov[0] * unit[0] + cov[3] * unit[1] + cov[4] * unit[2],
+                           cov[3] * unit[0] + cov[1] * unit[1] + cov[5] * unit[2],
+                           cov[4] * unit[0] + cov[5] * unit[1] + cov[2] * unit[2]};
+    const float norm = sqrtf(next[0] * next[0] + next[1] * next[1] + next[2] * next[2]);
+    if (norm > 0) {
+      for (int i = 0; i < 3; i++) {
+        unit[i] = next[i] / norm;
+      }
+    }
+    return ac[0] * unit[0] + ac[1] * unit[1] + ac[2] * unit[2];
+  }
+};
+
+Direction direction;
 // The accelerometer's noise is about a count; the tension's about 1 mN.
-Sway swayX(4), swayY(4), swayZ(4);
+Sway swayAccel(4);
 Sway swayTension(0.004f);
+
+// The sway as it goes out over OSC, as of now, along the direction: on the samples' clock,
+// micros64(), so the phase is taken on the clock its crossings were timed on.
+void fillSway(osc::At10hz &v) {
+  v.dendril_sway_hz = swayAccel.frequency();
+  v.dendril_sway_phase = swayAccel.phase(static_cast<double>(micros64()) / 1e6);
+  v.dendril_sway_amplitude = isnan(v.dendril_sway_hz) ? 0 : swayAccel.amplitude();
+}
 
 // ── The accelerometer ────────────────────────────────────────────────────────────────────────
 
@@ -422,9 +508,10 @@ uint8_t pollAccel(osc::DendrilAccel *out) {
   for (uint8_t i = 0; i < waiting; i++) {
     const double us = chipClock.timeOf(out[i].dendril_accel_sample_n);
     out[i].dendril_accel_sampled_ms = static_cast<int32_t>(llround(us / 1000));
-    swayX.take(us / 1e6, out[i].dendril_accel_x);
-    swayY.take(us / 1e6, out[i].dendril_accel_y);
-    swayZ.take(us / 1e6, out[i].dendril_accel_z);
+    const float v[3] = {static_cast<float>(out[i].dendril_accel_x),
+                        static_cast<float>(out[i].dendril_accel_y),
+                        static_cast<float>(out[i].dendril_accel_z)};
+    swayAccel.take(us / 1e6, direction.take(us / 1e6, v));
   }
   return waiting;
 }
@@ -511,21 +598,13 @@ void logStatus() {
   mostWaiting = 0;
   tensionReads = 0;
 
-  // The sway as each sensor sees it: the accelerometer's axis that swings most, in counts, and
-  // the tension, in newtons; "none" where it is still.
-  const Sway *axes[] = {&swayX, &swayY, &swayZ};
-  const char names[] = {'x', 'y', 'z'};
-  int best = -1;
-  for (int i = 0; i < 3; i++) {
-    if (!isnan(axes[i]->frequency()) &&
-        (best < 0 || axes[i]->amplitude() > axes[best]->amplitude())) {
-      best = i;
-    }
-  }
-  char accel[48] = "none";
-  if (best >= 0) {
-    snprintf(accel, sizeof accel, "%.3f Hz on %c, %.1f counts", axes[best]->frequency(),
-             names[best], axes[best]->amplitude());
+  // The sway as each sensor sees it: the accelerometer along its direction, in counts, and the
+  // tension, in newtons; "none" where it is still.
+  char accel[80] = "none";
+  if (!isnan(swayAccel.frequency())) {
+    snprintf(accel, sizeof accel, "%.3f Hz along (%.2f, %.2f, %.2f), %.1f counts",
+             swayAccel.frequency(), direction.unit[0], direction.unit[1], direction.unit[2],
+             swayAccel.amplitude());
   }
   char tensionSway[40] = "none";
   if (!isnan(swayTension.frequency())) {

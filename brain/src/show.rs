@@ -4,7 +4,9 @@
 //! Test mode first, then the calendar. Outside a show the state is `blackout`: Wrist is sent
 //! Blackout and both lamps are dark. Inside one it is `run`: Wrist is sent Run with `RUN_SINE`,
 //! and the face's right lamp shows the motor's phase, (1 + sin φ)/2, from Wrist's state
-//! bundles. The left lamp is dark.
+//! bundles. The left lamp shows the sway's the same way, (1 + sin 2πφ)/2 with φ in turns, as
+//! Dendril measured it in the same bundles, carried on at its frequency between them; dark
+//! while the structure is still.
 //!
 //! The chord enters test mode, in `test_pluck`, whatever the calendar says, and leaves it, back
 //! to what the calendar says. In test mode the left button moves between `test_pluck` and
@@ -34,6 +36,7 @@ use crate::wrist_show::{self, Ask, Sine, Tug};
 use cortex::calendar::{self, Calendar};
 use cortex::config::FRAME_RATE_HZ;
 use cortex::latest::{LatestRx, LatestTx, latest};
+use std::f64::consts::TAU;
 use std::time::{Duration, Instant};
 
 /// The left lamp's flash in test mode: lit for this many frames...
@@ -128,12 +131,13 @@ impl Show {
         if let Some((next, why)) = self.next(chorded, timed_out, left_pressed) {
             self.enter(next, why);
         }
-        let left = self.left_lamp();
-        self.frames = self.frames.saturating_add(1);
 
-        let wrist = wrist
-            .filter(|(_, at)| at.elapsed() < WRIST_STALE_AFTER)
-            .map(|(report, _)| report);
+        let wrist = wrist.filter(|(_, at)| at.elapsed() < WRIST_STALE_AFTER);
+        let sway = wrist.and_then(|(report, at)| report.sway.map(|s| s.phase_after(at.elapsed())));
+        let wrist = wrist.map(|(report, _)| report);
+
+        let left = self.left_lamp(sway);
+        self.frames = self.frames.saturating_add(1);
         // The right button counts only in `test_pluck`; a press anywhere else is let go of.
         let (pluck, can_pluck) = self.pluck(face, wrist.map(|report| report.pluck));
         let (ask, right) = match self.state {
@@ -242,13 +246,18 @@ impl Show {
         self.frames = 0;
     }
 
-    /// The left lamp's level this frame, 0..1. The test flash counts from the state's first
-    /// frame, so each test state starts lit.
-    fn left_lamp(&self) -> f64 {
-        if is_test(self.state) && self.frames % TEST_FLASH_PERIOD < TEST_FLASH_FRAMES {
-            TEST_FLASH_LEVEL
-        } else {
-            0.0
+    /// The left lamp's level this frame, 0..1, given the sway's phase now, in turns, if there
+    /// is a sway and Wrist is not stale. The test flash counts from the state's first frame, so
+    /// each test state starts lit.
+    fn left_lamp(&self, sway: Option<f64>) -> f64 {
+        match self.state {
+            State::TestPluck | State::TestBlackout
+                if self.frames % TEST_FLASH_PERIOD < TEST_FLASH_FRAMES =>
+            {
+                TEST_FLASH_LEVEL
+            }
+            State::Run => sway.map_or(0.0, |turns| (1.0 + (TAU * turns).sin()) / 2.0),
+            _ => 0.0,
         }
     }
 }

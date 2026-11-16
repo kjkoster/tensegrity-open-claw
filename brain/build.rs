@@ -18,9 +18,9 @@ fn main() {
         },
     );
 
-    // What Wrist sends, which the brain decodes by, and what the brain sends for itself and the
-    // face.
-    for device in ["wrist", "brain", "face"] {
+    // What Wrist and Dendril send, which the brain decodes by, and what the brain sends for
+    // itself and the face.
+    for device in ["wrist", "dendril", "brain", "face"] {
         cortex_build::osc(&root.join("fixtures").join(format!("{device}.oscquery.json")));
     }
 

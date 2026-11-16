@@ -15,18 +15,8 @@ yet.
 
 memory-pi died again; it is decommissioned and everything on it but Grafana moves to chaos-pi.
 
-- `clockwork.dot`: Mosquitto, Memory and Greptime in chaos-pi, Memory's OSC on 9002, the
-  brain keeping 9001; memory-pi gone.
-- On chaos-pi the brain comes first, then Memory, then Greptime; DESIGN.md §3.9 rewritten to
-  that, and its case for a Pi of its own dropped.
-- Memory's board reporting kept as it is, though Stem reports the same Pi.
-- memory-pi's deploy folded into chaos-pi's; `deploy-memory-pi.sh` and `pi/memory-pi/` gone,
-  except its Grafana files, which stay.
-- The brain and Stem ordered after the local broker, so their goodbyes still leave.
-- The SSD moved to chaos-pi's hub; room for Greptime on chaos-pi's root partition checked.
+- Room for Greptime on chaos-pi's root partition checked.
 - Deployed; Wrist reflashed; the recordings so far read back.
-- README, SHOW.md, OWNED-DEVICES.md (memory-pi to the spares) and Memory's fixture description
-  brought in line.
 
 ## Dendril, the sensing
 
@@ -46,9 +36,9 @@ The target: E0, Dendril's trace on the dashboard from Wrist's board, the motor i
 - A Dendril panel on the PoC dashboard: the three axes and the tension.
 - E0 from `SHOW.md` §4, its numbers recorded by run; the placement decided; the static pull
   test done.
-- Design Dendril's sway detection: the same calculation on the accelerometer and on the
-  tension, each checking the other; its phase, frequency and amplitude, read by Wrist in memory
-  and sent over OSC for the face's left lamp.
+- Dendril's sway checked against the tension's, each checking the other; read by Wrist in
+  memory. Its phase, frequency and amplitude go out over OSC today from the accelerometer
+  alone, and the left lamp follows them in Run: where it peaks against the swing judged by eye.
 
 ## Test and dinner on Monday
 
@@ -170,7 +160,6 @@ through the brain's universe, with the e-stop and signal loss leaving it limp.
 ## The brain runs the programme
 
 - Brain: test mode disabled, left in the code, as the calendar is.
-- Brain: the OSC receiver takes Dendril's as well.
 - The Director's states — `armed_pluck`, `pluck`, `armed_run`, `run` — with the button rules
   of `SHOW.md` §2.2, `/brain/run`, and the lamp patterns of §2.3, Run's two sines included;
   the experiments' amplitudes and durations as constants in `brain/src/show.rs`, named, with

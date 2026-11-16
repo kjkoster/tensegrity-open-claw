@@ -153,7 +153,7 @@ itself when NTP steps the clock.
 ### 1.6 What may fail runs in its own process
 
 Anything the show must survive losing, and that has no reason to be inside the brain, runs
-outside it: Stem, and Memory on a Pi of its own (§3.9). Its crash then costs what it provides
+outside it: Stem, and Memory (§3.9). Its crash then costs what it provides
 and never a frame, and the process driving fixtures beside people shares no address space with
 it.
 
@@ -232,8 +232,8 @@ A **Raspberry Pi drives one DMX-512 universe**. It runs `brain`, which reads the
 runs the show, and clocks the universe out of an RS-485 HAT at 40 Hz to the wired fixtures.
 The same universe goes out as E1.31 sACN for the wireless fixtures, a monitor or a console, and
 an external override arrives the same way. The Pi is a WiFi access point, and reachable from
-the Mac over a WireGuard tunnel. Telemetry's recordings live on a second Pi on that access
-point, Memory (§3.9), so the Pi that drives the show carries none of them.
+the Mac over a WireGuard tunnel. Telemetry's recordings, Memory (§3.9), live on the same Pi, on
+an external SSD, below the show in every priority.
 
 ```
     ┌── Mac ──────────────────────────────────────────┐
@@ -273,12 +273,13 @@ reporting a healthy signal, which reads as a wiring fault and is not one. The pa
 | `cortex/` | what every rig shares under its show: both transports, the frame loop, the show calendar, the latest-value seam; and the OSC every Rust device on the rig reports, Memory's included |
 | `cortex-build/` | the QLC+ ingest, the calendar's resolution, and the OSC addresses generated from `fixtures/`, a build-dependency of the rig crate, Memory and `cortex` |
 | `brain/` | the rig crate: the rig's patch, its show times, and its show |
-| `memory/` | Memory (§3.9), on `memory-pi` |
+| `memory/` | Memory (§3.9), on `chaos-pi` |
 | `wrist/` | Wrist's firmware (§3.10), C++ on the Arduino core for the ESP8266, not a crate |
 
 **Beside the crates**: `stem/` holds Stem's daemon and its Python modules; `pi/chaos-pi/` is
-what `chaos-pi` runs that belongs to no crate; `pi/memory-pi/` is what `memory-pi` runs that
-belongs to no crate. A daemon's systemd unit lives in its own directory. `clockwork/`
+what `chaos-pi` runs that belongs to no crate, Memory's and GreptimeDB's units among it;
+`pi/memory-pi/grafana/` is Grafana's, which runs nowhere until it has a host again. A daemon's
+systemd unit lives in its own directory, except where `pi/chaos-pi/` holds it. `clockwork/`
 holds what reads `clockwork.dot` at build time: the dot's reader, and the renderer that fills
 the Pis' configuration from it; and `oscquery.py`, the reader of the OSCQuery files.
 
@@ -365,9 +366,8 @@ has, and uses its Ethernet port as a wired segment for a laptop.
 
 **Everything that must be found by address has a fixed one, outside the DHCP range.** The
 fixed addresses and the ranges are both in `clockwork.dot`. Each network hands out its range by DHCP as a convenience for
-laptops; a device the rig talks to by address sets its own on itself — a second Pi from a
-profile rendered from the dot, a wireless fixture from its firmware's header, generated from
-the dot. Both networks route their clients out over 4G.
+laptops; a device the rig talks to by address sets its own on itself — a wireless fixture
+from its firmware's header, generated from the dot. Both networks route their clients out over 4G.
 
 ### 2.7 OSC: one file per device, three ways to send
 
@@ -447,7 +447,7 @@ workspace patches them.
 | the latest-value seam and thread scheduling (§1.4, §1.6) | `cortex::latest`, `cortex::sched` |
 | the brain's telemetry, over OSC (§2.7) | `cortex::report`, `cortex::system`, `cortex::osc`, the rig crate's `report.rs` |
 | Stem (§3.1) | `stem/` |
-| Memory (§3.9) | `memory/`, `pi/memory-pi/`, `fixtures/memory.oscquery.json` |
+| Memory (§3.9) | `memory/`, `pi/chaos-pi/`, `fixtures/memory.oscquery.json` |
 | the 4G watchdog (§3.2), the access point, the wired segment, WireGuard | `pi/chaos-pi/` |
 
 | Component | In the code |
@@ -750,53 +750,54 @@ so a re-enumeration under a running brain showed as the flaky hub port it usuall
 ### 3.9 Memory
 
 The rig's long memory: the telemetry every device sends, kept in a time-series database on an
-external SSD so a show can be read back afterwards. It runs on a Pi of its own, `memory-pi`.
+external SSD so a show can be read back afterwards. It runs on `chaos-pi`, beside the brain.
 
-**A Pi of its own, because `chaos-pi` has no room for it.** The frame loop has no room beside a
-database that flushes and compacts in bursts. A small Pi is enough, because Greptime publishes
-64-bit ARM binaries and runs in a few hundred MB.
+**On `chaos-pi`, because a Pi of its own kept dying.** It ran on a second Pi, `memory-pi`, until
+that Pi failed once too often; one Pi fewer is one fewer to fail. The price is that the frame
+loop now shares its Pi with a database that flushes and compacts in bursts, which the
+priorities below answer.
 
-**Never part of the show.** The show reads no telemetry (§1.3), so losing Memory, its SSD or its
-Pi costs the recording and never a frame. Everything on it waits for the network for as long as
-it takes, because both Pis power up together and `memory-pi` is up long before the access point.
+**Never part of the show.** The show reads no telemetry (§1.3), so losing Memory or its SSD
+costs the recording and never a frame. Memory waits for the access point's address for as long
+as it takes, as the brain does.
 
-**On the access point, at an address it sets itself**, from a profile rendered from the same
-`clockwork.dot` as the access point's, so the two cannot disagree; routed out over 4G by
-`chaos-pi`. The Mac reaches it only by jumping through `chaos-pi`: a tunnel of its own would buy
-nothing, because a dead `chaos-pi` leaves little to do remotely anyway.
+**Its broker on loopback alone.** `chaos-pi`'s 4G address is public and has no firewall, so a
+broker on every interface would answer the internet. Every publisher is on the Pi, and the Mac
+subscribes through an SSH forward, which arrives on loopback too.
 
-**Three processes:**
+**Three processes, and a fourth without a host:**
 
 - **Memory itself**, in Rust, `memory/`, built on the Mac as the brain is. It ingests the OSC
-  every device sends to `memory-pi` directly and writes it into Greptime in batches, so a
+  every device sends to it directly and writes it into Greptime in batches, so a
   device is recorded without the brain in the path; Greptime has no OSC listener. An address
   no device's OSCQuery file (§1.4) has is recorded all the same and logged once. It relays
   every value onto the broker as it arrives, retained, so a subscriber on the Mac watches
   the rig live, sees the last of every value when it connects, and nothing crosses the 4G
   link while none is connected. The broker is a bridge for troubleshooting from the Mac; it
   keeps nothing across a restart, and Memory replays every retained value when it reconnects.
-  It is also Stem's counterpart for `memory-pi`: its heartbeat and the Pi's health are its
-  own OSC, `fixtures/memory.oscquery.json`, handed to itself rather than sent, so they are
+  Its heartbeat and the Pi's health, which Stem reports too, are its own OSC, `fixtures/memory.oscquery.json`, handed to itself rather than sent, so they are
   recorded while the WiFi is down. From every device's heartbeat it makes that device's
   `last_seen` and `state`, `lost` once the heartbeat has stopped for longer than Memory's
   timeout.
 - **GreptimeDB**, standalone, on loopback alone.
-- **Grafana**, reading Greptime as a MySQL server, on loopback.
+- **Stem's broker**, Mosquitto, on loopback alone.
+- **Grafana**, reading Greptime as a MySQL server, ran on `memory-pi` and has no host now; its
+  configuration stays in `pi/memory-pi/grafana/` until it has one.
 
 **What is stored** is one table per first level of the OSC address, numbers and words in
 separate columns, flags as 1 and 0 so they draw as a line, timed when Memory received them,
 kept forever: a few MB a day. **Not stored:** anything before the clock first synchronised,
 which would be filed under the stale boot time.
 
-**Memory comes first.** Greptime and Grafana run at a lower priority, Greptime's writes at
-idle disk priority, and they are the first the kernel kills when memory runs out, so a
-compaction or a heavy dashboard cannot take Memory down on a small Pi. They are not capped
-in memory, because the Pi's kernel ships with the memory cgroup controller off and turning it
-on is a boot parameter on a file the repo cannot own; Grafana, a Go program that otherwise
-holds on to what it freed, gets a Go memory limit instead.
+**The brain comes first, then Memory, then Greptime.** In CPU, by their units' niceness and the
+brain's own real-time threads; in memory, by who the kernel kills first when it runs out,
+Greptime before Memory and both before the brain; and Greptime's writes at idle disk priority,
+so a compaction cannot hold up a frame or take Memory down. None is capped in memory, because
+the Pi's kernel ships with the memory cgroup controller off and turning it on is a boot
+parameter on a file the repo cannot own.
 
 **The SSD carries the recordings only.** The Pi boots from its SD card and does not wait for the
-SSD, so a missing SSD costs the recordings and leaves the Pi up and reporting why. Greptime requires the mount, so it never writes into the empty mount point.
+SSD, so a missing SSD costs the recordings and leaves the Pi up and reporting why. Greptime requires the mount, so it never writes into the empty mount point. The deploy installs the telemetry after everything the show needs, so a missing SSD stops it with the rig already up.
 
 **Power is cut, never shut down.** Greptime writes its log to the SSD every ten seconds, so a
 power cut costs at most those seconds and what Memory held: the recordings are read in
@@ -871,6 +872,7 @@ makes them from a velocity the control tick sets.
 **Telemetry is OSC, out only.** Wrist sends its state and raw inputs as OSC, whether a pluck
 can start and Run's phase among them. Nothing is computed for telemetry; what can be derived is
 derived from the recording, save the time of Dendril's samples, which the recording cannot
-recover (§2.7). The address space is `fixtures/wrist.oscquery.json` and Dendril's
+recover (§2.7), and the sway, its frequency and phase, which the brain shows live on the face's
+left lamp and so cannot wait for a recording. The address space is `fixtures/wrist.oscquery.json` and Dendril's
 `fixtures/dendril.oscquery.json` (§1.4). Nothing comes in over OSC: calibration constants are
 coded in, worked out from raw readings in the telemetry.

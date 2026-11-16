@@ -3,9 +3,11 @@
 //!
 //! Wrist sends its state bundle ten times a second, as `fixtures/wrist.oscquery.json` has it.
 //! Three of its addresses are read: `/wrist/pluck`, whether a pluck can be started;
-//! `/wrist/mode`; and `/wrist/run/phase`, Run's φ. Their addresses, type tags and values are
-//! the file's, generated into `osc::wrist`; OSC's own framing is `cortex::osc`'s. What the
-//! brain asks of Wrist in return is the show's, in `show`.
+//! `/wrist/mode`; and `/wrist/run/phase`, Run's φ. Dendril, on the same board, puts the sway in
+//! the same bundle, `fixtures/dendril.oscquery.json`'s `/dendril/sway_hz` and
+//! `/dendril/sway_phase`, read too where they are there. Their addresses, type tags and values
+//! are the files', generated into `osc::wrist` and `osc::dendril`; OSC's own framing is
+//! `cortex::osc`'s. What the brain asks of Wrist in return is the show's, in `show`.
 
 use cortex::latest::{LatestRx, LatestTx, latest};
 use cortex::osc::{self, Value};
@@ -14,6 +16,7 @@ use std::net::{SocketAddrV4, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::osc::dendril::{DendrilSwayHz as SwayHz, DendrilSwayPhase as SwayPhase};
 /// `/wrist/mode`: the mode Wrist is in, whoever sent it there.
 pub use crate::osc::wrist::WristMode as Mode;
 /// `/wrist/pluck`: whether a pluck can be started. `Can` in Hold; `Busy` from Pluck's start
@@ -35,6 +38,27 @@ pub struct Report {
     pub mode: Mode,
     /// Run's φ, in radians; NaN outside Run.
     pub phase: f32,
+    /// The sway as Dendril measured it when the bundle was sent; none while the structure is
+    /// still, or from firmware that does not send it.
+    pub sway: Option<Sway>,
+}
+
+/// The sway, as Dendril sends it.
+#[derive(Clone, Copy)]
+pub struct Sway {
+    /// Its frequency, in Hz.
+    pub hz: f32,
+    /// Where it was in its cycle when the bundle was sent, in turns: 0 the upward zero
+    /// crossing, 0.25 the peak.
+    pub phase: f32,
+}
+
+impl Sway {
+    /// Where it is in its cycle `since` the bundle arrived, in turns, [0, 1): the network's
+    /// delay is taken as none, so no clock needs to agree with the board's.
+    pub fn phase_after(&self, since: Duration) -> f64 {
+        (f64::from(self.phase) + f64::from(self.hz) * since.as_secs_f64()).rem_euclid(1.0)
+    }
 }
 
 /// The last state bundle, and when it came; what stale means is the show's to say.
@@ -124,23 +148,32 @@ fn receive(socket: &UdpSocket, reports: &LatestTx<Heard>) {
     }
 }
 
-/// The state bundle's report, if `packet` is a bundle holding all three addresses, well formed.
+/// The state bundle's report, if `packet` is a bundle holding Wrist's three addresses, well
+/// formed. The sway is in it where both its addresses are, and finite.
 fn report_in(packet: &[u8]) -> Option<Report> {
     if !packet.starts_with(b"#bundle\0") {
         return None;
     }
     let (mut pluck, mut mode, mut phase) = (None, None, None);
+    let (mut sway_hz, mut sway_phase) = (None, None);
     for (address, values) in osc::decode(packet).ok()? {
         match (address.as_str(), values.as_slice()) {
             (Pluck::PATH, [Value::Text(word)]) => pluck = Pluck::from_word(word),
             (Mode::PATH, [Value::Text(word)]) => mode = Mode::from_word(word),
             (RunPhase::PATH, [Value::Float(radians)]) => phase = Some(*radians),
+            (SwayHz::PATH, [Value::Float(hz)]) => sway_hz = Some(*hz),
+            (SwayPhase::PATH, [Value::Float(turns)]) => sway_phase = Some(*turns),
             _ => {}
         }
     }
+    let sway = match (sway_hz, sway_phase) {
+        (Some(hz), Some(phase)) if hz.is_finite() && phase.is_finite() => Some(Sway { hz, phase }),
+        _ => None,
+    };
     Some(Report {
         pluck: pluck?,
         mode: mode?,
         phase: phase?,
+        sway,
     })
 }

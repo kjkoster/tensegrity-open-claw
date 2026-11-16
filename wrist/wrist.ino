@@ -175,6 +175,7 @@ uint32_t dwellFrom = 0;
 int32_t runCentre = 0;
 float runSign = 1;
 float runPhase = 0;             // radians
+float runHz = 0;                // the sine's frequency, as last followed, for the log
 
 void enableMotor() {
   digitalWrite(PIN_ENA, LOW);
@@ -423,12 +424,41 @@ void stepRun(float dt) {
   const uint16_t level = (levels[patch::frequency::OFFSET] << 8) |
                          levels[patch::frequency_fine::OFFSET];
   const float frequency = F_MAX * level / 65535.0f;
+  runHz = frequency;
   if (millis() - enabledAt >= ENABLE_SETTLE_MS) {
     runPhase = fmodf(runPhase + 2 * PI * frequency * dt, 2 * PI);
   }
   // A whole step, so a frozen sine does not hunt between the two either side of it.
   const int32_t wanted = runCentre + lroundf(runSign * amplitude * sinf(runPhase));
   move((wanted - stepper::position) / RUN_TAU_S);
+}
+
+// `hz` as the Frequency and Frequency fine values that would play it: stepRun's sum the other way
+// round. "out of range" above what Frequency reaches.
+void frequencyValues(float hz, char *out, size_t size) {
+  if (hz > F_MAX) {
+    snprintf(out, size, "out of range");
+    return;
+  }
+  const uint16_t level = lroundf(hz / F_MAX * 65535);
+  snprintf(out, size, "%u/%u", level >> 8, level & 0xFF);
+}
+
+// The sway Dendril measures, as the Frequency and Frequency fine values that would play it, so
+// the desk can be set to match; and at half the sway, since a tug pulls each way, two to a
+// cycle. Nothing while there is no sway.
+void logSwayAsFrequency() {
+  const float hz = dendril::swayAccel.frequency();
+  if (isnan(hz)) {
+    return;
+  }
+  char full[16];
+  char half[16];
+  frequencyValues(hz, full, sizeof full);
+  frequencyValues(hz / 2, half, sizeof half);
+  say("sway: %.3f Hz is Frequency/fine (channels %u/%u) %s, halved %s", hz,
+      static_cast<unsigned>(patch::DMX_ADDRESS + patch::frequency::OFFSET),
+      static_cast<unsigned>(patch::DMX_ADDRESS + patch::frequency_fine::OFFSET), full, half);
 }
 
 // Once per pass of loop(), `dt` in seconds since the last. The frame's mode is the mode, from
@@ -548,6 +578,7 @@ void sendState() {
   v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
   v.dendril_tension_newtons = dendril::tension();
+  dendril::fillSway(v);
   sendToRecipients(osc::encodeAt10hz(v, packet, sizeof packet));
 }
 
@@ -638,6 +669,10 @@ void loop() {
   }
   if (static_cast<int32_t>(millis() - statusDue) >= 0) {
     logStatus();
+    if (mode == Mode::run) {
+      say("run: %.3f Hz", runHz);
+    }
+    logSwayAsFrequency();
     dendril::logStatus();
     statusDue = millis() + STATUS_PERIOD_MS;
   }

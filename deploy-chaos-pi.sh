@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PI="chaos-pi"               # ssh alias (key-based)
+PI="chaos-pi-deploy"               # ssh alias (key-based)
 PI_DIR="tensegrity-open-claw"
 
 # The Pi's target: 64-bit ARM Linux, linked statically against musl, so the binary carries its

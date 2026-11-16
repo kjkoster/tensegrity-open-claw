@@ -10,9 +10,8 @@ The system is four parts:
 
 - **`chaos-pi`** — a Raspberry Pi in the cabinet running the `brain` daemon. It reads its
   sensors, runs the show, and sends one DMX universe two ways: out of the RS-485 HAT
-  as wired DMX-512, and over the network as E1.31 sACN.
-- **`memory-pi`** — a second Pi in the cabinet, on the first one's WiFi, running the telemetry
-  broker and Memory, which records the OSC every device sends and relays it onto the broker.
+  as wired DMX-512, and over the network as E1.31 sACN. It also runs the telemetry: the
+  broker, and Memory, which records the OSC every device sends and relays it onto the broker.
 - **Wired fixtures** — on the HAT's DMX line.
 - **Wireless fixtures** — on `chaos-pi`'s WiFi, following the sACN universe.
 
@@ -32,24 +31,16 @@ Mac's.
 - SSH alias **`chaos-pi`** → the Pi's WireGuard address, user `kjkoster`, key
   `~/.ssh/id_rsa` (`IdentitiesOnly yes`). The Mac is a WireGuard peer routing that single
   address, not a general VPN. The tunnel's config is not versioned here.
-- SSH alias **`memory-pi`** → its WiFi address, jumping through `chaos-pi` (why: DESIGN
-  §3.9). In `~/.ssh/config`:
-
-  ```
-  Host memory-pi
-      HostName <memory-pi's wlan0 address>
-      User kjkoster
-      ProxyJump chaos-pi
-  ```
+- SSH alias **`chaos-pi-deploy`** → the same Pi: the alias `deploy-chaos-pi.sh` connects by.
 
 WireGuard is point-to-point with no multicast, so anything reaching the Pi over the tunnel
 must unicast.
 
 ## Networking
 
-- **NetworkManager runs every connection on both Pis** from profiles in the repo. The
-  profiles are templates: each Pi's deploy fills their `@…@` placeholders with what
-  `clockwork.dot` says about that Pi — the WiFi's SSID, passphrase and channel, the addresses,
+- **NetworkManager runs every connection on the Pi** from profiles in the repo. The
+  profiles are templates: the deploy fills their `@…@` placeholders with what
+  `clockwork.dot` says about the Pi — the WiFi's SSID, passphrase and channel, the addresses,
   gateways and DHCP ranges — using `clockwork/pi_network.py`, so each is written once, in the dot. A
   placeholder the dot does not fill stops the deploy before anything reaches the Pi.
 - **The access point**, `pi/chaos-pi/claw-ap.nmconnection`, and **the wired segment**,
@@ -151,17 +142,18 @@ fixture's connector gender, since some makers reverse the convention. Put a **12
 - `sudo systemctl restart brain`; `journalctl -u brain -f`.
 - **Disabled** for the DMX serial: `serial-getty@ttyAMA0.service`, `hciuart`.
 
-The deploy also installs `stem.service`, the watchdog's unit and timer, and the network
-profiles. Stem's broker runs on [`memory-pi`](#the-memory-pi-memory-pi); Stem's unit is a
-template too, its broker's address filled from Stem's MQTT edge in the dot.
+The deploy also installs `stem.service`, the watchdog's unit and timer, the network
+profiles, and the [telemetry](#telemetry-on-chaos-pi). Stem's unit is a template too, its
+broker's address filled from Stem's MQTT edge in the dot.
 
 ## Build & deploy
 
 From the Mac at the repo root: `./deploy-chaos-pi.sh`
 
 It renders the Pi's network profiles and Stem's unit from `clockwork.dot` into
-`target/chaos-pi/`, builds `brain` on the Mac, rsyncs what the Pi runs — the binary and its
-unit, Stem's daemon and Python modules, `pi/chaos-pi/`, `pi/deploy-lib.sh` and the rendered files — to
+`target/chaos-pi-deploy/`, builds `brain` and Memory on the Mac, rsyncs what the Pi runs — the
+binaries and the brain's unit, Stem's daemon, Python modules and broker configuration,
+`pi/chaos-pi/`, `pi/deploy-lib.sh` and the rendered files — to
 `chaos-pi:tensegrity-open-claw/`, then runs
 `pi/chaos-pi/remote-deploy.sh` there. That installs each file, and restarts a service only when one of
 its files changed, saying which were left alone; a restart that fails stops the deploy with
@@ -290,70 +282,38 @@ rig: shutdown — releasing the sACN source (3 terminate frames)
 
 ---
 
-# The memory Pi (`memory-pi`)
+# Telemetry on `chaos-pi`
 
-Stem's broker; Memory, recording the OSC every device sends into GreptimeDB on an external SSD
-and relaying it onto the broker; and Grafana. Why it is built this way: DESIGN §3.9. Its only network is `wlan0`, at the address
-`clockwork.dot` gives it, set on the Pi itself by `pi/memory-pi/claw.nmconnection`.
-
-## Setting up a fresh `memory-pi`
-
-Headless, in the cabinet; the card only has to get it onto the access point once:
-
-- **Write the card with Raspberry Pi Imager**: 64-bit Raspberry Pi OS Lite, hostname
-  `memory-pi`, user `kjkoster` with the Mac's public key, key-only SSH, the WiFi of the
-  `wifi` network in `clockwork.dot`'s `networks`, and country `NL`, without which the radio
-  stays blocked.
-- **Power it up with `chaos-pi` running.** It takes a DHCP address; find it on `chaos-pi`:
-  `sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases`
-- **Format the SSD** if it is new or wiped, which erases it: `sudo mkfs.ext4 -L memory /dev/sda1`
-- **Deploy** with the alias pointed at that DHCP address: `./deploy-memory-pi.sh`, then
-  `ssh memory-pi sudo reboot`, then the alias back to its address in the dot.
-- **Remove Imager's network profiles**, including a DHCP one for `eth0`:
-  `sudo rm /etc/netplan/90-NM-*.yaml && sudo netplan generate && sudo nmcli connection reload`
+Stem's broker; and Memory, recording the OSC every device sends into GreptimeDB on an external
+SSD and relaying it onto the broker. Why it is built this way: DESIGN §3.9. `deploy-chaos-pi.sh`
+installs it after everything the show needs, so a deploy that fails here leaves the rig up.
 
 ## What runs
 
 | Unit | What | Installed from |
 |---|---|---|
-| `mosquitto.service` | Stem's broker, on every interface | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
-| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only | the release pinned in `pi/memory-pi/greptime.version`, in `/opt/greptimedb`, set up by `greptimedb.toml` |
+| `mosquitto.service` | Stem's broker, loopback only | Debian's `mosquitto`, with `stem/stem.conf` in its include directory |
+| `greptimedb.service` | GreptimeDB, data on `/tank/greptimedb`, loopback only | the release pinned in `pi/chaos-pi/greptime.version`, in `/opt/greptimedb`, set up by `greptimedb.toml` |
 | `memory.service` | Memory: the OSC every device sends, its own included, into Greptime's `rig` database and relayed onto the broker; `health/memory` | `memory/`, built on the Mac, in `/usr/local/bin/memory` |
-| `grafana-server.service` | Grafana, loopback only | Grafana's apt repository, settings and data source from `pi/memory-pi/grafana/` |
 
 To watch the broker from the Mac:
 
 ```
-ssh -L 1883:localhost:1883 memory-pi
+ssh -L 1883:localhost:1883 chaos-pi
 mosquitto_sub -h localhost -v -t '#'
 ```
 
-## Deploy
-
-From the Mac at the repo root: `./deploy-memory-pi.sh`
-
-It renders its WiFi profile from `clockwork.dot` into `target/memory-pi/`, builds Memory for
-the Pi, rsyncs `pi/memory-pi/`, the binary, the rendered profile, `pi/deploy-lib.sh` and
-`stem/stem.conf`, then runs `pi/memory-pi/remote-deploy.sh` there. That restarts a service only
-when one of its files changed or it was installed just now, saying which were left alone; a
-restart that fails stops the deploy. It assumes a fresh Pi and
-removes nothing but what an older deploy shipped, and it never touches `chaos-pi`, as
-`deploy-chaos-pi.sh` never touches `memory-pi`.
-
-- **The first deploy is long**: Greptime's release (about 170 MB) and Grafana come over 4G,
-  filling it so SSH to `chaos-pi` times out meanwhile. Greptime downloads again only when its
-  pin changes, Grafana only when it is missing.
-- **Grafana upgrades with apt.** To choose when: `sudo apt-mark hold grafana`, `unhold` to
-  upgrade.
-- **A changed WiFi profile waits for a reboot**, because the deploy arrives over that link.
+- **The first deploy is long**: Greptime's release comes over 4G, filling it so SSH to
+  `chaos-pi` times out meanwhile. It downloads again only when its pin changes.
 
 ## The SSD on `/tank`
 
-One ext4 partition labelled `memory`, mounted on `/tank` from `pi/memory-pi/fstab-tank`, which
+One ext4 partition labelled `memory`, mounted on `/tank` from `pi/chaos-pi/fstab-tank`, which
 the deploy puts in `/etc/fstab`; after a power cut ext4 replays its journal and is checked at
 boot before it mounts. The Pi boots without it; Greptime does not start without it.
 The deploy never unmounts it: a changed line is applied with a remount, a change of device
-waits for a reboot.
+waits for a reboot. A new or wiped SSD is formatted, which erases it, with
+`sudo mkfs.ext4 -L memory /dev/sda1`.
 
 ## The recordings
 
@@ -363,13 +323,16 @@ One database, `rig`, kept forever. One table per first level of the OSC address 
 `greptime_timestamp`. A table appears once its addresses first arrive.
 
 ```
-ssh memory-pi journalctl -u memory -n 20
-ssh memory-pi "curl -s 'localhost:4000/v1/sql?db=rig' --data-urlencode 'sql=SHOW TABLES'"
+ssh chaos-pi journalctl -u memory -n 20
+ssh chaos-pi "curl -s 'localhost:4000/v1/sql?db=rig' --data-urlencode 'sql=SHOW TABLES'"
 ```
 
 Memory logs when GreptimeDB's answer changes: `ok`, or why it cannot write.
 
 ## Grafana
+
+**Not running.** It ran on `memory-pi`, which is gone; where it runs next is a step in
+[`TODO.md`](TODO.md). What follows is how it was.
 
 `ssh -L 3000:localhost:3000 memory-pi`, then **`http://localhost:3000`**. Viewing needs no
 login; editing takes `admin` / `admin` until Grafana asks for a new password. Its data source,

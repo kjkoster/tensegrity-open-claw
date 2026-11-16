@@ -155,6 +155,7 @@ digraph clockwork {
         wrist_firmware:title -> chaos_pi_brain:osc       [xlabel="OSC"];
         wrist_firmware:title -> chaos_pi_memory:osc      [xlabel="OSC"];
         wrist_dendril:title  -> chaos_pi_memory:osc      [xlabel="OSC"];
+        wrist_dendril:title  -> chaos_pi_brain:osc       [xlabel="OSC, the sway for the face"];
         chaos_pi_brain:title -> chaos_pi_memory:osc      [xlabel="OSC"];
         chaos_pi_face:title  -> chaos_pi_memory:osc      [xlabel="OSC"];
     }
