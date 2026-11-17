@@ -2,9 +2,9 @@
 //! of the fixtures.
 //!
 //! Test mode first, then the calendar. Outside a show the state is `blackout`: Wrist is sent
-//! Blackout and both lamps are dark. Inside one it is `run`: Wrist is sent Run with `RUN_SINE`,
-//! and the face's right lamp shows the motor's phase, (1 + sin φ)/2, from Wrist's state
-//! bundles. The left lamp shows the sway's the same way, (1 + sin 2πφ)/2 with φ in turns, as
+//! Blackout and both lamps are dark. Inside one it is `run`: Wrist is sent Automatic with
+//! `RUN_SINE`'s amplitude, holding the sine on the structure's resonance itself, and the face's
+//! right lamp shows the motor's phase, (1 + sin φ)/2, from Wrist's state bundles. The left lamp shows the sway's the same way, (1 + sin 2πφ)/2 with φ in turns, as
 //! Dendril measured it in the same bundles, carried on at its frequency between them; dark
 //! while the structure is still.
 //!
@@ -63,9 +63,10 @@ const PLUCK_TUG: Tug = Tug {
     speed: 1.0,
     clockwise: true,
 };
-/// Run's sine: a fifth of Wrist's Amplitude and Frequency, enough to see it is alive.
+/// The show's sine, in Automatic: Amplitude at DMX 30, by eye on the model. Its frequency is
+/// Wrist's to find; the one here is sent and not read.
 const RUN_SINE: Sine = Sine {
-    amplitude: 0.2,
+    amplitude: 30.0 / 255.0,
     frequency: 0.2,
     clockwise: true,
 };
@@ -144,12 +145,15 @@ impl Show {
             State::Run => {
                 // The motor's phase, from each state bundle as it comes.
                 let right = match wrist {
-                    Some(report) if report.mode == Mode::Run && report.phase.is_finite() => {
+                    Some(report)
+                        if matches!(report.mode, Mode::Run | Mode::Automatic)
+                            && report.phase.is_finite() =>
+                    {
                         (1.0 + f64::from(report.phase).sin()) / 2.0
                     }
                     _ => 0.0,
                 };
-                (Ask::Run, right)
+                (Ask::Automatic, right)
             }
             State::TestPluck => (
                 if pluck { Ask::Pluck } else { Ask::Hold },

@@ -1,4 +1,4 @@
-//! Wrist's channels: its mode, the tug a Pluck makes, and Run's sine.
+//! Wrist's channels: its mode, the tug a Pluck makes, and Automatic's sine.
 //!
 //! Only the show's side of Wrist. What it hears from Wrist is in `wrist`; what Wrist does with
 //! its channels is its firmware's, in `wrist/`.
@@ -14,8 +14,8 @@ pub struct Tug {
     pub clockwise: bool,
 }
 
-/// Run's sine: `amplitude` and `frequency` as fractions of Wrist's largest; which way the first
-/// swing goes, facing the shaft.
+/// The sine: `amplitude` and `frequency` as fractions of Wrist's largest; which way the first
+/// swing goes, facing the shaft. Automatic finds its own frequency, and does not read it.
 pub struct Sine {
     pub amplitude: f64,
     pub frequency: f64,
@@ -28,20 +28,21 @@ pub enum Ask {
     Blackout,
     Hold,
     Pluck,
-    Run,
+    /// Run's sine, at the frequency Wrist holds on the structure's resonance.
+    Automatic,
 }
 
-/// Sends `ask`, with the tug Pluck reads as it starts, or, in Run, the sine.
+/// Sends `ask`, with the tug Pluck reads as it starts, or, in Automatic, the sine.
 pub fn fill(slots: &mut [u8], ask: Ask, tug: &Tug, sine: &Sine) {
     let mode = match ask {
         Ask::Blackout => Wrist::MODE_BLACKOUT,
         Ask::Hold => Wrist::MODE_HOLD,
         Ask::Pluck => Wrist::MODE_PLUCK,
-        Ask::Run => Wrist::MODE_RUN,
+        Ask::Automatic => Wrist::MODE_AUTOMATIC,
     };
     WRIST.mode.set(slots, middle(mode));
     let (amplitude, clockwise) = match ask {
-        Ask::Run => (sine.amplitude, sine.clockwise),
+        Ask::Automatic => (sine.amplitude, sine.clockwise),
         _ => (tug.size, tug.clockwise),
     };
     WRIST.amplitude.set_unit(slots, amplitude);

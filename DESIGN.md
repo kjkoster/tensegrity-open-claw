@@ -850,9 +850,12 @@ from a requested one — releases at once as well.
 
 **Wrist follows the desk and does not decide.** The mode in the frame is Wrist's mode, from
 any mode to any other, on the next tick: Blackout, Hold (enabled, the shaft locked), Pluck (one
-tug, then back and held), Run (a sine about where the shaft stood) and Manual (the shaft turned
-by hand from the desk). No mode is entered or left by the firmware's own choice, no brake, no
-fallback; the one exception is the lost universe above. Every change of speed is taken at once,
+tug, then back and held), Run (a sine about where the shaft stood), Automatic (Run's sine at a
+frequency Wrist holds on the structure's resonance itself, a first attempt: a phase-locked
+loop on the swing's lag behind the drive, which Dendril measures, 90° at resonance; not kept
+across a restart) and Manual (the shaft turned by hand from the desk). No mode is
+entered or left by the firmware's own choice, no brake, no fallback; the one exception is the
+lost universe above. Every change of speed is taken at once,
 with no ramp: the motor follows a step from standstill to full speed. Wrist reports whether a
 pluck can start, so the show starts one only when it can.
 

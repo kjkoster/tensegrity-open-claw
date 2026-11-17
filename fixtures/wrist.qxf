@@ -11,11 +11,12 @@
  <Type>Other</Type>
  <Channel Name="Mode">
   <Group Byte="0">Maintenance</Group>
-  <Capability Min="0" Max="51" Preset="NoFunction">Blackout</Capability>
-  <Capability Min="52" Max="102">Hold</Capability>
-  <Capability Min="103" Max="153">Pluck</Capability>
-  <Capability Min="154" Max="204">Run</Capability>
-  <Capability Min="205" Max="255">Manual</Capability>
+  <Capability Min="0" Max="42" Preset="NoFunction">Blackout</Capability>
+  <Capability Min="43" Max="85">Hold</Capability>
+  <Capability Min="86" Max="127">Pluck</Capability>
+  <Capability Min="128" Max="170">Run</Capability>
+  <Capability Min="171" Max="212">Automatic</Capability>
+  <Capability Min="213" Max="255">Manual</Capability>
  </Channel>
  <Channel Name="Amplitude">
   <Group Byte="0">Nothing</Group>

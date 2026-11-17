@@ -41,6 +41,40 @@ const float PLUCK_RETURN_S = 2.5f;      // back to where it began
 // the sine by atan(2π·f·τ), 17° at 5 Hz.
 const float F_MAX = 5.0f;               // Hz
 const float RUN_TAU_S = 0.01f;          // s
+
+// Automatic: Run's sine, its Amplitude and Direction the desk's, its frequency Wrist's own,
+// held on the structure's resonance by a phase-locked loop.
+//
+// It starts where the resonance is best known: Run's frequency when it comes from Run, which the
+// desk tuned by hand; otherwise the sway's own frequency if the structure swings freely, as
+// after a Pluck, which is its natural frequency; otherwise AUTO_START_HZ.
+//
+// The phase detector: at each upward zero crossing of the sway along its direction, the drive's
+// phase then. A driven structure's swing lags the drive by between 0° and 180°, 90° at
+// resonance, less below it, more above. The accelerometer reads the swing's acceleration, the
+// swing turned half round, and its sense, the Direction channel's and the wire's way of
+// pulling each turn it half round again, so the measured difference Δ lies in (0°, 180°) or in
+// (−180°, 0°) for good, 90° or −90° at resonance. Δ's sign says which, so the error from
+// resonance, d = Δ − sgn(Δ)·90°, needs no calibration: positive below resonance, negative above.
+// Near Δ = 0° or ±180°, far from resonance, the sign is not to be trusted; starting near it, as
+// above, keeps it away from there.
+//
+// The loop filter: the frequency moves by K·d at each crossing, an integrator. What it drives
+// is the structure: its phase moves 2Q/f rad per Hz near resonance, and settles with its time
+// constant τ. With an integrator's crossover at 1/τ, a 45° phase margin, the step per crossing,
+// once a period, is K = (1/f)/(τ·2Q/f) = 1/(2τQ) Hz per rad, whatever f is. Simulated on a
+// resonator like the model's, it locks from 0.03 Hz off in about 30 s, overshooting by
+// 0.002 Hz; twice the gain overshoots more, half of it takes twice as long.
+//
+// From the logs of 2026-11-16 on the model: the largest sway near 1.16 Hz, and after a change
+// of frequency the sway settling over about three 10 s status periods, a time constant τ near
+// 10 s, which is a Q = π·f·τ near 35.
+const float AUTO_START_HZ = 1.16f;      // where the logs found the peak
+const float AUTO_TAU_S = 10;
+const float AUTO_Q = 35;
+const float AUTO_GAIN_HZ_PER_RAD = 1 / (2 * AUTO_TAU_S * AUTO_Q);
+const float AUTO_MIN_HZ = 0.5f;         // kept away from a sway the motor cannot lock to
+const float AUTO_MAX_HZ = 2.5f;
 // The DIR level that turns the shaft clockwise, facing it, with SW5 as set. By test, 2026-11-09.
 const uint8_t DIR_CW = HIGH;
 // The driver wants enable settled this long before the first pulse.
@@ -177,6 +211,12 @@ float runSign = 1;
 float runPhase = 0;             // radians
 float runHz = 0;                // the sine's frequency, as last followed, for the log
 
+// Automatic's loop: the frequency, the sway's crossing last taken, and the last error, for the
+// log.
+float autoHz = AUTO_START_HZ;
+double autoCrossedS = NAN;
+float autoError = NAN;          // rad, positive below resonance
+
 void enableMotor() {
   digitalWrite(PIN_ENA, LOW);
   pinMode(PIN_ENA, OUTPUT);
@@ -306,6 +346,9 @@ Mode askedMode() {
   if (patch::mode::RUN.holds(level)) {
     return Mode::run;
   }
+  if (patch::mode::AUTOMATIC.holds(level)) {
+    return Mode::automatic;
+  }
   if (patch::mode::MANUAL.holds(level)) {
     return Mode::manual;
   }
@@ -417,13 +460,10 @@ void beginRun() {
   say("Run, first swing %s", runSign > 0 ? "clockwise" : "counter-clockwise");
 }
 
-// Amplitude and Frequency are followed on every frame. φ stands still while the driver settles
-// after enabling, so the sine starts from x0 once the shaft can follow it.
-void stepRun(float dt) {
+// The sine at `frequency`, Amplitude followed on every frame. φ stands still while the driver
+// settles after enabling, so the sine starts from x0 once the shaft can follow it.
+void stepSine(float dt, float frequency) {
   const float amplitude = A_MAX * levels[patch::amplitude::OFFSET] / 255.0f;
-  const uint16_t level = (levels[patch::frequency::OFFSET] << 8) |
-                         levels[patch::frequency_fine::OFFSET];
-  const float frequency = F_MAX * level / 65535.0f;
   runHz = frequency;
   if (millis() - enabledAt >= ENABLE_SETTLE_MS) {
     runPhase = fmodf(runPhase + 2 * PI * frequency * dt, 2 * PI);
@@ -431,6 +471,53 @@ void stepRun(float dt) {
   // A whole step, so a frozen sine does not hunt between the two either side of it.
   const int32_t wanted = runCentre + lroundf(runSign * amplitude * sinf(runPhase));
   move((wanted - stepper::position) / RUN_TAU_S);
+}
+
+// Run: the sine at the Frequency channels' frequency.
+void stepRun(float dt) {
+  const uint16_t level = (levels[patch::frequency::OFFSET] << 8) |
+                         levels[patch::frequency_fine::OFFSET];
+  stepSine(dt, F_MAX * level / 65535.0f);
+}
+
+// Automatic starts afresh each time, from `from`, the mode it was entered from, at the frequency
+// that tells most about the resonance.
+void beginAutomatic(Mode from) {
+  const float swayHz = dendril::swayAccel.frequency();
+  const char *source;
+  if (from == Mode::run) {
+    autoHz = runHz;
+    source = "Run's";
+  } else if (!isnan(swayHz)) {
+    autoHz = swayHz;
+    source = "the free sway's";
+  } else {
+    autoHz = AUTO_START_HZ;
+    source = "the default";
+  }
+  autoHz = constrain(autoHz, AUTO_MIN_HZ, AUTO_MAX_HZ);
+  beginRun();
+  autoCrossedS = dendril::swayAccel.crossedS;
+  autoError = NAN;
+  say("automatic: from %.3f Hz, %s", autoHz, source);
+}
+
+// Automatic: the sine at its own frequency, which the loop moves at each new crossing of the
+// sway, while there is a sway to measure.
+void stepAutomatic(float dt) {
+  stepSine(dt, autoHz);
+  const dendril::Sway &sway = dendril::swayAccel;
+  if (sway.crossedS == autoCrossedS || isnan(sway.frequency())) {
+    return;
+  }
+  autoCrossedS = sway.crossedS;
+  // The drive's phase at the crossing, wound back from now at the drive's frequency: the
+  // crossing is found a sample or a FIFO's batch after it happened. The sway's phase is 0 there.
+  const double nowS = static_cast<double>(micros64()) / 1e6;
+  const float driveThen = runPhase - 2 * PI * autoHz * (nowS - autoCrossedS);
+  const float delta = remainder(0 - driveThen, 2 * PI);
+  autoError = delta - copysignf(PI / 2, delta);
+  autoHz = constrain(autoHz + AUTO_GAIN_HZ_PER_RAD * autoError, AUTO_MIN_HZ, AUTO_MAX_HZ);
 }
 
 // `hz` as the Frequency and Frequency fine values that would play it: stepRun's sum the other way
@@ -477,12 +564,16 @@ void updateMotor(float dt) {
       enabledAt = millis();
     }
     say("%s → %s", modeName(mode), modeName(asked));
+    const Mode was = mode;
     mode = asked;
     if (mode == Mode::pluck) {
       beginPluck();
     }
     if (mode == Mode::run) {
       beginRun();
+    }
+    if (mode == Mode::automatic) {
+      beginAutomatic(was);
     }
   }
   switch (mode) {
@@ -494,6 +585,9 @@ void updateMotor(float dt) {
       break;
     case Mode::run:
       stepRun(dt);
+      break;
+    case Mode::automatic:
+      stepAutomatic(dt);
       break;
     case Mode::manual: {
       const float rate = rateOf(levels[patch::speed::OFFSET]);
@@ -575,7 +669,7 @@ void sendState() {
   osc::At10hz v;
   v.wrist_mode = mode;
   v.wrist_pluck = pluckState();
-  v.wrist_run_phase = mode == Mode::run ? runPhase : NAN;
+  v.wrist_run_phase = mode == Mode::run || mode == Mode::automatic ? runPhase : NAN;
   v.wrist_alarm = digitalRead(PIN_ALM) == LOW;
   v.dendril_tension_newtons = dendril::tension();
   dendril::fillSway(v);
@@ -671,6 +765,10 @@ void loop() {
     logStatus();
     if (mode == Mode::run) {
       say("run: %.3f Hz", runHz);
+    }
+    if (mode == Mode::automatic) {
+      say("automatic: %.3f Hz, %+.0f° from resonance, sway %.1f counts", autoHz,
+          autoError * 180 / PI, dendril::swayAccel.amplitude());
     }
     logSwayAsFrequency();
     dendril::logStatus();
